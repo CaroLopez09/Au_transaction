@@ -2,14 +2,19 @@ package com.example.autransactional.interfaces.rest;
 
 import com.example.autransactional.application.compliance.AnswerRfiService;
 import com.example.autransactional.application.compliance.RfiCommands;
+import com.example.autransactional.application.compliance.RfiDocumentLink;
 import com.example.autransactional.application.compliance.RfiView;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 
 /**
@@ -65,5 +70,42 @@ public class RfiController {
                           @PathVariable String id,
                           @Valid @RequestBody RfiCommands.AnswerItems command) {
         return rfis.answer(operator, id, command);
+    }
+
+    /**
+     * Sube archivos a un item de tipo documento: multipart con la parte `files` repetida
+     * (maximo 20, 30 MB cada uno; PDF, JPEG, PNG, HEIC o WebP salvo que el item diga otra cosa).
+     */
+    @PostMapping(value = "/{id}/items/{itemId}/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    public RfiView uploadDocuments(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                   @PathVariable String id, @PathVariable String itemId,
+                                   @RequestPart("files") List<MultipartFile> files) {
+        return rfis.uploadDocuments(operator, id, itemId, files.stream().map(RfiController::toUploaded).toList());
+    }
+
+    /** Kira no permite borrar el ultimo archivo de un item ya respondido (422). */
+    @DeleteMapping("/{id}/items/{itemId}/documents/{documentId}")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    public RfiView removeDocument(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                  @PathVariable String id, @PathVariable String itemId,
+                                  @PathVariable String documentId) {
+        return rfis.removeDocument(operator, id, itemId, documentId);
+    }
+
+    /** Enlace temporal (minutos). Abrirlo al momento; si caduca, pedir otro. */
+    @GetMapping("/{id}/items/{itemId}/documents/{documentId}/link")
+    public RfiDocumentLink documentLink(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                        @PathVariable String id, @PathVariable String itemId,
+                                        @PathVariable String documentId) {
+        return rfis.documentLink(operator, id, itemId, documentId);
+    }
+
+    private static RfiCommands.UploadedFile toUploaded(MultipartFile file) {
+        try {
+            return new RfiCommands.UploadedFile(file.getOriginalFilename(), file.getContentType(), file.getBytes());
+        } catch (IOException e) {
+            throw new UncheckedIOException("No se pudo leer el archivo recibido.", e);
+        }
     }
 }

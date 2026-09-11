@@ -17,14 +17,11 @@ auth:bearer {
 body:json {
   {
     "items": [
-      {
-        "itemId": "i-ein",
-        "answerValue": "12-3456789"
-      }
+      { "itemId": "{{rfiTextItemId}}", "answerValue": "12-3456789" }
     ]
   }
 }
 
 docs {
-  Solo items `identifier`. Llama a Kira: sin credenciales, 500.
+  `answerValue` es texto, numero o booleano segun el `answer_type`. Llama a Kira: sin credenciales, 503.
 }

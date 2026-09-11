@@ -28,7 +28,7 @@ public class Ubo {
 
     private final String id;
     private final TenantId tenantId;
-    private final Instant createdAt;
+    private Instant createdAt;
 
     private String personReferenceId;
     private String firstName;
@@ -75,6 +75,8 @@ public class Ubo {
                                 LivenessStatus livenessStatus, String livenessLink,
                                 Instant livenessExpiresAt, Instant createdAt, Instant updatedAt) {
         Ubo u = new Ubo(id, tenantId, firstName, lastName, ownershipPercentage, roleInCompany);
+        // Sin esto, cada lectura "reiniciaba" la fecha de alta con la hora actual.
+        u.createdAt = createdAt == null ? u.createdAt : createdAt;
         u.personReferenceId = personReferenceId;
         u.documentType = documentType;
         u.documentNumber = documentNumber;

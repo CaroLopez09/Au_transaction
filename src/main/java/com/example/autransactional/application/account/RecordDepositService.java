@@ -6,14 +6,18 @@ import com.example.autransactional.domain.account.VirtualAccount;
 import com.example.autransactional.domain.account.VirtualAccountRepository;
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.infrastructure.kira.KiraApiClient;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,12 +33,57 @@ public class RecordDepositService {
 
     private static final Logger log = LoggerFactory.getLogger(RecordDepositService.class);
 
+    /** Tope de Kira por pagina en el listado de depositos de una cuenta. */
+    private static final int PAGE_SIZE = 100;
+    private static final int MAX_PAGES = 20;
+
     private final DepositRepository deposits;
     private final VirtualAccountRepository accounts;
+    private final KiraApiClient kira;
 
-    public RecordDepositService(DepositRepository deposits, VirtualAccountRepository accounts) {
+    public RecordDepositService(DepositRepository deposits, VirtualAccountRepository accounts, KiraApiClient kira) {
         this.deposits = deposits;
         this.accounts = accounts;
+        this.kira = kira;
+    }
+
+    /**
+     * Trae de Kira los depositos de una cuenta y los asienta con la misma proyeccion que los
+     * webhooks, asi que converge en las mismas filas. Es la red de seguridad de un evento
+     * perdido (entrega unica, sin reintentos). En el sandbox Kira no devuelve nada aqui.
+     */
+    @Transactional
+    public List<DepositView> syncFromKira(AuthenticatedOperator operator, String accountId) {
+        VirtualAccount account = accounts.findByIdAndTenant(accountId, operator.tenantId())
+                .orElseThrow(() -> new DomainException("Cuenta virtual no encontrada."));
+        if (account.getKiraAccountId() == null) {
+            throw new DomainException("La cuenta virtual no esta abierta en Kira.");
+        }
+        int asentados = 0;
+        for (int page = 0; page < MAX_PAGES; page++) {
+            Map<String, Object> query = new LinkedHashMap<>();
+            query.put("limit", PAGE_SIZE);
+            query.put("offset", page * PAGE_SIZE);
+            JsonNode response = kira.listAccountDeposits(account.getKiraAccountId(), query);
+            JsonNode list = response.isArray() ? response : response.path("data");
+            int size = 0;
+            for (JsonNode resource : list) {
+                size++;
+                KiraDepositEvent event = KiraDepositEvent.fromResource(resource, account.getKiraAccountId());
+                // Aislamiento: un deposito de otra cuenta no se asienta aqui aunque venga en la lista.
+                if (!account.getKiraAccountId().equals(event.kiraAccountId())) {
+                    continue;
+                }
+                apply(event);
+                asentados++;
+            }
+            // Sin envoltorio de paginacion: hay mas si la pagina vino llena.
+            if (size < PAGE_SIZE) {
+                break;
+            }
+        }
+        log.info("Sincronizados {} depositos de la cuenta {} desde Kira.", asentados, account.getId());
+        return listByAccount(operator, accountId, 200);
     }
 
     @Transactional(readOnly = true)

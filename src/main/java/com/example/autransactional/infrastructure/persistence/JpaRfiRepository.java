@@ -62,6 +62,15 @@ public class JpaRfiRepository implements RfiRepository {
                 .toList();
     }
 
+    @Override
+    public Optional<Rfi> findOpenBlocking(String kiraResourceId) {
+        if (kiraResourceId == null) {
+            return Optional.empty();
+        }
+        return jpa.findFirstByBlockingResourceIdAndStatusInOrderByCreatedAtDesc(kiraResourceId, OPEN)
+                .map(JpaRfiRepository::toDomain);
+    }
+
     private static Rfi toDomain(RfiEntity e) {
         return Rfi.rehydrate(e.getId(), TenantId.of(e.getTenantId()), e.getKiraRfiId(), e.getStatus(),
                 e.getItemsPayload(), e.getDueDate(), e.getBlockingType(), e.getBlockingResourceId(),

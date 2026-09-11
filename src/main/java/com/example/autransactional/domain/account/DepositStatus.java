@@ -32,8 +32,9 @@ public enum DepositStatus {
         }
         return switch (normalized) {
             case "RETURNED", "REVERSED" -> REFUNDED;
-            case "DECLINED", "REJECTED" -> FAILED;
-            case "PROCESSING", "IN_TRANSIT", "IN_REVIEW" -> PENDING;
+            // KYT_REJECTED: el control de transacciones de Kira no dejo pasar los fondos.
+            case "DECLINED", "REJECTED", "KYT_REJECTED" -> FAILED;
+            case "PROCESSING", "IN_TRANSIT", "IN_REVIEW", "KYT_PENDING" -> PENDING;
             default -> COMPLETED;
         };
     }

@@ -2,6 +2,9 @@ package com.example.autransactional.interfaces.rest;
 
 import com.example.autransactional.application.treasury.PayoutCommands;
 import com.example.autransactional.application.treasury.ExecutePayoutService;
+import com.example.autransactional.application.treasury.KiraPayoutPage;
+import com.example.autransactional.application.treasury.PayoutEventView;
+import com.example.autransactional.application.treasury.PayoutPreviewView;
 import com.example.autransactional.application.treasury.PayoutView;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import jakarta.validation.Valid;
@@ -29,6 +32,29 @@ public class PayoutController {
     public List<PayoutView> list(@AuthenticationPrincipal AuthenticatedOperator operator,
                                  @RequestParam(defaultValue = "50") int limit) {
         return payoutService.list(operator, limit);
+    }
+
+    /**
+     * Historial de la empresa en Kira, incluidos movimientos que no nacieron en el portal.
+     * Pagina por `page` (desde 1) y `limit` (1-100). `status`: CREATED, PENDING, PROCESSING,
+     * COMPLETED, FAILED, CANCELLED, IN_REVIEW, KYT_PENDING. Fechas ISO 8601 o AAAA-MM-DD.
+     */
+    @GetMapping("/kira")
+    public KiraPayoutPage kiraHistory(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                      @RequestParam(required = false) String status,
+                                      @RequestParam(defaultValue = "1") int page,
+                                      @RequestParam(defaultValue = "20") int limit,
+                                      @RequestParam(required = false) String fromDate,
+                                      @RequestParam(required = false) String toDate) {
+        return payoutService.kiraHistory(operator, status, page, limit, fromDate, toDate);
+    }
+
+    /** Coste del pago sin reservar precio. Para cerrarlo, cotiza en /api/quotations. */
+    @PostMapping("/preview")
+    @PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")
+    public PayoutPreviewView preview(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                     @Valid @RequestBody PayoutCommands.PreviewPayout command) {
+        return payoutService.preview(operator, command);
     }
 
     @GetMapping("/{id}")
@@ -64,6 +90,13 @@ public class PayoutController {
                              @PathVariable String id,
                              @Valid @RequestBody PayoutCommands.RejectPayout command) {
         return payoutService.reject(operator, id, command.reason());
+    }
+
+    /** Linea de tiempo del pago en Kira. Vacia mientras no se haya enviado. */
+    @GetMapping("/{id}/events")
+    public List<PayoutEventView> events(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                        @PathVariable String id) {
+        return payoutService.events(operator, id);
     }
 
     @PostMapping("/{id}/refresh")

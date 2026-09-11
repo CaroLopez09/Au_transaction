@@ -1,5 +1,6 @@
 package com.example.autransactional.interfaces.rest;
 
+import com.example.autransactional.application.treasury.KiraRecipientView;
 import com.example.autransactional.application.treasury.RecipientCommands;
 import com.example.autransactional.application.treasury.RecipientView;
 import com.example.autransactional.application.treasury.RegisterRecipientService;
@@ -35,6 +36,18 @@ public class RecipientController {
     @GetMapping
     public List<RecipientView> list(@AuthenticationPrincipal AuthenticatedOperator operator) {
         return recipients.list(operator);
+    }
+
+    /** Destinatarios de la empresa tal como los tiene Kira, para conciliar con el directorio. */
+    @GetMapping("/kira")
+    public List<KiraRecipientView> listInKira(@AuthenticationPrincipal AuthenticatedOperator operator) {
+        return recipients.listInKira(operator);
+    }
+
+    @GetMapping("/{id}/kira")
+    public KiraRecipientView getInKira(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                       @PathVariable String id) {
+        return recipients.getInKira(operator, id);
     }
 
     @GetMapping("/{id}")

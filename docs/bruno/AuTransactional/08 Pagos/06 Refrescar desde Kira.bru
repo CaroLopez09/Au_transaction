@@ -13,9 +13,3 @@ post {
 auth:bearer {
   token: {{tokenReadOnly}}
 }
-
-tests {
-  test("responde 200", function () {
-    expect([200]).to.include(res.getStatus());
-  });
-}

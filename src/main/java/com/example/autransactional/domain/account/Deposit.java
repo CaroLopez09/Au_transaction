@@ -23,7 +23,7 @@ public class Deposit {
     private final TenantId tenantId;
     private final String virtualAccountId;
     private final String currency;
-    private final Instant createdAt;
+    private Instant createdAt;
 
     private String kiraDepositId;
     private BigDecimal grossAmount;
@@ -60,6 +60,8 @@ public class Deposit {
                                     String senderAccount, Rail rail, DepositStatus status,
                                     boolean microdeposit, Instant createdAt, Instant updatedAt) {
         Deposit d = new Deposit(id, tenantId, virtualAccountId, grossAmount, feeAmount, currency);
+        // Sin esto, cada lectura "reiniciaba" la fecha de alta con la hora actual.
+        d.createdAt = createdAt == null ? d.createdAt : createdAt;
         d.kiraDepositId = kiraDepositId;
         d.netAmount = netAmount == null ? d.netAmount : netAmount;
         d.senderName = senderName;

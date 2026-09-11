@@ -26,7 +26,7 @@ public class VirtualAccount {
     private final TenantId tenantId;
     private final String currency;
     private final VirtualAccountMode mode;
-    private final Instant createdAt;
+    private Instant createdAt;
 
     private String kiraAccountId;
     private String bankName;
@@ -70,6 +70,8 @@ public class VirtualAccount {
                                            Instant balanceRefreshedAt, String openingIdempotencyKey,
                                            Instant createdAt, Instant updatedAt) {
         VirtualAccount a = new VirtualAccount(id, tenantId, currency, mode, bank, description);
+        // Sin esto, cada lectura "reiniciaba" la fecha de alta con la hora actual.
+        a.createdAt = createdAt == null ? a.createdAt : createdAt;
         a.kiraAccountId = kiraAccountId;
         a.bankName = bankName;
         a.accountNumber = accountNumber;

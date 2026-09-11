@@ -1,5 +1,6 @@
 package com.example.autransactional.application.compliance;
 
+import com.example.autransactional.domain.account.Deposit;
 import com.example.autransactional.domain.compliance.Rfi;
 import com.example.autransactional.domain.treasury.Payout;
 
@@ -28,13 +29,16 @@ public record RfiView(
         Instant updatedAt) {
 
     /**
-     * Lo que el RFI tiene detenido. payoutId es el pago local; va nulo si Kira bloquea algo
-     * que este portal no origino.
+     * Lo que el RFI tiene detenido: una transferencia (type "transfer") o un deposito
+     * (type "virtual_account_deposit"). payoutId / depositId son los ids del portal; van nulos
+     * si Kira bloquea algo que este portal no conoce.
      */
-    public record Blocking(String type, String kiraResourceId, String payoutId, String payoutStatus) {
+    public record Blocking(String type, String kiraResourceId, String payoutId, String payoutStatus,
+                           String depositId, String depositStatus) {
     }
 
-    public static RfiView from(Rfi rfi, List<Map<String, Object>> items, Payout blockedPayout) {
+    public static RfiView from(Rfi rfi, List<Map<String, Object>> items, Payout blockedPayout,
+                               Deposit blockedDeposit) {
         int pending = 0;
         for (Map<String, Object> item : items) {
             if ("pending".equalsIgnoreCase(String.valueOf(item.get("status")))) {
@@ -45,7 +49,9 @@ public record RfiView(
                 rfi.getBlockingType(),
                 rfi.getBlockingResourceId(),
                 blockedPayout == null ? null : blockedPayout.getId(),
-                blockedPayout == null ? null : blockedPayout.getStatus().name());
+                blockedPayout == null ? null : blockedPayout.getStatus().name(),
+                blockedDeposit == null ? null : blockedDeposit.getId(),
+                blockedDeposit == null ? null : blockedDeposit.getStatus().name());
 
         return new RfiView(
                 rfi.getId(),

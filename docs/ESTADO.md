@@ -1,9 +1,10 @@
 # Estado del proyecto
 
-**Fecha:** 11 de septiembre de 2026
-**Build:** `Tests run: 254, Failures: 0, Errors: 0` — BUILD SUCCESS (verificado con `clean`)
+**Fecha:** 11 de septiembre de 2026 (tarde)
+**Build:** `Tests run: 253, Failures: 0, Errors: 0` — BUILD SUCCESS (verificado con `clean`)
+**Rama:** `depuracion-bff` (sin commitear) · `master` = copia de seguridad previa (`dc6af92`)
 
-> Guía de arquitectura: [`ARQUITECTURA.md`](ARQUITECTURA.md) · Contrato HTTP: [`API-GUIA-POSTMAN.md`](API-GUIA-POSTMAN.md) · Pruebas con Bruno: [`GUIA-BRUNO.md`](GUIA-BRUNO.md)
+> Arquitectura: [`ARQUITECTURA.md`](ARQUITECTURA.md) · Contrato HTTP: [`API-GUIA.md`](API-GUIA.md) · Pruebas con Bruno: [`GUIA-BRUNO.md`](GUIA-BRUNO.md)
 
 ---
 
@@ -11,142 +12,148 @@
 
 ```bash
 cd ~/Documentos/AuTransactional
-./mvnw clean test                                              # debe dar 254 verdes
-KIRA_WEBHOOK_SECRET=secreto-webhook-local ./mvnw spring-boot:run   # perfil dev, http://localhost:8080/swagger-ui.html
+git status                                   # rama depuracion-bff, cambios sin commitear
+./mvnw clean test                            # 253 verdes
+KIRA_WEBHOOK_SECRET=secreto-webhook-local ./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"
 ```
 
-Login de prueba: `treasury.maker@juriscop.test` / `Dev12345!`
-(la semilla crea `juriscop`, `bankvision`, `au-colombia` × 5 roles).
+Colección de Bruno: `docs/bruno/AuTransactional/`. Ejecutada entera el 11-sep: **84/84 peticiones,
+46/46 tests** (sin credenciales de Kira).
 
-Para probar a mano: colección de Bruno en `docs/bruno/AuTransactional/`, guía en
-[`GUIA-BRUNO.md`](GUIA-BRUNO.md). Ejecutada entera el 11-sep: **83/83 peticiones, 59/59 tests**
-(Developer Mode, sin credenciales de Kira).
-
-**Antes de tocar código de un flujo de Kira**, leer su sección en
-`~/Descargas/kirafin-flujos-arquitectura.md` **y** `~/Descargas/brecha-kirafin.html`. La última
-trampa apareció en la segunda: los RFIs sólo existen en la versión de API `2026-06-01`, y el
-cliente enviaba `2026-04-14` en todas las peticiones.
+**Antes de tocar un flujo de Kira, verificar su contrato en la documentación oficial**
+(`https://docs.kirafin.ai/api-reference-2026-06-01/…`), no sólo en
+`~/Descargas/kirafin-flujos-arquitectura.md`. El 11-sep el documento de diseño tenía mal la ruta de
+países y le faltaban tipos de respuesta de RFI y el bloqueo por depósito.
 
 ---
 
-## 2. Qué está terminado
+## 2. Principio de diseño
 
-### Reorganización arquitectónica *(aprobada 10-sep)*
-Estructura `domain / application / infrastructure / interfaces` por contextos acotados,
-esquema alineado con el DDL v2, roles B2B con tabla `roles` y FK.
-
-### Flujo funcional completo — 8 casos de uso
-
-| # | Caso de uso | Endpoints | Pruebas |
-|---|---|---|---|
-| 1 | `SubmitOnboarding` | `/api/onboarding` (GET, POST, PUT, POST /refresh) | 22 |
-| 2 | `SyncUbos` | `/api/ubos` (GET, POST, POST /sync, POST /liveness-links) | 29 |
-| 3 | `RegisterRecipient` | `/api/recipients` (GET, GET /{id}, POST, POST /{id}/archive) | 24 |
-| 4 | `OpenVirtualAccount` | `/api/virtual-accounts` (+ refresh, balance, simulate-deposit) | 15 |
-| 5 | `RecordDeposit` | `/api/deposits`, `/api/virtual-accounts/{id}/deposits` | 11 |
-| 6 | `CreateQuote` | `/api/quotations` (GET, GET /{id}, POST) | 26 |
-| 7 | `ExecutePayout` | `/api/payouts` (+ approve, reject, refresh) | 13 |
-| 8 | **`AnswerRfi`** *(11-sep)* | `/api/rfis` (GET, GET /{id}, POST /sync, POST /{id}/refresh, PATCH /{id}/items) | 25 |
-
-Más lo que ya existía: sesión JWT, verificación biométrica propia (reto de voz + liveness +
-documento) e ingress de webhooks firmado con HMAC.
-
-### RFIs *(11-sep)* — qué se hizo y qué se corrigió por el camino
-
-- `AnswerRfiService` en `application/compliance`: bandeja, sincronización paginada por `offset`,
-  refresco, respuesta por item y proyección del webhook `rfi.*`.
-- Errores **por `item_id`** (`rfi_answer_rejected`): un item `document` nunca envía
-  `answer_value`; el `422` de Kira no marca nada como guardado; un `409` asienta el cierre.
-- El RFI enlaza con el pago que bloquea (`blocking.transfer_uuid` → `payoutId`).
-- Aislamiento: se descarta cualquier RFI que Kira devuelva y no se pueda atribuir a la empresa.
-- **Corregido — cabecera de versión:** `KiraApiClient` envía `X-Api-Version: 2026-06-01` en las
-  rutas de RFI. Con `2026-04-14`, los tres métodos "ya existentes" no habrían funcionado nunca.
-- **Corregido — estados:** `RfiStatus` tenía `RETURNED` (no existe en Kira) y no tenía
-  `NOT_RESOLVED`: un RFI cerrado sin resolver se habría mostrado como pendiente.
-- **Corregido — fechas:** `Rfi.rehydrate` ignoraba `createdAt` y cada guardado lo pisaba con la
-  hora actual, desordenando la bandeja.
-
-### Proyección de webhooks
-Familias `user.*`, `virtual_account.*`, `virtual_account.deposit_*`, `payout.*` y ahora `rfi.*`.
+**El BFF es una capa delgada sobre Kira.** El negocio vive en Kira y el front lo consume a través
+del BFF. El BFF sólo añade sesión y roles por empresa, traducción de ids, maker-checker,
+validación temprana de reglas de Kira y el espejo de lo que la API no devuelve.
 
 ---
 
-## 3. Qué falta
+## 3. Qué se hizo el 11-sep
 
-### 3.1 Workers de reconciliación — *lo siguiente en la lista*
-`infrastructure/reconciliation/` tiene sólo un `package-info.java`. **Los puertos están listos:**
+### 3.1 Depuración
+| Eliminado | Por qué |
+|---|---|
+| Verificación biométrica propia (reto de voz, liveness AWS, OCR, rostro): 8 endpoints `/api/v1/*`, 29 clases, 33 pruebas, tabla `verification_sessions` | Kira hace la liveness de los UBO con su enlace; duplicarla no servía al BFF |
+| Colección Postman (`docs/postman`) | Sustituida por Bruno |
+| Thymeleaf (3 dependencias) | El BFF sólo devuelve JSON; no había ninguna plantilla |
+| `KiraApiClient.listUsers()`, `listDeposits()` global | Listarían recursos de todos los clientes del integrador |
 
-| Qué reconciliar | Puerto disponible |
+### 3.2 Fallo grave corregido: ids del portal enviados a Kira
+**Cotizar y pagar enviaban a Kira los ids locales del BFF** (`virtual_account_id` y `recipient_id`)
+en vez de `kiraAccountId` / `kiraRecipientId`. Contra el sandbox real habrían fallado siempre. Las
+pruebas no lo veían porque simulan Kira. Ahora ambos servicios traducen los ids justo antes de enviar.
+
+### 3.3 Defectos D1–D6 corregidos
+| # | Defecto | Arreglo |
+|---|---|---|
+| D1 | `rehydrate` perdía `createdAt` en **7 agregados** (Tenant, Ubo, VirtualAccount, Deposit, Recipient, Payout, Quotation); `activationDelayed` nunca saltaba | fecha conservada + prueba |
+| D2 | Crear un pago aceptaba cuenta/destinatario inexistentes o de otra empresa y `kiraUserId` del cuerpo | se valida todo dentro de la empresa; `kiraUserId` sale de la empresa y ya no está en el contrato |
+| D3 | Sin credenciales de Kira: `500` (y `NullPointerException` si faltaba `client_id`/`password`) | `503 kira_not_configured` para las tres credenciales |
+| D4 | `/actuator/health` daba `500` | dependencia de Actuator añadida: `{"status":"UP"}` |
+| D5 | Parte multipart o parámetro ausente, JSON ilegible y ruta inexistente daban `500` | `400 validation_error` / `404 not_found` / `413 file_too_large` |
+| D6 | La semilla dejaba las empresas en `VERIFIED` sin existir en Kira | nacen en `CREATED` (y se corrigieron las 3 filas de la base de dev) |
+
+### 3.4 Rutas de Kira ahora expuestas al front (contratos verificados en docs.kirafin.ai)
+| Endpoint del BFF | Kira |
+|---|---|
+| `POST /api/rfis/{id}/items/{itemId}/documents` (multipart `files`) | `POST /v1/rfis/{id}/items/{item}/documents` |
+| `DELETE /api/rfis/{id}/items/{itemId}/documents/{documentId}` | `DELETE …/documents/{doc}` |
+| `GET /api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | `GET …/documents/{doc}` |
+| `POST /api/payouts/preview` | `POST /v1/virtual-accounts/{id}/payout/preview` |
+| `GET /api/payouts/{id}/events` | `events[]` de `GET /v1/payouts/{id}` |
+| `GET /api/payouts/kira` | `GET /v1/payouts` (filtrado por empresa) |
+| `GET /api/recipients/kira`, `GET /api/recipients/{id}/kira` | `GET /v1/recipients`, `GET /v1/recipients/{id}` |
+| `POST /api/virtual-accounts/{id}/deposits/sync` | `GET /v1/virtual-accounts/{id}/deposits` |
+| `GET /api/reference/countries` (cache 24 h) | `GET /v1/countries` |
+
+Además `PayoutView.blockedByRfiId` marca el pago detenido por un RFI abierto.
+
+### 3.5 RFIs alineados con el contrato oficial
+- `answerValue` acepta **texto, número o booleano** (antes sólo texto).
+- `blocking` también puede ser un **depósito** (`virtual_account_deposit_uuid`) → `depositId`.
+- Se reconocen los 9 `answer_type`.
+
+---
+
+## 4. Qué falta
+
+### 4.1 Commit de la rama
+Los cambios están en `depuracion-bff` sin commitear. Revisar con `git diff master` y commitear
+cuando se dé el visto bueno.
+
+### 4.2 Workers de reconciliación — *lo siguiente*
+`infrastructure/reconciliation/` sigue vacío. Puertos listos:
+
+| Qué reconciliar | Puerto / método |
 |---|---|
 | Pagos en vuelo | `PayoutRepository.findInFlight(limit)` |
 | Cotizaciones vencidas | `QuotationRepository.findActiveExpiredBefore(cutoff)` |
-| Enlaces de liveness caducados (7 días) | `UboRepository.findPendingLivenessExpiredBefore(cutoff)` |
-| Eventos almacenados sin proyectar | `webhooks_log.processed = false` + `processing_error` |
-| RFIs abiertos | `RfiRepository.findOpenByTenant()` + `AnswerRfiService.sync()` |
+| Enlaces de liveness caducados | `UboRepository.findPendingLivenessExpiredBefore(cutoff)` |
+| Eventos sin proyectar | `webhooks_log.processed = false` |
+| RFIs abiertos | `AnswerRfiService.sync()` |
+| Depósitos | `RecordDepositService.syncFromKira()` *(nuevo)* |
 
-`@EnableScheduling` ya está activo en `AsyncConfig`.
-
-### 3.2 Defectos encontrados el 11-sep al probar todas las rutas *(anteriores a los RFIs, sin tocar)*
-
-| # | Defecto | Dónde | Efecto |
-|---|---|---|---|
-| D1 | `rehydrate` ignora `createdAt` | `VirtualAccount.rehydrate()` | **`activationDelayed` nunca se activa**; `createdAt` de la cuenta es siempre "ahora". Mismo fallo que tenía `Rfi` |
-| D2 | Crear un pago no valida cuenta ni destinatario | `ExecutePayoutService.create()` | Acepta ids inexistentes o de otra empresa (`201`), y toma `kiraUserId` del cuerpo de la petición. Falla tarde, al aprobar |
-| D3 | Sin `KIRA_API_KEY`, cualquier llamada a Kira da `500` | `KiraCredentialManager` → `IllegalStateException` sin mapear | El operador ve "error inesperado" en vez de "integración no configurada" |
-| D4 | `/actuator/health` responde `500` | `pom.xml` sin `spring-boot-starter-actuator` | Un balanceador o un *liveness probe* marcaría la app como caída |
-| D5 | Una parte multipart ausente da `500` | `RestExceptionHandler` no mapea `MissingServletRequestPartException` | `validate` sin documento: `500` en vez de `400`/`422` |
-| D6 | La semilla deja las empresas en `VERIFIED` sin `kiraUserId` | `DevDataSeeder` | En local la empresa parece verificada pero nada de tesorería funciona |
-
-D1 y D2 son los que merecen arreglo antes de producción; D4 antes de desplegar detrás de un balanceador.
-
-### 3.3 Menor
-- **Subida de documentos a un RFI** (`POST /v1/rfis/{id}/items/{item_id}/documents`, multipart):
-  no implementada. Hoy un item `document` se ve pero no se puede responder desde el portal.
-- La vista de un **pago** no muestra aún que está detenido por un RFI (el enlace existe desde el
-  RFI; falta el badge en `PayoutView`).
-- `GET /v1/deposits` de Kira no se consulta.
-- `events[]` de `GET /v1/payouts/{id}` no se guarda (línea de tiempo del pago).
+### 4.3 Menor
+- `POST /v1/versioning/upgrade` no se expone: es una operación de cuenta, no de portal.
+- `resolution_reason` de un RFI cerrado (`expired` / `rejected`) no se guarda.
+- La cotización detallada también es exclusiva de `2026-06-01`; `CreateQuoteService` sigue en
+  `2026-04-14`. Sin verificar qué campos se pierden.
 - No hay endpoint de gestión de operadores.
-- La **cotización detallada** también es exclusiva de `2026-06-01` (según `brecha-kirafin.html`);
-  `CreateQuoteService` sigue enviando `2026-04-14`. Sin verificar qué campos se pierden.
 
 ---
 
-## 4. Decisiones abiertas
+## 5. Decisiones abiertas
 
-### 4.1 ¿Se permite aprobar un pago sin cotización?
+### 5.1 *(nueva)* Tablas huérfanas en la base de dev
+`audit_log`, `operator_user` (18 filas), `payout`, `tenant` (3 filas) y `webhook_event` no las usa
+ninguna entidad: son restos del esquema anterior a la reorganización. ¿Se borran?
+
+### 5.2 ¿Se permite aprobar un pago sin cotización?
 **Hoy: sí.** Prohibirlo es una línea en `ExecutePayoutService.loadQuotation()`.
 
-### 4.2 ¿`recipients` con 29 columnas o con un JSON?
+### 5.3 ¿`recipients` con 29 columnas o con un JSON?
 Cambio contenido al `RecipientMapper`.
 
-### 4.3 ¿`memo` obligatorio en WIRE?
+### 5.4 ¿`memo` obligatorio en WIRE?
 **Hoy: no.** Si falta, lo rechaza Kira.
-
-### 4.4 *(decidida 11-sep)* Bloqueo de un RFI en columnas propias
-`rfis.blocking_type` y `rfis.blocking_resource_id` (+ índice), en lugar de guardar el RFI entero
-en `items_payload`. Permite consultar qué RFI detiene cada pago.
 
 ---
 
-## 5. Riesgos conocidos
+## 6. Riesgos conocidos
 
 | Riesgo | Detalle | Mitigación actual |
 |---|---|---|
-| **Webhook perdido** | Entrega única, sin reintentos | Ninguna hasta los workers (§3.1). Hoy: `refresh` / `sync` manual |
-| **`rfi.*` no suscrito** | Es la única familia que exige suscripción explícita en Kira | `POST /api/rfis/sync`. **Pedirla a Kira** |
-| **Atribución de RFIs** | Se asume que Kira devuelve `user_id` en cada RFI (no verificado contra el sandbox) | Si no viene, sólo se importan los que bloquean un pago local; el resto se descarta con `WARN` |
-| **Activación colgada** | En sandbox la VA puede no activarse nunca | `activationDelayed` — **roto por D1** |
-| **Sandbox miente sobre el saldo** | Valor fijo del proveedor | Espejo local en `deposits` |
-| **Compilación incremental de Maven** | `test-compile` ha dado verde con firmas rotas | `./mvnw clean test` |
-| **`ddl-auto: validate` en prod** | Columnas nuevas deben existir en el DDL aplicado a mano | Regenerar el DDL antes de desplegar (§6). **Pendiente: `rfis.blocking_type`, `rfis.blocking_resource_id`, `idx_rfis_blocking`** |
+| **Sin credenciales de Kira** | Nada del flujo real se ha probado contra el sandbox | Contratos verificados en la documentación oficial; pedir `api_key` a Kira |
+| **Webhook perdido** | Entrega única, sin reintentos | `refresh` / `sync` manuales hasta los workers |
+| **`rfi.*` no suscrito** | Exige suscripción explícita en Kira | `POST /api/rfis/sync`; pedirla a Kira |
+| **Atribución por `user_id`** | Documentado en list/get RFI, pagos y destinatarios; no probado en sandbox | Se descarta y registra lo que no se puede atribuir |
+| **Forma de `account_details` y `fees`** | Kira no documenta sus campos | Se enmascara `account_number`/`address` si viene; `fees` va tal cual al front |
+| **App antigua corriendo** | IntelliJ tenía arrancado el código anterior contra la misma base (sin `verification_sessions`) | Reiniciarla |
+| **`ddl-auto: validate` en prod** | Cambios de esquema aplicados a mano | §7 |
 
 ---
 
-## 6. Cómo regenerar el DDL de producción
+## 7. Cambios de esquema para prod/cert (aplicar a mano)
 
-El esquema de prod se aplica a mano y `ddl-auto: validate` falla si no coincide. Para obtener
-el DDL exacto que espera Hibernate, crear un test temporal:
+```sql
+-- RFIs: lo que bloquean (10-sep/11-sep)
+ALTER TABLE rfis
+  ADD COLUMN blocking_type VARCHAR(30) NULL,
+  ADD COLUMN blocking_resource_id VARCHAR(100) NULL,
+  ADD INDEX idx_rfis_blocking (blocking_resource_id);
+
+-- Verificacion biometrica propia eliminada (11-sep)
+DROP TABLE IF EXISTS verification_sessions;
+```
+
+Para obtener el DDL exacto que espera Hibernate, crear un test temporal:
 
 ```java
 @SpringBootTest
@@ -161,30 +168,17 @@ class TempDdlDumpTest { @Test void dump() {} }
 ```
 
 `./mvnw test -Dtest=TempDdlDumpTest -Dsurefire.failIfNoSpecifiedTests=false`, revisar
-`target/schema-mysql.sql` y **borrar el test**. Comprobar que no aparezca ningún
-`enum ('...')`: si aparece, falta un `@JdbcTypeCode(SqlTypes.VARCHAR)`.
-
-Cambio de esquema del 11-sep, para aplicar a mano en prod/cert:
-
-```sql
-ALTER TABLE rfis
-  ADD COLUMN blocking_type VARCHAR(30) NULL,
-  ADD COLUMN blocking_resource_id VARCHAR(100) NULL,
-  ADD INDEX idx_rfis_blocking (blocking_resource_id);
-```
-
-(Verificado contra lo que genera Hibernate en dev; confirmar con el volcado de arriba antes de aplicar.)
+`target/schema-mysql.sql` y **borrar el test**.
 
 ---
 
-## 7. Cifras
+## 8. Cifras
 
 | | |
 |---|---|
-| Clases de producción | 185 |
-| Clases de prueba | 34 |
-| Pruebas | 254 (de 78 al empezar) |
-| Tablas | 13 |
-| Endpoints REST | 45 operaciones sobre 38 rutas (14 controladores) |
-| Casos de uso implementados | 8 de 8 |
-| Colección Bruno | 83 peticiones en 11 carpetas |
+| Clases de producción | 163 (185 antes de depurar) |
+| Clases de prueba | 32 |
+| Pruebas | 253 |
+| Tablas | 12 |
+| Endpoints REST | 47 operaciones sobre 40 rutas |
+| Colección Bruno | 84 peticiones en 11 carpetas |

@@ -31,7 +31,7 @@ public class Quotation {
     private final String recipientId;
     private final QuotationRail rail;
     private final BigDecimal originAmount;
-    private final Instant createdAt;
+    private Instant createdAt;
 
     private FeeBreakdown fees;
     private Instant expiresAt;
@@ -77,6 +77,8 @@ public class Quotation {
                                       Instant expiresAt, QuotationStatus status, Instant createdAt) {
         Quotation q = new Quotation(id, tenantId, virtualAccountId, recipientId, rail, originAmount,
                 fees, expiresAt);
+        // Sin esto, cada lectura "reiniciaba" la fecha de alta con la hora actual.
+        q.createdAt = createdAt == null ? q.createdAt : createdAt;
         q.kiraQuoteId = kiraQuoteId;
         q.destinationAmount = destinationAmount == null ? originAmount : destinationAmount;
         q.destinationCurrency = destinationCurrency;

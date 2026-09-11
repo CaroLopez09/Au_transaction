@@ -1,0 +1,24 @@
+meta {
+  name: 11 Historial en Kira
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/api/payouts/kira?page=1&limit=20
+  body: none
+  auth: bearer
+}
+
+params:query {
+  page: 1
+  limit: 20
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+docs {
+  Todos los pagos de la empresa en Kira. Filtros: status, fromDate, toDate.
+}

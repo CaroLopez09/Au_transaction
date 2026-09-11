@@ -8,6 +8,9 @@ import com.example.autransactional.domain.account.VirtualAccountMode;
 import com.example.autransactional.domain.account.VirtualAccountRepository;
 import com.example.autransactional.domain.shared.Rail;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.Role;
+import com.example.autransactional.infrastructure.kira.KiraApiClient;
+import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -31,6 +34,7 @@ class RecordDepositServiceTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final DepositRepository deposits = mock(DepositRepository.class);
     private final VirtualAccountRepository accounts = mock(VirtualAccountRepository.class);
+    private final KiraApiClient kira = mock(KiraApiClient.class);
 
     private RecordDepositService service;
     private VirtualAccount cuenta;
@@ -58,7 +62,7 @@ class RecordDepositServiceTest {
                 .filter(d -> i.getArgument(0).equals(d.getKiraDepositId()))
                 .findFirst());
 
-        service = new RecordDepositService(deposits, accounts);
+        service = new RecordDepositService(deposits, accounts, kira);
     }
 
     private JsonNode json(String raw) {
@@ -207,5 +211,32 @@ class RecordDepositServiceTest {
 
         assertTrue(registro.isEmpty());
         verify(deposits, never()).save(any());
+    }
+
+    @Test
+    void laSincronizacionDesdeKiraConvergeEnLaMismaFilaQueElWebhook() {
+        when(accounts.findByIdAndTenant("va-1", TENANT)).thenReturn(Optional.of(cuenta));
+        when(deposits.findByVirtualAccount(eq("va-1"), anyInt())).thenAnswer(i -> registro);
+        recibido();
+        String idDelWebhook = registro.getFirst().getKiraDepositId();
+        when(kira.listAccountDeposits(eq("kva_1"), any())).thenReturn(json("""
+                [ { "id": "%s", "virtual_account_id": "kva_1", "amount": "5000.00", "currency": "USD",
+                    "status": "REFUNDED", "sender": { "name": "Acme Corp", "account_number": "999" },
+                    "payment_rail": "wire", "fees": { "total_fees": "25.00" }, "net_amount": "4975.00" },
+                  { "id": "dep_otra_cuenta", "virtual_account_id": "kva_ajena", "amount": "10.00",
+                    "currency": "USD", "status": "COMPLETED" } ]
+                """.formatted(idDelWebhook)));
+
+        service.syncFromKira(new AuthenticatedOperator("u-1", "read.only@juriscop.test", TENANT, Role.READ_ONLY),
+                "va-1");
+
+        assertEquals(1, registro.size());
+        assertEquals(DepositStatus.REFUNDED, registro.getFirst().getStatus());
+    }
+
+    @Test
+    void kytRechazadoEsUnDepositoFallido() {
+        assertEquals(DepositStatus.FAILED, DepositStatus.fromWire("KYT_REJECTED"));
+        assertEquals(DepositStatus.PENDING, DepositStatus.fromWire("KYT_PENDING"));
     }
 }

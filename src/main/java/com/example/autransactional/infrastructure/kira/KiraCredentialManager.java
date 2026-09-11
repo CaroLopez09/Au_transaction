@@ -42,6 +42,13 @@ public class KiraCredentialManager {
         this.objectMapper = objectMapper;
     }
 
+    private static void requireCredential(String value, String variable) {
+        if (value == null || value.isBlank()) {
+            throw new KiraNotConfiguredException("Falta " + variable
+                    + ". Kira entrega api_key, client_id y password por canal seguro.");
+        }
+    }
+
     public String getAccessToken() {
         return tokenCache.get(CACHE_KEY, key -> authenticate());
     }
@@ -52,10 +59,10 @@ public class KiraCredentialManager {
     }
 
     private String authenticate() {
-        if (properties.apiKey() == null || properties.apiKey().isBlank()) {
-            throw new IllegalStateException(
-                    "Falta KIRA_API_KEY. Kira entrega api_key, client_id y password por canal seguro.");
-        }
+        // Las tres son obligatorias: sin client_id o password el cuerpo ni siquiera se construye.
+        requireCredential(properties.apiKey(), "KIRA_API_KEY");
+        requireCredential(properties.clientId(), "KIRA_CLIENT_ID");
+        requireCredential(properties.password(), "KIRA_PASSWORD");
         log.info("Solicitando nuevo access token a KiraFin");
 
         var response = restClient.post()

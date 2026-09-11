@@ -1,5 +1,7 @@
 package com.example.autransactional.application.compliance;
 
+import com.example.autransactional.domain.account.Deposit;
+import com.example.autransactional.domain.account.DepositRepository;
 import com.example.autransactional.domain.compliance.Rfi;
 import com.example.autransactional.domain.compliance.RfiRepository;
 import com.example.autransactional.domain.compliance.RfiStatus;
@@ -43,6 +45,7 @@ class AnswerRfiServiceTest {
     private final RfiRepository rfis = mock(RfiRepository.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
     private final PayoutRepository payouts = mock(PayoutRepository.class);
+    private final DepositRepository deposits = mock(DepositRepository.class);
 
     private AnswerRfiService service;
     private List<Rfi> registro;
@@ -91,7 +94,7 @@ class AnswerRfiServiceTest {
         when(rfis.findByTenant(any())).thenAnswer(i -> registro.stream()
                 .filter(r -> r.getTenantId().equals(i.getArgument(0))).toList());
 
-        service = new AnswerRfiService(rfis, tenants, payouts, kira, audit, mapper);
+        service = new AnswerRfiService(rfis, tenants, payouts, deposits, kira, audit, mapper);
     }
 
     private JsonNode json(String raw) {
@@ -274,5 +277,132 @@ class AnswerRfiServiceTest {
         service.applyWebhook("rfi_1", "resolved");
 
         assertEquals(RfiStatus.RESOLVED, registro.getFirst().getStatus());
+    }
+
+    // ---------- Valores tipados y bloqueo por deposito ----------
+
+    @Test
+    void unaRespuestaNumericaOBooleanaViajaConSuTipo() {
+        when(kira.listRfis(any())).thenReturn(json("""
+                { "data": [ { "rfi_id": "rfi_2", "user_id": "usr_1", "status": "pending", "items": [
+                  { "item_id": "i-num", "answer_type": "number", "status": "pending" },
+                  { "item_id": "i-bool", "answer_type": "boolean", "status": "pending" } ] } ] }
+                """));
+        service.sync(cumplimiento);
+        Rfi rfi = registro.getFirst();
+        when(kira.answerRfiItems(eq("rfi_2"), any())).thenReturn(json("{}"));
+        when(kira.getRfi("rfi_2")).thenReturn(json("{\"rfi_id\":\"rfi_2\",\"status\":\"answered\",\"items\":[]}"));
+
+        service.answer(cumplimiento, rfi.getId(), new RfiCommands.AnswerItems(List.of(
+                new RfiCommands.ItemAnswer("i-num", 25000), new RfiCommands.ItemAnswer("i-bool", true))));
+
+        ArgumentCaptor<Object> body = ArgumentCaptor.forClass(Object.class);
+        verify(kira).answerRfiItems(eq("rfi_2"), body.capture());
+        assertEquals(Map.of("items", List.of(Map.of("item_id", "i-num", "answer_value", 25000),
+                Map.of("item_id", "i-bool", "answer_value", true))), body.getValue());
+    }
+
+    @Test
+    void unRfiQueDetieneUnDepositoEnlazaElDepositoDelPortal() {
+        Deposit deposito = mock(Deposit.class);
+        when(deposito.getId()).thenReturn("d-1");
+        when(deposito.getTenantId()).thenReturn(TENANT);
+        when(deposito.getStatus()).thenReturn(com.example.autransactional.domain.account.DepositStatus.PENDING);
+        when(deposits.findByKiraDepositId("kdep_7")).thenReturn(Optional.of(deposito));
+        when(kira.listRfis(any())).thenReturn(json("""
+                [ { "rfi_id": "rfi_3", "user_id": "usr_1", "status": "pending",
+                    "blocking": { "type": "virtual_account_deposit", "virtual_account_deposit_uuid": "kdep_7" },
+                    "items": [] } ]
+                """));
+        service.sync(cumplimiento);
+
+        RfiView vista = service.get(cumplimiento, registro.getFirst().getId());
+
+        assertEquals("virtual_account_deposit", vista.blocking().type());
+        assertEquals("d-1", vista.blocking().depositId());
+        assertNull(vista.blocking().payoutId());
+    }
+
+    // ---------- Documentos ----------
+
+    private RfiCommands.UploadedFile pdf(String nombre) {
+        return new RfiCommands.UploadedFile(nombre, "application/pdf", "%PDF-1.4".getBytes());
+    }
+
+    @Test
+    void subirArchivosAUnItemDeTextoSeRechazaSinLlamarAKira() {
+        Rfi rfi = sincronizarUno();
+
+        assertThrows(RfiAnswerRejectedException.class, () ->
+                service.uploadDocuments(cumplimiento, rfi.getId(), "i-ein", List.of(pdf("a.pdf"))));
+        verify(kira, never()).uploadRfiDocuments(anyString(), anyString(), any());
+    }
+
+    @Test
+    void unTipoDeArchivoNoAdmitidoSeRechazaPorArchivo() {
+        Rfi rfi = sincronizarUno();
+
+        RfiAnswerRejectedException e = assertThrows(RfiAnswerRejectedException.class, () ->
+                service.uploadDocuments(cumplimiento, rfi.getId(), "i-doc", List.of(
+                        new RfiCommands.UploadedFile("hoja.xlsx", "application/vnd.ms-excel", new byte[]{1}))));
+
+        assertTrue(e.itemErrors().get("hoja.xlsx").contains("Tipo no admitido"));
+        verify(kira, never()).uploadRfiDocuments(anyString(), anyString(), any());
+    }
+
+    @Test
+    void elAnswerSpecDelItemPuedeLimitarElNumeroDeArchivos() {
+        when(kira.listRfis(any())).thenReturn(json("""
+                [ { "rfi_id": "rfi_4", "user_id": "usr_1", "status": "pending", "items": [
+                  { "item_id": "i-doc", "answer_type": "document", "status": "pending",
+                    "answer_spec": { "max_files": 1, "mime_types": ["application/pdf"] } } ] } ]
+                """));
+        service.sync(cumplimiento);
+
+        RfiAnswerRejectedException e = assertThrows(RfiAnswerRejectedException.class, () ->
+                service.uploadDocuments(cumplimiento, registro.getFirst().getId(), "i-doc",
+                        List.of(pdf("a.pdf"), pdf("b.pdf"))));
+
+        assertTrue(e.itemErrors().get("i-doc").contains("maximo 1"));
+    }
+
+    @Test
+    void subirUnPdfLoEnviaAKiraYReleeElRfi() {
+        Rfi rfi = sincronizarUno();
+        when(kira.uploadRfiDocuments(eq("rfi_1"), eq("i-doc"), any())).thenReturn(json("{\"item\":{}}"));
+        when(kira.getRfi("rfi_1")).thenReturn(json(detalle("answered", "answered")));
+
+        RfiView vista = service.uploadDocuments(cumplimiento, rfi.getId(), "i-doc", List.of(pdf("acta.pdf")));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<com.example.autransactional.infrastructure.kira.KiraFile>> files =
+                ArgumentCaptor.forClass(List.class);
+        verify(kira).uploadRfiDocuments(eq("rfi_1"), eq("i-doc"), files.capture());
+        assertEquals("acta.pdf", files.getValue().getFirst().fileName());
+        assertEquals("ANSWERED", vista.status());
+    }
+
+    @Test
+    void noSePuedeBorrarElUltimoArchivoYElErrorVaPorItem() {
+        Rfi rfi = sincronizarUno();
+        when(kira.removeRfiDocument("rfi_1", "i-doc", "doc-1")).thenThrow(new KiraApiException(422, null,
+                "The last file cannot be removed", "{\"message\":\"The last file cannot be removed\"}"));
+
+        RfiAnswerRejectedException e = assertThrows(RfiAnswerRejectedException.class, () ->
+                service.removeDocument(cumplimiento, rfi.getId(), "i-doc", "doc-1"));
+
+        assertEquals("The last file cannot be removed", e.itemErrors().get("i-doc"));
+    }
+
+    @Test
+    void elEnlaceDeDescargaSeDevuelveConSuCaducidad() {
+        Rfi rfi = sincronizarUno();
+        when(kira.getRfiDocumentLink("rfi_1", "i-doc", "doc-1")).thenReturn(json(
+                "{\"download_url\":\"https://files.kira.test/x?sig=abc\",\"expires_at\":\"2026-09-11T15:05:00Z\"}"));
+
+        RfiDocumentLink link = service.documentLink(cumplimiento, rfi.getId(), "i-doc", "doc-1");
+
+        assertEquals("https://files.kira.test/x?sig=abc", link.downloadUrl());
+        assertEquals(java.time.Instant.parse("2026-09-11T15:05:00Z"), link.expiresAt());
     }
 }

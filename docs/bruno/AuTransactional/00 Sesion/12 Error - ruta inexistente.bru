@@ -1,0 +1,21 @@
+meta {
+  name: 12 Error - ruta inexistente
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/api/no-existe
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+tests {
+  test("responde 404", function () {
+    expect([404]).to.include(res.getStatus());
+  });
+}

@@ -88,6 +88,9 @@ public class CreateQuoteService {
                 .orElseThrow(() -> new DomainException("La cuenta virtual no existe."));
         // 'approved' no basta: hace falta numero de cuenta real o el evento de activacion.
         account.assertFundsReady();
+        if (account.getKiraAccountId() == null) {
+            throw new DomainException("La cuenta virtual no esta abierta en Kira.");
+        }
 
         Recipient recipient = recipients.findByIdAndTenant(command.recipientId(), operator.tenantId())
                 .orElseThrow(() -> new DomainException("El destinatario no existe."));
@@ -143,7 +146,8 @@ public class CreateQuoteService {
                                           QuotationCommands.CreateQuote command) {
         Map<String, Object> body = new LinkedHashMap<>();
         // virtual_account_id y quote_for son excluyentes: enviar ambos es un 400.
-        body.put("virtual_account_id", account.getId());
+        // Es el id de Kira: el id del portal no significa nada para su API.
+        body.put("virtual_account_id", account.getKiraAccountId());
         body.put("amount", KiraAmounts.amountString(command.amount()));
         body.put("rail", rail.name());
         body.put("inverse", true);

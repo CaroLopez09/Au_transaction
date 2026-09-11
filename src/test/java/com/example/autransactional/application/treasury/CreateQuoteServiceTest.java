@@ -78,6 +78,7 @@ class CreateQuoteServiceTest {
         empresa.applyRemoteState(TenantStatus.VERIFIED, null, null, true);
 
         cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT, "slovak_savings_bank", null);
+        cuenta.linkKiraAccount("kva-1");
         cuenta.describeBank("Bank", "1234567890", "021000021");
 
         destinatario = new Recipient("rec-1", TENANT,
@@ -118,7 +119,8 @@ class CreateQuoteServiceTest {
 
         Map<String, Object> body = cuerpoEnviado();
         // virtual_account_id y quote_for son excluyentes: con quote_for el quote_id es nulo.
-        assertEquals("va-1", body.get("virtual_account_id"));
+        // El id de Kira, no el del portal: el del portal no significa nada para su API.
+        assertEquals("kva-1", body.get("virtual_account_id"));
         assertFalse(body.containsKey("quote_for"));
         // inverse: el operador teclea lo que RECIBE el destinatario.
         assertEquals(true, body.get("inverse"));

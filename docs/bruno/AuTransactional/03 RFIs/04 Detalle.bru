@@ -13,3 +13,20 @@ get {
 auth:bearer {
   token: {{tokenReadOnly}}
 }
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const items = res.getBody().items || [];
+    const texto = items.find(i => i.answer_type !== "document");
+    const doc = items.find(i => i.answer_type === "document");
+    if (texto) { bru.setVar("rfiTextItemId", texto.item_id); }
+    if (doc) {
+      bru.setVar("rfiDocItemId", doc.item_id);
+      if (doc.documents && doc.documents.length > 0) { bru.setVar("rfiDocumentId", doc.documents[0].document_id); }
+    }
+  }
+}
+
+docs {
+  Guarda `rfiTextItemId`, `rfiDocItemId` y, si hay archivos, `rfiDocumentId`.
+}

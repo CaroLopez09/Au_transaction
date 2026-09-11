@@ -12,8 +12,8 @@ import java.util.List;
 /**
  * Depositos entrantes.
  *
- * Solo lectura: los depositos no se crean desde aqui, llegan por webhook. En el sandbox,
- * ademas, este espejo es la unica constancia que existe de ellos.
+ * Los depositos no se crean desde aqui: llegan por webhook y, como red de seguridad, se
+ * sincronizan desde Kira. En el sandbox el webhook es la unica constancia que existe de ellos.
  */
 @Tag(name = "2.4 Depositos",
         description = "Historial de fondeos de las cuentas virtuales, proyectado desde los webhooks.")
@@ -31,6 +31,13 @@ public class DepositController {
     public List<DepositView> list(@AuthenticationPrincipal AuthenticatedOperator operator,
                                   @RequestParam(defaultValue = "50") int limit) {
         return deposits.list(operator, limit);
+    }
+
+    /** Trae de Kira los depositos de la cuenta y los asienta. Idempotente por id de deposito. */
+    @PostMapping("/virtual-accounts/{id}/deposits/sync")
+    public List<DepositView> syncFromKira(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                          @PathVariable String id) {
+        return deposits.syncFromKira(operator, id);
     }
 
     @GetMapping("/virtual-accounts/{id}/deposits")

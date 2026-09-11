@@ -27,13 +27,18 @@ public class OpenApiConfig {
                         .description("""
                                 Backend for Frontend de la integracion con KiraFin.
 
+                                Todo lo de negocio vive en KiraFin: el BFF custodia las credenciales,
+                                aplica la sesion y los roles de cada empresa, y guarda lo que la API
+                                de Kira no devuelve o no ofrece (maker-checker, cuestionario KYB,
+                                bitacora de webhooks).
+
                                 Grupos de endpoints:
-                                - /api/auth          sesion propia del BFF (login y perfil)
-                                - /api/payouts       pagos con control interno maker-checker
-                                - /api/v1/identity   verificacion biometrica: documento, rostro y voz
-                                - /api/v1/liveness   prueba de vida
-                                - /api/v1/number-challenge  reto de voz de 4 digitos
-                                - /api/webhooks/kira ingress de eventos de Kira, firmado con HMAC
+                                - /api/auth            sesion propia del BFF (login y perfil)
+                                - /api/onboarding, /api/ubos, /api/rfis   KYB y cumplimiento
+                                - /api/virtual-accounts, /api/deposits    cuentas y fondeo
+                                - /api/recipients, /api/quotations, /api/payouts   tesoreria
+                                - /api/reference       catalogos de Kira
+                                - /api/webhooks/kira   ingress de eventos de Kira, firmado con HMAC
 
                                 Para probar los endpoints protegidos: POST /api/auth/login,
                                 copia accessToken y pulsa Authorize.

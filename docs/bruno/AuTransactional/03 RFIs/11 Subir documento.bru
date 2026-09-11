@@ -1,0 +1,23 @@
+meta {
+  name: 11 Subir documento
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}/items/{{rfiDocItemId}}/documents
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:multipart-form {
+  files: @file(muestras/documento.pdf)
+}
+
+docs {
+  Parte `files` repetible (max 20, 30 MB). Valida tipo y cantidad antes de llamar a Kira.
+}

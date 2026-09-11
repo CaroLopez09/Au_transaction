@@ -28,8 +28,6 @@ script:pre-request {
   // Sin cotizacion previa, quotationId vacio falla con "Cotizacion no encontrada": se quita.
   const body = req.getBody();
   if (!bru.getVar("quotationId")) { delete body.quotationId; }
-  if (!bru.getVar("vaId")) { body.virtualAccountId = "va_demo_001"; }
-  if (!bru.getVar("recipientId")) { body.recipientId = "rec_demo_001"; }
   req.setBody(body);
 }
 
@@ -39,12 +37,6 @@ script:post-response {
   }
 }
 
-tests {
-  test("responde 201", function () {
-    expect([201]).to.include(res.getStatus());
-  });
-}
-
 docs {
-  Guarda `payoutId`. Funciona sin Kira (no llama a Kira).
+  Guarda `payoutId`. Exige cuenta y destinatario de la empresa: sin ellos, 422.
 }

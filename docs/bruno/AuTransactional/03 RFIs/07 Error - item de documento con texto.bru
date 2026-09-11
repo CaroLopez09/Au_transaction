@@ -17,14 +17,8 @@ auth:bearer {
 body:json {
   {
     "items": [
-      {
-        "itemId": "i-doc",
-        "answerValue": "adjunto"
-      },
-      {
-        "itemId": "i-inventado",
-        "answerValue": "x"
-      }
+      { "itemId": "{{rfiDocItemId}}", "answerValue": "adjunto" },
+      { "itemId": "i-inventado", "answerValue": "x" }
     ]
   }
 }

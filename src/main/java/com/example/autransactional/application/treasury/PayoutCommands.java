@@ -14,13 +14,24 @@ public final class PayoutCommands {
     private PayoutCommands() {
     }
 
+    /** Ids del portal (los de /api/virtual-accounts y /api/recipients), no los de Kira. */
     public record CreatePayout(
             @NotBlank String virtualAccountId,
             @NotBlank String recipientId,
-            String kiraUserId,
             @NotNull @DecimalMin(value = "0.00000001") BigDecimal amount,
             @NotBlank String currency,
             String quotationId) {
+    }
+
+    /**
+     * Vista previa de comisiones. Por defecto 'amount' es lo que RECIBE el destinatario, igual
+     * que al cotizar; con recipientReceivesAmount=false es lo que sale de la cuenta.
+     */
+    public record PreviewPayout(
+            @NotBlank String virtualAccountId,
+            @NotBlank String recipientId,
+            @NotNull @DecimalMin(value = "0.01") BigDecimal amount,
+            Boolean recipientReceivesAmount) {
     }
 
     /**

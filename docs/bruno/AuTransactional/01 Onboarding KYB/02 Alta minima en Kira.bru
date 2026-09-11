@@ -22,6 +22,12 @@ body:json {
   }
 }
 
+tests {
+  test("responde 201 o 503", function () {
+    expect([201, 503]).to.include(res.getStatus());
+  });
+}
+
 docs {
-  Llama a `POST /v1/users`. Sin credenciales de Kira: 500 `internal_error`.
+  Llama a `POST /v1/users`. Sin credenciales de Kira: 503 `kira_not_configured`.
 }

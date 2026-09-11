@@ -16,4 +16,7 @@ public interface RfiRepository {
     List<Rfi> findByTenant(TenantId tenantId);
 
     List<Rfi> findOpenByTenant(TenantId tenantId);
+
+    /** RFI abierto que tiene detenido el recurso de Kira indicado (pago o deposito). */
+    Optional<Rfi> findOpenBlocking(String kiraResourceId);
 }

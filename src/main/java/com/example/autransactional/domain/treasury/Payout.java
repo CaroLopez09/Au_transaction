@@ -25,7 +25,7 @@ public class Payout {
     private FeeBreakdown fees;
     private final IdempotencyKey idempotencyKey;
     private final String makerUserId;
-    private final Instant createdAt;
+    private Instant createdAt;
 
     private String quotationId;
     private Instant quotationExpiresAt;
@@ -75,6 +75,8 @@ public class Payout {
                                    Instant updatedAt) {
         Payout p = new Payout(id, tenantId, kiraUserId, virtualAccountId, recipientId, amount, fees,
                 idempotencyKey, makerUserId);
+        // Sin esto, cada lectura "reiniciaba" la fecha de alta con la hora actual.
+        p.createdAt = createdAt == null ? p.createdAt : createdAt;
         p.quotationId = quotationId;
         p.quotationExpiresAt = quotationExpiresAt;
         p.approvalState = approvalState;

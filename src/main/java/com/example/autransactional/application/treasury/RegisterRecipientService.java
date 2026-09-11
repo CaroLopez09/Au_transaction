@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +64,66 @@ public class RegisterRecipientService {
     @Transactional(readOnly = true)
     public RecipientView get(AuthenticatedOperator operator, String recipientId) {
         return RecipientView.from(load(operator.tenantId(), recipientId));
+    }
+
+    /**
+     * Destinatarios de la empresa en Kira (GET /v1/recipients?user_id=...). Kira no pagina esta
+     * lista. Se descarta cualquier destinatario que no pueda confirmarse como de esta empresa.
+     */
+    @Transactional(readOnly = true)
+    public List<KiraRecipientView> listInKira(AuthenticatedOperator operator) {
+        Tenant tenant = tenants.findById(operator.tenantId())
+                .orElseThrow(() -> new DomainException("La organizacion no existe."));
+        tenant.assertRegisteredInKira();
+        JsonNode response = kira.listRecipients(tenant.getKiraUserId(), null);
+        JsonNode list = response.has("recipients") ? response.get("recipients") : response.path("data");
+        List<KiraRecipientView> views = new ArrayList<>();
+        for (JsonNode row : list) {
+            views.add(toKiraView(operator.tenantId(), row));
+        }
+        return views;
+    }
+
+    /** Un destinatario del directorio, leido de Kira. */
+    @Transactional(readOnly = true)
+    public KiraRecipientView getInKira(AuthenticatedOperator operator, String recipientId) {
+        Recipient recipient = load(operator.tenantId(), recipientId);
+        if (recipient.getKiraRecipientId() == null) {
+            throw new DomainException("El destinatario no esta registrado en Kira.");
+        }
+        JsonNode response = kira.getRecipient(recipient.getKiraRecipientId());
+        return toKiraView(operator.tenantId(), response.has("data") ? response.get("data") : response);
+    }
+
+    private KiraRecipientView toKiraView(TenantId tenantId, JsonNode row) {
+        String kiraId = text(row, "recipient_id");
+        String localId = kiraId == null ? null : recipients.findByKiraRecipientId(kiraId)
+                .filter(r -> r.getTenantId().equals(tenantId))
+                .map(Recipient::getId)
+                .orElse(null);
+        String company = text(row, "company_name");
+        String person = ((text(row, "first_name") == null ? "" : text(row, "first_name")) + " "
+                + (text(row, "last_name") == null ? "" : text(row, "last_name"))).trim();
+        JsonNode details = row.path("account_details");
+        String destination = text(details, "account_number");
+        if (destination == null) {
+            destination = text(details, "address");
+        }
+        return new KiraRecipientView(kiraId, localId, text(row, "type"),
+                company != null ? company : (person.isEmpty() ? null : person),
+                text(row, "account_type"), mask(destination), text(row, "email"), text(row, "created_ts"));
+    }
+
+    private static String mask(String value) {
+        if (value == null || value.length() <= 4) {
+            return value;
+        }
+        return "****" + value.substring(value.length() - 4);
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value == null || value.isNull() || !value.isValueNode() ? null : value.asText();
     }
 
     @Transactional

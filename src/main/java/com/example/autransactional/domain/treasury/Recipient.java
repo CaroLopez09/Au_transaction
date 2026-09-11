@@ -27,7 +27,7 @@ public class Recipient {
     private final RecipientHolder holder;
     private final RecipientAccount account;
     private final PostalAddress address;
-    private final Instant createdAt;
+    private Instant createdAt;
 
     private String kiraRecipientId;
     private RecipientStatus status;
@@ -64,6 +64,8 @@ public class Recipient {
                                       String kiraRecipientId, RecipientStatus status,
                                       String replacedByRecipientId, Instant createdAt, Instant updatedAt) {
         Recipient r = new Recipient(id, tenantId, holder, account, address);
+        // Sin esto, cada lectura "reiniciaba" la fecha de alta con la hora actual.
+        r.createdAt = createdAt == null ? r.createdAt : createdAt;
         r.kiraRecipientId = kiraRecipientId;
         r.status = status == null ? RecipientStatus.ACTIVE : status;
         r.replacedByRecipientId = replacedByRecipientId;

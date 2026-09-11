@@ -10,6 +10,8 @@ import java.time.Instant;
  *
  * amount es lo que recibe el destinatario y totalDebitAmount el bruto que sale de la cuenta.
  * referenceNumber (IMAD / ACH trace / UETR) es el comprobante que reclama el cliente final.
+ * blockedByRfiId no es nulo cuando un RFI abierto de Kira tiene el pago detenido: el portal
+ * lo muestra como "detenido" y enlaza al RFI.
  */
 public record PayoutView(
         String id,
@@ -32,10 +34,15 @@ public record PayoutView(
         String referenceNumber,
         String paymentMethod,
         String errorCode,
+        String blockedByRfiId,
         Instant createdAt,
         Instant updatedAt) {
 
     public static PayoutView from(Payout p) {
+        return from(p, null);
+    }
+
+    public static PayoutView from(Payout p, String blockedByRfiId) {
         return new PayoutView(
                 p.getId(),
                 p.getVirtualAccountId(),
@@ -57,6 +64,7 @@ public record PayoutView(
                 p.getReferenceNumber(),
                 p.getPaymentMethod(),
                 p.getErrorCode(),
+                blockedByRfiId,
                 p.getCreatedAt(),
                 p.getUpdatedAt());
     }

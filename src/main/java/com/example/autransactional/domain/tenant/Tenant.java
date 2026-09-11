@@ -25,7 +25,7 @@ public class Tenant {
 
     private final TenantId id;
     private final String name;
-    private final Instant createdAt;
+    private Instant createdAt;
 
     private String taxId;
     private String jurisdiction;
@@ -64,6 +64,8 @@ public class Tenant {
                                    String onboardingIdempotencyKey, String rejectionReason,
                                    Instant createdAt, Instant updatedAt) {
         Tenant t = new Tenant(id, name, taxId, jurisdiction);
+        // Sin esto, cada lectura "reiniciaba" la fecha de alta con la hora actual.
+        t.createdAt = createdAt == null ? t.createdAt : createdAt;
         t.kiraUserId = kiraUserId;
         t.status = status == null ? TenantStatus.CREATED : status;
         t.eligibleProducts = eligibleProducts == null ? List.of() : List.copyOf(eligibleProducts);

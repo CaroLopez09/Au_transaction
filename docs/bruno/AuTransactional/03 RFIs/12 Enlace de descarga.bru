@@ -1,0 +1,19 @@
+meta {
+  name: 12 Enlace de descarga
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}/items/{{rfiDocItemId}}/documents/{{rfiDocumentId}}/link
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+docs {
+  URL temporal (minutos). No guardarla.
+}

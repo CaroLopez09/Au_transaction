@@ -1,0 +1,25 @@
+meta {
+  name: 01 Paises
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/reference/countries
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+tests {
+  test("responde 200 o 503", function () {
+    expect([200, 503]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Nombre, alpha3 (ISO-3), formato de codigo postal y subdivisiones. Sin credenciales de Kira: 503.
+}

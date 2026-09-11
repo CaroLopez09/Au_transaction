@@ -43,20 +43,6 @@ class OpenApiDocsTest {
     }
 
     @Test
-    void losOchoEndpointsDeVerificacionBiometricaEstanDocumentados() throws Exception {
-        JsonNode paths = apiDocs().path("paths");
-
-        assertTrue(paths.has("/api/v1/liveness/config"));
-        assertTrue(paths.has("/api/v1/liveness/status"));
-        assertTrue(paths.has("/api/v1/liveness/session"));
-        assertTrue(paths.has("/api/v1/liveness/session/{sessionId}/result"));
-        assertTrue(paths.has("/api/v1/number-challenge/session"));
-        assertTrue(paths.has("/api/v1/number-challenge/{challengeId}/verify"));
-        assertTrue(paths.has("/api/v1/number-challenge/{challengeId}/status"));
-        assertTrue(paths.has("/api/v1/identity/validate"));
-    }
-
-    @Test
     void losEndpointsDeNegocioEstanDocumentados() throws Exception {
         JsonNode paths = apiDocs().path("paths");
 
@@ -78,6 +64,16 @@ class OpenApiDocsTest {
         assertTrue(paths.has("/api/rfis"));
         assertTrue(paths.has("/api/rfis/sync"));
         assertTrue(paths.has("/api/rfis/{id}/items"));
+        assertTrue(paths.has("/api/rfis/{id}/items/{itemId}/documents"));
+        assertTrue(paths.has("/api/rfis/{id}/items/{itemId}/documents/{documentId}"));
+        assertTrue(paths.has("/api/rfis/{id}/items/{itemId}/documents/{documentId}/link"));
+        assertTrue(paths.has("/api/reference/countries"));
+        assertTrue(paths.has("/api/payouts/preview"));
+        assertTrue(paths.has("/api/payouts/kira"));
+        assertTrue(paths.has("/api/payouts/{id}/events"));
+        assertTrue(paths.has("/api/recipients/kira"));
+        assertTrue(paths.has("/api/recipients/{id}/kira"));
+        assertTrue(paths.has("/api/virtual-accounts/{id}/deposits/sync"));
         assertTrue(paths.has("/api/webhooks/kira"));
     }
 
@@ -96,5 +92,17 @@ class OpenApiDocsTest {
         assertFalse(crudo.contains("x-api-key"));
         assertFalse(crudo.contains("balampay"));
         assertFalse(crudo.contains("webhook-secret"));
+    }
+
+    @Test
+    void laVerificacionBiometricaPropiaYaNoExiste() throws Exception {
+        JsonNode paths = apiDocs().path("paths");
+
+        paths.propertyNames().forEach(p -> assertFalse(p.startsWith("/api/v1/"), p));
+    }
+
+    @Test
+    void elHealthCheckRespondeSinAutenticacion() throws Exception {
+        mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
 }

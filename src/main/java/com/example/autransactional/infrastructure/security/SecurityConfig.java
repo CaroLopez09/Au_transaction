@@ -26,12 +26,6 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login").permitAll()
                         .requestMatchers("/api/webhooks/**").permitAll()
-                        // Verificacion biometrica: la ejecuta la persona que se vincula,
-                        // que todavia no tiene sesion. El aislamiento por organizacion lo
-                        // da el clientId y la sesion de verificacion del servidor.
-                        .requestMatchers("/api/v1/liveness/**").permitAll()
-                        .requestMatchers("/api/v1/number-challenge/**").permitAll()
-                        .requestMatchers("/api/v1/identity/validate").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         // Swagger UI. Se apaga por configuracion en prod, no por esta regla.
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()

@@ -82,8 +82,9 @@ public class DevDataSeeder implements ApplicationRunner {
                 tenant.setName(seed.name());
                 tenant.setTaxId(seed.taxId());
                 tenant.setJurisdiction("Colombia");
-                // VERIFIED en local: sin KYB aprobado no se puede probar tesoreria.
-                tenant.setStatus(TenantStatus.VERIFIED);
+                // CREATED y sin kira_user_id: la empresa aun no existe en Kira. Marcarla VERIFIED
+                // aqui hacia creer al portal que el KYB estaba aprobado cuando no habia nada detras.
+                tenant.setStatus(TenantStatus.CREATED);
                 tenants.save(tenant);
                 nuevosTenants++;
             }

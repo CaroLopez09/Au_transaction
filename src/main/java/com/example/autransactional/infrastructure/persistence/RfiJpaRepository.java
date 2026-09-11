@@ -17,4 +17,7 @@ public interface RfiJpaRepository extends JpaRepository<RfiEntity, String> {
 
     List<RfiEntity> findByTenantIdAndStatusInOrderByCreatedAtDesc(String tenantId,
                                                                  Collection<RfiStatus> statuses);
+
+    Optional<RfiEntity> findFirstByBlockingResourceIdAndStatusInOrderByCreatedAtDesc(String blockingResourceId,
+                                                                                    Collection<RfiStatus> statuses);
 }

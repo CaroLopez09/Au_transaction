@@ -1,0 +1,23 @@
+meta {
+  name: 14 Error - archivo en item de texto
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}/items/{{rfiTextItemId}}/documents
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:multipart-form {
+  files: @file(muestras/documento.pdf)
+}
+
+docs {
+  Con el RFI de prueba: 422 `rfi_answer_rejected` sin llamar a Kira.
+}

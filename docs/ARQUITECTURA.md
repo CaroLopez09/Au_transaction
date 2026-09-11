@@ -4,7 +4,7 @@ BFF (Backend for Frontend) de la integración con **KiraFin** para el portal B2B
 Spring Boot 4.1.1 · Java 21 · MySQL 8 · arquitectura hexagonal con DDD.
 
 > Este documento explica **cómo está construido** el sistema y **por qué**.
-> Para el contrato HTTP endpoint por endpoint, ver [`API-GUIA-POSTMAN.md`](API-GUIA-POSTMAN.md).
+> Para el contrato HTTP endpoint por endpoint, ver [`API-GUIA.md`](API-GUIA.md).
 > Para el estado del trabajo y qué sigue, ver [`ESTADO.md`](ESTADO.md).
 
 ---
@@ -26,41 +26,48 @@ El BFF existe porque un SPA no puede hacer ese trabajo:
 | **Maker-checker** | Kira no ofrece aprobación en dos pasos a los integradores. Es control interno nuestro. |
 | **Espejo local** | La API tiene campos que acepta y no devuelve, y motivos de error que pasan una sola vez. |
 
+**Principio de diseño (11-sep): el BFF es una capa delgada sobre Kira.** Todo el negocio vive en
+Kira y el front lo consume a través del BFF. El BFF sólo añade lo que Kira no puede dar: sesión y
+roles por empresa, traducción de ids del portal a ids de Kira, maker-checker, validación temprana de
+reglas de Kira y el espejo de lo que la API no devuelve. Nada que no sirva a eso tiene sitio aquí;
+por eso se eliminaron la verificación biométrica propia (Kira hace la liveness de los UBO) y
+Thymeleaf (el BFF sólo devuelve JSON).
+
 ---
 
 ## 2. Estructura de paquetes
 
-`com.example.autransactional` — **180 clases** en main, 31 en test.
+`com.example.autransactional` — **163 clases** en main, 32 en test.
 
 ```
 domain/                     Lógica pura. Sin anotaciones de framework.
-  tenant/     (11)          Tenant, OperatorUser, Role, Ubo, UboRoster, MissingFields, EligibleProduct
+  tenant/     (14)          Tenant, OperatorUser, Role, Ubo, UboRoster, MissingFields, EligibleProduct
   account/     (8)          VirtualAccount, VirtualAccountReadiness, Deposit + estados
-  treasury/   (16)          Payout, Quotation, Recipient (oneOf sellado), FeeBreakdown, rieles
+  treasury/   (18)          Payout, Quotation, Recipient (oneOf sellado), FeeBreakdown, rieles
   compliance/  (5)          Rfi, AuditLog + puertos
-    identity/ (15)          Verificación biométrica propia: reto de voz, liveness, documento
   shared/      (7)          TenantId, Money, IdempotencyKey, Rail, PostalAddress, DomainException
 
 application/                Casos de uso. Orquestan dominio + puertos.
   tenant/      (7)          SubmitOnboardingService, SyncUbosService
-  account/     (6)          OpenVirtualAccountService, RecordDepositService
-  treasury/   (10)          CreateQuoteService, ExecutePayoutService, RegisterRecipientService
-  compliance/identity (5)   Casos de uso de verificación biométrica
+  account/     (6)          OpenVirtualAccountService, RecordDepositService (+ sync desde Kira)
+  treasury/   (14)          CreateQuoteService, ExecutePayoutService (+ preview, eventos, historial),
+                            RegisterRecipientService (+ vistas de Kira)
+  compliance/  (5)          AnswerRfiService (bandeja, respuestas, documentos)
+  reference/   (2)          ReferenceCatalogService (países, cache 24 h)
   webhook/     (2)          ProcessWebhookUseCase, KiraWebhookEnvelope
   auth/        (1)          LoginUseCase
 
 infrastructure/             Adaptadores técnicos.
-  persistence/ (43)         Entidades JPA, repositorios Spring Data y adaptadores de puertos
-  kira/         (9)         Cliente HTTP, token cache, verificador HMAC, conversión de importes
+  persistence/ (36)         Entidades JPA, repositorios Spring Data y adaptadores de puertos
+  kira/        (12)         Cliente HTTP (JSON y multipart), token cache, verificador HMAC, importes
   security/     (6)         JWT propio, filtro de tenant, RBAC
-  identity/     (6)         Adaptadores dev de OCR / liveness / voz
   bootstrap/    (3)         Semilla de desarrollo, validador de secretos
   config/       (2)         Async (pool de webhooks), OpenAPI
   audit/        (1)         AuditTrail
   reconciliation/           Vacío. Ver §9.
 
 interfaces/                 Entrada HTTP.
-  rest/        (12)         9 controladores + manejador de errores
+  rest/        (11)         10 controladores + manejador de errores
   webhook/      (1)         Ingress firmado con HMAC
 ```
 
@@ -161,7 +168,7 @@ Login  →  Onboarding KYB  →  UBOs + liveness  →  Cuenta virtual  →  Dep�
 
 ## 5. Esquema de base de datos
 
-13 tablas. Base `autransactional`, `ddl-auto: update` en dev, **`validate` en prod**.
+12 tablas. Base `autransactional`, `ddl-auto: update` en dev, **`validate` en prod**.
 
 | Tabla | Columnas | Papel |
 |---|---|---|
@@ -177,7 +184,6 @@ Login  →  Onboarding KYB  →  UBOs + liveness  →  Cuenta virtual  →  Dep�
 | `rfis` | 11 | Requerimientos de compliance + lo que bloquean |
 | `webhooks_log` | 11 | Bitácora inmutable de eventos |
 | `audit_logs` | 11 | Quién hizo qué |
-| `verification_sessions` | 31 | Verificación biométrica propia (fuera del DDL v2) |
 
 **Convenciones aplicadas**
 
@@ -235,8 +241,13 @@ constante Java que usan `@PreAuthorize` y el JWT.
   equivocado.
 - Toda consulta filtra por tenant **dentro del query**, no después: un id manipulado no
   cruza organizaciones.
-- Endpoints públicos: `/api/auth/login`, `/api/webhooks/**` (HMAC), verificación biométrica
-  (la ejecuta quien aún no tiene sesión) y `/actuator/health`.
+- Endpoints públicos: `/api/auth/login`, `/api/webhooks/**` (HMAC), `/actuator/health` y Swagger.
+- **Ids del portal hacia fuera, ids de Kira hacia dentro.** El front sólo ve ids del BFF; los
+  servicios los resuelven dentro de la empresa del operador y los traducen a `kiraAccountId`,
+  `kiraRecipientId` o `kiraUserId` justo antes de llamar. Un id de otra empresa no existe.
+- Las lecturas que pasan directamente a Kira (`/api/payouts/kira`, `/api/recipients/kira`, sync de
+  RFIs y depósitos) **descartan cualquier fila de otro `user_id`**: Kira trata los recursos como
+  globales del integrador y su filtro no es la frontera.
 - En `cert` y `prod` el arranque **falla** si falta un secreto, en vez de descubrirlo con la
   primera llamada.
 
@@ -302,12 +313,22 @@ Esta es la tabla más útil del documento. Cada fila es un fallo silencioso evit
 | Un item `document` nunca lleva `answer_value` | `AnswerRfiService.validate()` |
 | El `PATCH` de items es all-or-nothing: `422` por `item_id` | `RfiAnswerRejectedException` |
 | `GET /v1/rfis` pagina con `limit`+`offset`, no con `page` | `AnswerRfiService.sync()` |
+| `answer_value` es texto, número o booleano según `answer_type` | `RfiCommands.ItemAnswer`, `AnswerRfiService.isScalar()` |
+| Un RFI puede bloquear un pago **o un depósito** | `AnswerRfiService.applyDetail()` / `ownerOf()` |
+| Documentos de RFI: parte `files`, máx. 20 × 30 MB, MIME del `answer_spec` | `AnswerRfiService.validateFiles()` |
+| No se puede borrar el último archivo de un item respondido (`422`) | `AnswerRfiService.callItemWrite()` |
+| Kira sólo conoce sus ids: enviar el id del portal es un `404` seguro | `ExecutePayoutService.submitToKira()`, `CreateQuoteService.buildBody()` |
+| `GET /v1/payouts` rechaza con `400` cualquier parámetro que no conoce | `ExecutePayoutService.KIRA_PAYOUT_STATUSES` |
+| Depósitos por REST: `sender{}`, `fees.total_fees`, `payment_rail` (no la forma del webhook) | `KiraDepositEvent.fromResource()` |
+| `KYT_PENDING` / `KYT_REJECTED` en depósitos | `DepositStatus.fromWire()` |
+| Países en `/v1/countries` (`/countries` da `403`) | `KiraApiClient.listCountries()` |
+| La fecha de alta se perdía al leer de la base (activación demorada nunca saltaba) | `rehydrate()` de los 8 agregados |
 
 ---
 
 ## 9. Pruebas
 
-**254 pruebas, todas verdes.** Sin mocks del propio dominio: las de dominio son puras y las
+**253 pruebas, todas verdes.** Sin mocks del propio dominio: las de dominio son puras y las
 de aplicación usan Mockito sólo para `KiraApiClient` y los repositorios.
 
 Nombres en español y en indicativo, describiendo la **regla de negocio**, no el método:
@@ -315,7 +336,7 @@ Nombres en español y en indicativo, describiendo la **regla de negocio**, no el
 `seEnviaElBrutoParaQueElDestinatarioRecibaLoPrometido`.
 
 ```bash
-./mvnw test                          # las 254
+./mvnw test                          # las 253
 ./mvnw test -Dtest=PayoutTest        # una clase
 ./mvnw clean test                    # ante cambios de firma (el incremental miente)
 ```
@@ -363,7 +384,7 @@ para poder probar de verdad el maker-checker: hacen falta dos personas distintas
 
 | Documento | Contenido |
 |---|---|
-| [`API-GUIA-POSTMAN.md`](API-GUIA-POSTMAN.md) | Contrato HTTP completo, ejemplos y colección Postman |
+| [`API-GUIA.md`](API-GUIA.md) | Contrato HTTP completo y ejemplos |
 | [`GUIA-BRUNO.md`](GUIA-BRUNO.md) | Pruebas paso a paso con la colección de Bruno (`docs/bruno/`) |
 | [`ESTADO.md`](ESTADO.md) | Estado del trabajo y qué sigue |
 | `~/Descargas/kirafin-flujos-arquitectura.md` | **Contrato de Kira.** Fuente de verdad de los flujos F0–F7 |

@@ -1,0 +1,19 @@
+meta {
+  name: 03 Sincronizar desde Kira
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/virtual-accounts/{{vaId}}/deposits/sync
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+docs {
+  Red de seguridad del webhook: trae los depositos de la cuenta desde Kira.
+}

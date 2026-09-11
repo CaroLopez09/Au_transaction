@@ -7,9 +7,10 @@ spring:
 
   servlet:
     multipart:
-      # La grabacion del reto de voz son ~5 s de webm; las imagenes del documento, JPEG q=0.92.
-      max-file-size: 10MB
-      max-request-size: 32MB
+      # Documentos de un RFI: Kira admite hasta 30 MB por archivo. La peticion se limita a
+      # 100 MB aunque Kira acepte 20 archivos: un portal no deberia subir 600 MB de una vez.
+      max-file-size: 30MB
+      max-request-size: 100MB
 
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
@@ -46,24 +47,6 @@ kira:
 
 # --- Configuracion propia del BFF ---
 bff:
-  # Verificacion biometrica de identidad (documento + rostro + voz).
-  # Complementa, no sustituye, la liveness alojada que Kira usa para el KYB de los UBO.
-  identity:
-    # dev = adaptadores locales deterministas. El adaptador de AWS se registrara con 'aws'.
-    provider: ${BFF_IDENTITY_PROVIDER:dev}
-    liveness-enabled: ${BFF_LIVENESS_ENABLED:true}
-    # Umbrales de riesgo: viven en el servidor porque un umbral que viaja al navegador
-    # es un umbral que el atacante edita.
-    min-liveness-score: 80
-    min-match-score: 85
-    review-floor: 70
-    challenge-ttl-seconds: 120
-    session-ttl-seconds: 1800
-    max-upload-bytes: 10485760
-    aws:
-      region: ${AWS_REGION:}
-      identity-pool-id: ${AWS_IDENTITY_POOL_ID:}
-
   security:
     jwt-secret: ${BFF_JWT_SECRET:}
     jwt-issuer: ${BFF_JWT_ISSUER:autransactional-bff}

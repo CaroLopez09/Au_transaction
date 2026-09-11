@@ -5,14 +5,20 @@ import tools.jackson.databind.ObjectMapper;
 import com.example.autransactional.domain.shared.IdempotencyKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -60,10 +66,6 @@ public class KiraApiClient {
         return exchange(HttpMethod.GET, "/v1/users/" + userId, null, null);
     }
 
-    public JsonNode listUsers(Map<String, ?> query) {
-        return exchange(HttpMethod.GET, withQuery("/v1/users", query), null, null);
-    }
-
     public JsonNode createUser(Object body, IdempotencyKey key) {
         return exchange(HttpMethod.POST, "/v1/users", body, key);
     }
@@ -109,10 +111,7 @@ public class KiraApiClient {
                 "/v1/virtual-accounts/" + virtualAccountId + "/simulate-deposit", body, null);
     }
 
-    public JsonNode listDeposits(Map<String, ?> query) {
-        return exchange(HttpMethod.GET, withQuery("/v1/virtual-accounts/deposits", query), null, null);
-    }
-
+    /** Array desnudo, paginado con limit (1-100) + offset. */
     public JsonNode listAccountDeposits(String virtualAccountId, Map<String, ?> query) {
         return exchange(HttpMethod.GET,
                 withQuery("/v1/virtual-accounts/" + virtualAccountId + "/deposits", query), null, null);
@@ -179,6 +178,45 @@ public class KiraApiClient {
                 RFI_API_VERSION).body();
     }
 
+    /**
+     * Sube archivos a un item de tipo documento. Multipart con la parte 'files' repetida;
+     * maximo 20 archivos y 30 MB cada uno. 409 si el RFI esta cerrado, 422 si un archivo
+     * no cumple el answer_spec del item.
+     */
+    public JsonNode uploadRfiDocuments(String rfiId, String itemId, List<KiraFile> files) {
+        MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+        for (KiraFile file : files) {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType(file.contentType()));
+            ByteArrayResource resource = new ByteArrayResource(file.content()) {
+                @Override
+                public String getFilename() {
+                    return file.fileName();
+                }
+            };
+            parts.add("files", new HttpEntity<>(resource, headers));
+        }
+        return exchangeWithStatus(HttpMethod.POST, rfiDocumentsPath(rfiId, itemId), parts, null,
+                RFI_API_VERSION).body();
+    }
+
+    /** 422 "The last file cannot be removed": un item respondido necesita al menos un archivo. */
+    public JsonNode removeRfiDocument(String rfiId, String itemId, String documentId) {
+        return exchangeWithStatus(HttpMethod.DELETE, rfiDocumentsPath(rfiId, itemId) + "/" + documentId,
+                null, null, RFI_API_VERSION).body();
+    }
+
+    /** La URL es una credencial al portador que caduca en minutos: no se guarda ni se registra. */
+    public JsonNode getRfiDocumentLink(String rfiId, String itemId, String documentId) {
+        return exchangeWithStatus(HttpMethod.GET, rfiDocumentsPath(rfiId, itemId) + "/" + documentId,
+                null, null, RFI_API_VERSION).body();
+    }
+
+    private static String rfiDocumentsPath(String rfiId, String itemId) {
+        return "/v1/rfis/" + rfiId + "/items/" + itemId + "/documents";
+    }
+
+    /** Ruta verificada: /v1/countries. /countries o /api/countries responden 403. */
     public JsonNode listCountries() {
         return exchange(HttpMethod.GET, "/v1/countries", null, null);
     }
@@ -220,7 +258,9 @@ public class KiraApiClient {
         if (idempotencyKey != null) {
             spec = spec.header("Idempotency-Key", idempotencyKey.value());
         }
-        if (body != null) {
+        if (body instanceof MultiValueMap<?, ?>) {
+            spec = spec.contentType(MediaType.MULTIPART_FORM_DATA).body(body);
+        } else if (body != null) {
             spec = spec.contentType(MediaType.APPLICATION_JSON).body(body);
         }
 

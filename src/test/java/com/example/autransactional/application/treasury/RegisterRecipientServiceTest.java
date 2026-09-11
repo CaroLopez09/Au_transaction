@@ -213,4 +213,27 @@ class RegisterRecipientServiceTest {
 
         assertThrows(DomainException.class, () -> service.register(approver, wire()));
     }
+
+    @Test
+    void losDestinatariosDeKiraSeEnmascaranYSeEnlazanConElDirectorio() {
+        service.register(maker, wire());
+        when(recipients.findByKiraRecipientId("krec_1")).thenAnswer(i -> registro.stream().findFirst());
+        when(kira.listRecipients(eq("usr_1"), any())).thenReturn(mapper.readTree("""
+                { "recipients": [
+                    { "recipient_id": "krec_1", "type": "business", "company_name": "Acme Corp",
+                      "account_type": "WIRE", "account_details": { "account_number": "1234567890" } },
+                    { "recipient_id": "krec_fuera", "type": "individual", "first_name": "Ana", "last_name": "Perez",
+                      "account_type": "WALLET", "account_details": { "address": "0xabcdef123456" } } ],
+                  "total": 2 }
+                """));
+
+        List<KiraRecipientView> enKira = service.listInKira(maker);
+
+        assertEquals(2, enKira.size());
+        assertEquals("****7890", enKira.getFirst().maskedDestination());
+        assertEquals(registro.getFirst().getId(), enKira.getFirst().localRecipientId());
+        // Dado de alta fuera del portal: se ve, pero no enlaza con el directorio.
+        assertNull(enKira.get(1).localRecipientId());
+        assertEquals("Ana Perez", enKira.get(1).name());
+    }
 }

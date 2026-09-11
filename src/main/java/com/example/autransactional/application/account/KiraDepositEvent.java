@@ -46,6 +46,29 @@ public record KiraDepositEvent(
                 Rail.fromWireOrNull(text(payload, "rail", "payment_type", "paymentType")));
     }
 
+    /**
+     * Deposito tal como lo devuelve GET /v1/virtual-accounts/{id}/deposits.
+     *
+     * No es la forma del webhook: el ordenante va anidado en 'sender', la comision en
+     * 'fees.total_fees' y el riel en 'payment_rail'.
+     */
+    public static KiraDepositEvent fromResource(JsonNode resource, String fallbackKiraAccountId) {
+        JsonNode sender = resource.path("sender");
+        String accountId = text(resource, "virtual_account_id");
+        return new KiraDepositEvent(
+                text(resource, "id"),
+                accountId == null ? fallbackKiraAccountId : accountId,
+                DepositStatus.fromWire(text(resource, "status")),
+                false,
+                decimal(resource, "amount"),
+                decimal(resource.path("fees"), "total_fees"),
+                decimal(resource, "net_amount"),
+                text(resource, "currency"),
+                text(sender, "name"),
+                text(sender, "account_number"),
+                Rail.fromWireOrNull(text(resource, "payment_rail")));
+    }
+
     public boolean isIdentifiable() {
         return kiraDepositId != null && kiraAccountId != null;
     }

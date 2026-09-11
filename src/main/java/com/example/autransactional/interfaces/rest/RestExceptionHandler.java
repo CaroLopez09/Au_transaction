@@ -1,16 +1,21 @@
 package com.example.autransactional.interfaces.rest;
 
 import com.example.autransactional.application.compliance.RfiAnswerRejectedException;
-import com.example.autransactional.domain.compliance.identity.IdentityErrorCode;
-import com.example.autransactional.domain.compliance.identity.IdentityException;
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.infrastructure.kira.KiraApiException;
+import com.example.autransactional.infrastructure.kira.KiraNotConfiguredException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -37,25 +42,6 @@ public class RestExceptionHandler {
         return body(HttpStatus.UNPROCESSABLE_CONTENT, "business_rule_violation", e.getMessage(), null);
     }
 
-    /**
-     * La libreria de onboarding usa 'code' para elegir el mensaje que muestra al usuario y
-     * cae a 'message' cuando el codigo le es desconocido. Respetar esa forma es lo que hace
-     * que la persona lea "acercate a la camara" en vez de un error tecnico.
-     */
-    @ExceptionHandler(IdentityException.class)
-    public ResponseEntity<Map<String, Object>> handleIdentity(IdentityException e) {
-        HttpStatus status = switch (e.getCode()) {
-            case UNAUTHORIZED -> HttpStatus.UNAUTHORIZED;
-            case SESSION_NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case SERVER_ERROR -> HttpStatus.INTERNAL_SERVER_ERROR;
-            default -> HttpStatus.UNPROCESSABLE_CONTENT;
-        };
-        if (e.getCode() == IdentityErrorCode.SERVER_ERROR) {
-            log.error("Error de verificacion de identidad", e);
-        }
-        return body(status, e.getCode().name(), e.getMessage(), null);
-    }
-
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> handleDenied(AccessDeniedException e) {
         return body(HttpStatus.FORBIDDEN, "forbidden", "No tienes permiso para esta accion.", null);
@@ -67,6 +53,38 @@ public class RestExceptionHandler {
         e.getBindingResult().getFieldErrors()
                 .forEach(err -> fields.put(err.getField(), err.getDefaultMessage()));
         return body(HttpStatus.BAD_REQUEST, "validation_error", "Datos invalidos.", fields);
+    }
+
+    /** Peticion mal formada: parte o parametro ausente, JSON ilegible o tipo equivocado. */
+    @ExceptionHandler({MissingServletRequestPartException.class, MissingServletRequestParameterException.class,
+            HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
+    public ResponseEntity<Map<String, Object>> handleBadRequest(Exception e) {
+        String detail = switch (e) {
+            case MissingServletRequestPartException m -> "Falta la parte '" + m.getRequestPartName() + "'.";
+            case MissingServletRequestParameterException m -> "Falta el parametro '" + m.getParameterName() + "'.";
+            case MethodArgumentTypeMismatchException m -> "Valor invalido para '" + m.getName() + "'.";
+            default -> "El cuerpo de la peticion no es un JSON valido.";
+        };
+        return body(HttpStatus.BAD_REQUEST, "validation_error", detail, null);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleUploadTooLarge(MaxUploadSizeExceededException e) {
+        return body(HttpStatus.CONTENT_TOO_LARGE, "file_too_large",
+                "El archivo supera el tamano permitido (30 MB por archivo).", null);
+    }
+
+    /** Ruta inexistente: 404, no "error inesperado". */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(NoResourceFoundException e) {
+        return body(HttpStatus.NOT_FOUND, "not_found", "La ruta no existe.", null);
+    }
+
+    @ExceptionHandler(KiraNotConfiguredException.class)
+    public ResponseEntity<Map<String, Object>> handleKiraNotConfigured(KiraNotConfiguredException e) {
+        log.error("Integracion con Kira sin configurar: {}", e.getMessage());
+        return body(HttpStatus.SERVICE_UNAVAILABLE, "kira_not_configured",
+                "La integracion con Kira no esta configurada en este entorno.", null);
     }
 
     @ExceptionHandler(KiraApiException.class)

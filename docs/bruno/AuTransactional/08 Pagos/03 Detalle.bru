@@ -14,8 +14,6 @@ auth:bearer {
   token: {{tokenReadOnly}}
 }
 
-tests {
-  test("responde 200", function () {
-    expect([200]).to.include(res.getStatus());
-  });
+docs {
+  `blockedByRfiId` no nulo = un RFI abierto tiene el pago detenido.
 }

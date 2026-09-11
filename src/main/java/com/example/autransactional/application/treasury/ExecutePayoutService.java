@@ -1,6 +1,14 @@
 package com.example.autransactional.application.treasury;
 
+import com.example.autransactional.domain.account.VirtualAccount;
+import com.example.autransactional.domain.compliance.Rfi;
+import com.example.autransactional.domain.compliance.RfiRepository;
+import com.example.autransactional.domain.account.VirtualAccountRepository;
+import com.example.autransactional.domain.tenant.Tenant;
+import com.example.autransactional.domain.tenant.TenantRepository;
 import com.example.autransactional.domain.treasury.Payout;
+import com.example.autransactional.domain.treasury.Recipient;
+import com.example.autransactional.domain.treasury.RecipientRepository;
 import com.example.autransactional.domain.treasury.PayoutRepository;
 import com.example.autransactional.domain.treasury.Quotation;
 import com.example.autransactional.domain.treasury.QuotationRepository;
@@ -16,6 +24,7 @@ import com.example.autransactional.infrastructure.kira.KiraAmounts;
 import com.example.autransactional.infrastructure.kira.KiraApiClient;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -26,6 +35,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -41,15 +51,137 @@ public class ExecutePayoutService {
 
     private final PayoutRepository payouts;
     private final QuotationRepository quotations;
+    private final VirtualAccountRepository accounts;
+    private final RecipientRepository recipients;
+    private final TenantRepository tenants;
+    private final RfiRepository rfis;
     private final KiraApiClient kira;
     private final AuditTrail audit;
+    private final ObjectMapper objectMapper;
+
+    /** Filtros que acepta GET /v1/payouts: cualquier otro parametro lo rechaza con 400. */
+    private static final Set<String> KIRA_PAYOUT_STATUSES = Set.of(
+            "CREATED", "PENDING", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED", "IN_REVIEW", "KYT_PENDING");
 
     public ExecutePayoutService(PayoutRepository payouts, QuotationRepository quotations,
-                         KiraApiClient kira, AuditTrail audit) {
+                                VirtualAccountRepository accounts, RecipientRepository recipients,
+                                TenantRepository tenants, RfiRepository rfis, KiraApiClient kira,
+                                AuditTrail audit, ObjectMapper objectMapper) {
         this.payouts = payouts;
         this.quotations = quotations;
+        this.accounts = accounts;
+        this.recipients = recipients;
+        this.tenants = tenants;
+        this.rfis = rfis;
         this.kira = kira;
         this.audit = audit;
+        this.objectMapper = objectMapper;
+    }
+
+    /**
+     * Vista previa de comisiones contra POST /v1/virtual-accounts/{id}/payout/preview.
+     *
+     * No reserva precio ni crea nada: sirve para mostrar el coste mientras el operador teclea.
+     * El margen de la plataforma viaja igual que en el pago sin cotizacion, para que lo que se
+     * muestra aqui sea lo que se cobraria.
+     */
+    @Transactional(readOnly = true)
+    public PayoutPreviewView preview(AuthenticatedOperator operator, PayoutCommands.PreviewPayout command) {
+        if (!operator.role().canCreatePayout()) {
+            throw new DomainException("Tu rol no puede preparar pagos.");
+        }
+        VirtualAccount account = loadAccount(operator.tenantId(), command.virtualAccountId());
+        Recipient recipient = loadRecipient(operator.tenantId(), command.recipientId());
+        recipient.assertUsable();
+        if (recipient.getKiraRecipientId() == null) {
+            throw new DomainException("El destinatario no esta registrado en Kira.");
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("amount", KiraAmounts.amountString(command.amount()));
+        body.put("recipient_id", recipient.getKiraRecipientId());
+        body.put("inverse_calculation", command.recipientReceivesAmount() == null || command.recipientReceivesAmount());
+        body.put("client_markup", KiraAmounts.markupForPayout(FeeBreakdown.standard().platformFee(), 0));
+
+        JsonNode data = unwrap(kira.previewPayout(account.getKiraAccountId(), body));
+        JsonNode fees = data.path("fees");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> feeMap = fees.isObject() ? objectMapper.convertValue(fees, Map.class) : Map.of();
+        return new PayoutPreviewView(text(data, "amount"), text(data, "currency"),
+                text(data, "recipient_amount"), text(data, "recipient_currency"), feeMap);
+    }
+
+    /** Linea de tiempo del pago (events[] de GET /v1/payouts/{id}). Vacia si aun no se envio. */
+    @Transactional(readOnly = true)
+    public List<PayoutEventView> events(AuthenticatedOperator operator, String payoutId) {
+        Payout payout = load(operator.tenantId(), payoutId);
+        if (payout.getKiraPayoutId() == null) {
+            return List.of();
+        }
+        JsonNode body = unwrap(kira.getPayout(payout.getKiraPayoutId()));
+        List<PayoutEventView> events = new ArrayList<>();
+        for (JsonNode event : body.path("events")) {
+            events.add(new PayoutEventView(text(event, "event_id"), text(event, "status"),
+                    text(event, "message"), text(event, "created_at")));
+        }
+        return events;
+    }
+
+    /**
+     * Historial de pagos de la empresa en Kira (GET /v1/payouts?user_id=...).
+     *
+     * Kira trata los pagos como globales del integrador: ademas del filtro user_id, se
+     * descarta cualquier fila de otro user. Solo se envian los filtros que Kira documenta,
+     * porque un parametro desconocido es un 400.
+     */
+    @Transactional(readOnly = true)
+    public KiraPayoutPage kiraHistory(AuthenticatedOperator operator, String status, int page, int limit,
+                                      String fromDate, String toDate) {
+        Tenant tenant = tenants.findById(operator.tenantId())
+                .orElseThrow(() -> new DomainException("La organizacion no existe."));
+        tenant.assertRegisteredInKira();
+
+        Map<String, Object> query = new LinkedHashMap<>();
+        query.put("user_id", tenant.getKiraUserId());
+        if (status != null && !status.isBlank()) {
+            String normalized = status.trim().toUpperCase();
+            if (!KIRA_PAYOUT_STATUSES.contains(normalized)) {
+                throw new DomainException("Estado no valido. Usa: " + String.join(", ", KIRA_PAYOUT_STATUSES) + ".");
+            }
+            query.put("status", normalized);
+        }
+        if (fromDate != null && !fromDate.isBlank()) {
+            query.put("from_date", fromDate.trim());
+        }
+        if (toDate != null && !toDate.isBlank()) {
+            query.put("to_date", toDate.trim());
+        }
+        int safePage = Math.max(page, 1);
+        int safeLimit = Math.min(Math.max(limit, 1), 100);
+        query.put("page", safePage);
+        query.put("limit", safeLimit);
+
+        JsonNode response = unwrap(kira.listPayouts(query));
+        List<KiraPayoutPage.Item> items = new ArrayList<>();
+        for (JsonNode row : response.path("payouts")) {
+            if (!tenant.getKiraUserId().equals(text(row, "user_id"))) {
+                continue;
+            }
+            String kiraPayoutId = text(row, "payout_id");
+            String local = kiraPayoutId == null ? null : payouts.findByKiraPayoutId(kiraPayoutId)
+                    .filter(p -> p.getTenantId().equals(operator.tenantId()))
+                    .map(Payout::getId)
+                    .orElse(null);
+            items.add(new KiraPayoutPage.Item(kiraPayoutId, text(row, "short_id"), local,
+                    text(row, "virtual_account_id"), text(row, "status"), text(row, "origin"),
+                    text(row, "from_amount"), text(row, "from_currency"), text(row, "to_amount"),
+                    text(row, "to_currency"), text(row, "payment_method"), text(row, "sender_name"),
+                    text(row, "recipient_name"), text(row, "reference"), text(row, "memo"),
+                    text(row, "created_at")));
+        }
+        return new KiraPayoutPage(items, response.path("page").asInt(safePage),
+                response.path("limit").asInt(safeLimit), response.path("total").asInt(items.size()),
+                response.path("total_pages").asInt(1));
     }
 
     @Transactional
@@ -57,6 +189,16 @@ public class ExecutePayoutService {
         if (!operator.role().canCreatePayout()) {
             throw new DomainException("Tu rol no puede preparar pagos.");
         }
+
+        Tenant tenant = tenants.findById(operator.tenantId())
+                .orElseThrow(() -> new DomainException("La organizacion no existe."));
+        tenant.assertCanOperateTreasury();
+        tenant.assertRegisteredInKira();
+        // Los ids son los del portal y se resuelven dentro de la empresa: un id de otra
+        // organizacion, inexistente o archivado se rechaza aqui y no al aprobar.
+        VirtualAccount account = loadAccount(operator.tenantId(), command.virtualAccountId());
+        Recipient recipient = loadRecipient(operator.tenantId(), command.recipientId());
+        recipient.assertUsable();
 
         // Una clave por intencion. Se persiste para que un reintento replique el mismo pago
         // en Kira en vez de crear uno nuevo.
@@ -66,9 +208,10 @@ public class ExecutePayoutService {
         Payout payout = new Payout(
                 UUID.randomUUID().toString(),
                 operator.tenantId(),
-                command.kiraUserId(),
-                command.virtualAccountId(),
-                command.recipientId(),
+                // El user de Kira es el de la empresa, nunca el que diga el cuerpo de la peticion.
+                tenant.getKiraUserId(),
+                account.getId(),
+                recipient.getId(),
                 Money.of(command.amount(), command.currency()),
                 FeeBreakdown.standard(),
                 key,
@@ -78,6 +221,10 @@ public class ExecutePayoutService {
         if (command.quotationId() != null && !command.quotationId().isBlank()) {
             Quotation quotation = quotations.findByIdAndTenant(command.quotationId(), operator.tenantId())
                     .orElseThrow(() -> new DomainException("Cotizacion no encontrada."));
+            if (!account.getId().equals(quotation.getVirtualAccountId())
+                    || !recipient.getId().equals(quotation.getRecipientId())) {
+                throw new DomainException("La cotizacion es de otra cuenta o de otro destinatario.");
+            }
             payout.attachQuotation(quotation, Instant.now());
         }
 
@@ -103,7 +250,7 @@ public class ExecutePayoutService {
                 payout.getIdempotencyKey().value(), "OK",
                 payout.isPriceLocked() ? "cotizacion=" + payout.getQuotationId() : "sin cotizacion");
 
-        return PayoutView.from(submitToKira(operator, payout, quotation, command));
+        return view(submitToKira(operator, payout, quotation, command));
     }
 
     @Transactional
@@ -125,8 +272,7 @@ public class ExecutePayoutService {
         if (payout.getKiraPayoutId() == null) {
             return PayoutView.from(payout);
         }
-        JsonNode remote = kira.getPayout(payout.getKiraPayoutId());
-        JsonNode body = remote.has("data") ? remote.get("data") : remote;
+        JsonNode body = unwrap(kira.getPayout(payout.getKiraPayoutId()));
 
         payout.applyRemoteStatus(
                 com.example.autransactional.domain.treasury.PayoutStatus.fromWire(body.path("status").asText(null)),
@@ -135,18 +281,36 @@ public class ExecutePayoutService {
         payout.describeRemote(body.path("reference_number").asText(null),
                 body.path("payment_method").asText(null));
         payouts.save(payout);
-        return PayoutView.from(payout);
+        return view(payout);
     }
 
     @Transactional(readOnly = true)
     public List<PayoutView> list(AuthenticatedOperator operator, int limit) {
         return payouts.findByTenant(operator.tenantId(), Math.min(limit, 100))
-                .stream().map(PayoutView::from).toList();
+                .stream().map(this::view).toList();
     }
 
     @Transactional(readOnly = true)
     public PayoutView get(AuthenticatedOperator operator, String payoutId) {
-        return PayoutView.from(load(operator.tenantId(), payoutId));
+        return view(load(operator.tenantId(), payoutId));
+    }
+
+    /** Vista con la marca de "detenido" si un RFI abierto de Kira bloquea el pago. */
+    private PayoutView view(Payout payout) {
+        String rfiId = rfis.findOpenBlocking(payout.getKiraPayoutId())
+                .filter(r -> r.getTenantId().equals(payout.getTenantId()))
+                .map(Rfi::getId)
+                .orElse(null);
+        return PayoutView.from(payout, rfiId);
+    }
+
+    private static JsonNode unwrap(JsonNode response) {
+        return response != null && response.has("data") ? response.get("data") : response;
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 
     private Payout submitToKira(AuthenticatedOperator operator, Payout payout, Quotation quotation,
@@ -154,10 +318,19 @@ public class ExecutePayoutService {
         Instant now = Instant.now();
         payout.assertSubmittable(now);
 
-        Map<String, Object> body = buildBody(payout, quotation, command);
+        // Kira solo conoce sus propios ids: los del portal se traducen justo antes de enviar.
+        VirtualAccount account = loadAccount(payout.getTenantId(), payout.getVirtualAccountId());
+        account.assertFundsReady();
+        Recipient recipient = loadRecipient(payout.getTenantId(), payout.getRecipientId());
+        recipient.assertUsable();
+        if (recipient.getKiraRecipientId() == null) {
+            throw new DomainException("El destinatario no esta registrado en Kira.");
+        }
+
+        Map<String, Object> body = buildBody(payout, recipient, quotation, command);
 
         try {
-            JsonNode response = kira.executePayout(payout.getVirtualAccountId(), body,
+            JsonNode response = kira.executePayout(account.getKiraAccountId(), body,
                     payout.getIdempotencyKey());
             JsonNode data = response.has("data") ? response.get("data") : response;
 
@@ -200,11 +373,11 @@ public class ExecutePayoutService {
      * encima, asi que enviar lo que teclea el operador dejaria al destinatario cobrando de
      * menos. Con cotizacion, el bruto correcto es el total a debitar que Kira ya calculo.
      */
-    private Map<String, Object> buildBody(Payout payout, Quotation quotation,
+    private Map<String, Object> buildBody(Payout payout, Recipient recipient, Quotation quotation,
                                           PayoutCommands.ApprovePayout command) {
         Map<String, Object> body = new LinkedHashMap<>();
         // recipient_id va en el nivel superior, no anidado bajo destination.
-        body.put("recipient_id", payout.getRecipientId());
+        body.put("recipient_id", recipient.getKiraRecipientId());
         body.put("amount", KiraAmounts.amountString(payout.grossAmountToSend(quotation).amount()));
 
         if (quotation != null) {
@@ -258,6 +431,20 @@ public class ExecutePayoutService {
         // Vigente, redimible y con saldo: Kira devuelve 400 terminal si falta lo ultimo.
         quotation.assertRedeemable(now);
         return quotation;
+    }
+
+    private VirtualAccount loadAccount(TenantId tenantId, String virtualAccountId) {
+        VirtualAccount account = accounts.findByIdAndTenant(virtualAccountId, tenantId)
+                .orElseThrow(() -> new DomainException("La cuenta virtual no existe."));
+        if (account.getKiraAccountId() == null) {
+            throw new DomainException("La cuenta virtual no esta abierta en Kira.");
+        }
+        return account;
+    }
+
+    private Recipient loadRecipient(TenantId tenantId, String recipientId) {
+        return recipients.findByIdAndTenant(recipientId, tenantId)
+                .orElseThrow(() -> new DomainException("El destinatario no existe."));
     }
 
     private Payout load(TenantId tenantId, String payoutId) {

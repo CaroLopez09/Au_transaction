@@ -12,6 +12,7 @@ import java.util.Map;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -68,6 +69,36 @@ class KiraApiClientVersionTest {
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
         client.getPayout("po_1");
+
+        server.verify();
+    }
+
+    @Test
+    void losDocumentosDeUnRfiViajanComoMultipartConLaParteFilesYLaVersionDeRfis() {
+        server.expect(requestTo("/v1/rfis/rfi_1/items/item_1/documents"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-Api-Version", "2026-06-01"))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.MULTIPART_FORM_DATA))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("name=\"files\"; filename=\"acta.pdf\"")))
+                .andRespond(withSuccess("{\"item\":{}}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("/v1/rfis/rfi_1/items/item_1/documents/doc_1"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andExpect(header("X-Api-Version", "2026-06-01"))
+                .andRespond(withSuccess("{\"item\":{}}", MediaType.APPLICATION_JSON));
+
+        client.uploadRfiDocuments("rfi_1", "item_1",
+                java.util.List.of(new KiraFile("acta.pdf", "application/pdf", "%PDF-1.4".getBytes())));
+        client.removeRfiDocument("rfi_1", "item_1", "doc_1");
+
+        server.verify();
+    }
+
+    @Test
+    void elCatalogoDePaisesVivePorDebajoDeV1() {
+        // /countries sin /v1 responde 403 en Kira.
+        server.expect(requestTo("/v1/countries")).andRespond(withSuccess("{\"data\":[]}", MediaType.APPLICATION_JSON));
+
+        client.listCountries();
 
         server.verify();
     }
