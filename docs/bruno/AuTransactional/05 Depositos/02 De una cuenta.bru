@@ -1,0 +1,19 @@
+meta {
+  name: 02 De una cuenta
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/virtual-accounts/{{vaId}}/deposits?limit=50
+  body: none
+  auth: bearer
+}
+
+params:query {
+  limit: 50
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}

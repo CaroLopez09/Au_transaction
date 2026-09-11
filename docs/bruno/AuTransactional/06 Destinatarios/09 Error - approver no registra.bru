@@ -1,0 +1,52 @@
+meta {
+  name: 09 Error - approver no registra
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/recipients
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenApprover}}
+}
+
+body:json {
+  {
+    "rail": "WIRE",
+    "business": true,
+    "companyName": "Acme Corp",
+    "email": "pagos@acme.com",
+    "phone": "+13055551234",
+    "address": {
+      "streetName": "1 Main St",
+      "city": "New York",
+      "state": "NY",
+      "postalCode": "10001",
+      "country": "US"
+    },
+    "routingNumber": "021000021",
+    "swiftCode": "EXAMUS33XXX",
+    "accountNumber": "1234567890",
+    "accountKind": "checking",
+    "bankName": "Example Bank, N.A.",
+    "bankAddress": {
+      "streetName": "1 Bank Plaza",
+      "city": "New York",
+      "state": "NY",
+      "postalCode": "10001",
+      "country": "US"
+    },
+    "docType": "ein",
+    "docNumber": "12-3456789"
+  }
+}
+
+tests {
+  test("responde 403", function () {
+    expect([403]).to.include(res.getStatus());
+  });
+}

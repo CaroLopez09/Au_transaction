@@ -1,0 +1,22 @@
+# Las pruebas no dependen de un MySQL levantado: base en memoria y esquema recreado.
+spring:
+  datasource:
+    url: jdbc:h2:mem:autransactional;DB_CLOSE_DELAY=-1;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+kira:
+  base-url: http://localhost:0/sandbox
+  api-key: test-api-key
+  client-id: test-client-id
+  password: test-password
+  api-version: "2026-04-14"
+  webhook-secret: test-webhook-secret
+
+bff:
+  security:
+    jwt-secret: secreto-de-pruebas-suficientemente-largo-para-hmac256

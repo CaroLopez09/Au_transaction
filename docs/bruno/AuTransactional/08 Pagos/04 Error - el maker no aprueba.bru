@@ -1,0 +1,25 @@
+meta {
+  name: 04 Error - el maker no aprueba
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/payouts/{{payoutId}}/approve
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("responde 403", function () {
+    expect([403]).to.include(res.getStatus());
+  });
+}

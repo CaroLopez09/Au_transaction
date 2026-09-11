@@ -1,0 +1,31 @@
+meta {
+  name: 08 Rechazar (approver)
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/payouts/{{payoutId}}/reject
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenApprover}}
+}
+
+body:json {
+  {
+    "reason": "Beneficiario no validado por cumplimiento."
+  }
+}
+
+tests {
+  test("responde 200 o 422", function () {
+    expect([200, 422]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  200 si estaba PENDING_APPROVAL; 422 si ya se aprobo o rechazo.
+}

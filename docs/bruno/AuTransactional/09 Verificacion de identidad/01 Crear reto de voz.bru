@@ -1,0 +1,49 @@
+meta {
+  name: 01 Crear reto de voz
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/number-challenge/session?clientId={{empresa}}
+  body: none
+  auth: none
+}
+
+params:query {
+  clientId: {{empresa}}
+}
+
+headers {
+  X-Correlation-Id: bruno-prueba-1
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const b = res.getBody();
+    bru.setVar("verificationId", b.verificationId);
+    bru.setVar("challengeId", b.challengeId);
+    bru.setVar("challengeNumber", b.challengeNumber);
+    // Escribe la grabacion con el numero. Solo funciona en Developer Mode;
+    // en Safe Mode genera el fichero a mano (ver guia).
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      fs.writeFileSync(path.join(bru.cwd(), "muestras", "recording.txt"),
+        "grabacion de prueba numero=" + b.challengeNumber + "\n");
+      console.log("recording.txt escrito con " + b.challengeNumber);
+    } catch (e) {
+      console.log("Safe Mode: escribe muestras/recording.txt a mano con " + b.challengeNumber);
+    }
+  }
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Guarda `verificationId`, `challengeId`, `challengeNumber`.
+}

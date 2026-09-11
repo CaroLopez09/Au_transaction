@@ -1,0 +1,26 @@
+meta {
+  name: 05 Enlaces de liveness
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/ubos/liveness-links
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "successUrl": "https://portal.juriscop.co/kyb/ok",
+    "rejectUrl": "https://portal.juriscop.co/kyb/ko"
+  }
+}
+
+docs {
+  Requiere la verificacion disparada en Kira.
+}

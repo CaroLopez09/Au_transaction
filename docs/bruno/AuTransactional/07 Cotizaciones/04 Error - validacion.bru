@@ -1,0 +1,27 @@
+meta {
+  name: 04 Error - validacion
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/quotations
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "amount": 0
+  }
+}
+
+tests {
+  test("responde 400", function () {
+    expect([400]).to.include(res.getStatus());
+  });
+}

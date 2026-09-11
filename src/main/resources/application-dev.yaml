@@ -1,0 +1,33 @@
+# Desarrollo local. Contra el sandbox de Kira y con datos semilla.
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/autransactional?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+    username: root
+    password: 123456789!*
+  jpa:
+    hibernate:
+      ddl-auto: ${DB_DDL_AUTO:update}
+    show-sql: true
+
+kira:
+  base-url: ${KIRA_BASE_URL:https://api.balampay.com/sandbox}
+
+bff:
+  security:
+    # Solo para desarrollo. En cert y prod se exige BFF_JWT_SECRET del entorno.
+    jwt-secret: ${BFF_JWT_SECRET:secreto-de-desarrollo-no-usar-fuera-de-local-32b}
+  dev:
+    # Crea organizaciones y operadores de prueba al arrancar. Idempotente.
+    seed: ${BFF_DEV_SEED:true}
+    seed-password: ${BFF_DEV_SEED_PASSWORD:Dev12345!}
+
+logging:
+  level:
+    com.example.autransactional: DEBUG
+
+# Documentacion interactiva en /swagger-ui.html
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha

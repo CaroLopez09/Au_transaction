@@ -1,0 +1,56 @@
+meta {
+  name: 02 Alta WIRE
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/recipients
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "rail": "WIRE",
+    "business": true,
+    "companyName": "Acme Corp",
+    "email": "pagos@acme.com",
+    "phone": "+13055551234",
+    "address": {
+      "streetName": "1 Main St",
+      "city": "New York",
+      "state": "NY",
+      "postalCode": "10001",
+      "country": "US"
+    },
+    "routingNumber": "021000021",
+    "swiftCode": "EXAMUS33XXX",
+    "accountNumber": "1234567890",
+    "accountKind": "checking",
+    "bankName": "Example Bank, N.A.",
+    "bankAddress": {
+      "streetName": "1 Bank Plaza",
+      "city": "New York",
+      "state": "NY",
+      "postalCode": "10001",
+      "country": "US"
+    },
+    "docType": "ein",
+    "docNumber": "12-3456789"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().id) {
+    bru.setVar("recipientId", res.getBody().id);
+  }
+}
+
+docs {
+  Guarda `recipientId`.
+}

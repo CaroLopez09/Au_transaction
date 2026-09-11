@@ -1,0 +1,63 @@
+package com.example.autransactional.application.treasury;
+
+import com.example.autransactional.domain.treasury.Payout;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+/**
+ * Proyeccion estable para el frontend: no expone la forma cambiante de la respuesta de Kira.
+ *
+ * amount es lo que recibe el destinatario y totalDebitAmount el bruto que sale de la cuenta.
+ * referenceNumber (IMAD / ACH trace / UETR) es el comprobante que reclama el cliente final.
+ */
+public record PayoutView(
+        String id,
+        String virtualAccountId,
+        String recipientId,
+        String quotationId,
+        BigDecimal amount,
+        String currency,
+        BigDecimal kiraFee,
+        BigDecimal platformFee,
+        BigDecimal totalFee,
+        BigDecimal totalDebitAmount,
+        String approvalState,
+        String status,
+        boolean terminal,
+        String makerUserId,
+        String approverUserId,
+        boolean priceLocked,
+        String kiraPayoutId,
+        String referenceNumber,
+        String paymentMethod,
+        String errorCode,
+        Instant createdAt,
+        Instant updatedAt) {
+
+    public static PayoutView from(Payout p) {
+        return new PayoutView(
+                p.getId(),
+                p.getVirtualAccountId(),
+                p.getRecipientId(),
+                p.getQuotationId(),
+                p.getAmount().amount(),
+                p.getAmount().currency(),
+                p.getFees().kiraFee(),
+                p.getFees().platformFee(),
+                p.getFees().totalFee(),
+                p.totalDebit().amount(),
+                p.getApprovalState().name(),
+                p.getStatus().name(),
+                p.getStatus().isTerminal(),
+                p.getMakerUserId(),
+                p.getApproverUserId(),
+                p.isPriceLocked(),
+                p.getKiraPayoutId(),
+                p.getReferenceNumber(),
+                p.getPaymentMethod(),
+                p.getErrorCode(),
+                p.getCreatedAt(),
+                p.getUpdatedAt());
+    }
+}

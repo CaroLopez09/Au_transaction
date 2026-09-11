@@ -1,0 +1,17 @@
+meta {
+  name: 05 Estado liveness
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/v1/liveness/status
+  body: none
+  auth: none
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}

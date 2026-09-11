@@ -1,0 +1,26 @@
+meta {
+  name: 07 Error - firma incorrecta
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/webhooks/kira
+  body: text
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  x-signature-sha256: 0000
+}
+
+body:text {
+  {"event":"payout.completed","data":{"event_id":"evt_malo"}}
+}
+
+tests {
+  test("responde 401", function () {
+    expect([401]).to.include(res.getStatus());
+  });
+}

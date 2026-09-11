@@ -1,0 +1,15 @@
+meta {
+  name: 04 Refrescar estado
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/virtual-accounts/{{vaId}}/refresh
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}

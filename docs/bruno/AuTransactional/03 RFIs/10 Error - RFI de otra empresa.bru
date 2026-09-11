@@ -1,0 +1,19 @@
+meta {
+  name: 10 Error - RFI de otra empresa
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenOtraEmpresa}}
+}
+
+docs {
+  Si `rfiId` existe: 422 "RFI no encontrado."
+}

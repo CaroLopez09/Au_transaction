@@ -1,0 +1,31 @@
+# Produccion. No se llama a esta base-url hasta tener credenciales de produccion emitidas por Kira.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+kira:
+  base-url: ${KIRA_BASE_URL:https://api.balampay.com}
+  bank: ${KIRA_BANK:portage}
+  sandbox: false
+
+bff:
+  dev:
+    seed: false
+
+logging:
+  level:
+    root: WARN
+    com.example.autransactional: INFO
+
+# Sin documentacion interactiva expuesta en produccion.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

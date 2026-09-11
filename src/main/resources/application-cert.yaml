@@ -1,0 +1,31 @@
+# Certificacion: mismo codigo que produccion, apuntando al sandbox de Kira.
+# Es el entorno donde se recorre la lista de verificacion previa a pedir credenciales de produccion.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      # El esquema se aplica con migraciones, no por Hibernate.
+      ddl-auto: validate
+    show-sql: false
+
+kira:
+  base-url: ${KIRA_BASE_URL:https://api.balampay.com/sandbox}
+
+bff:
+  dev:
+    seed: false
+
+logging:
+  level:
+    com.example.autransactional: INFO
+    com.example.autransactional.infrastructure.kiraclient: DEBUG
+
+# Documentacion interactiva en /swagger-ui.html
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha

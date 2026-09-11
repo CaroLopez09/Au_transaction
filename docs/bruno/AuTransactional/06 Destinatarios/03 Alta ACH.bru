@@ -1,0 +1,47 @@
+meta {
+  name: 03 Alta ACH
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/recipients
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "rail": "ACH",
+    "business": true,
+    "companyName": "Acme Corp",
+    "address": {
+      "streetName": "1 Main St",
+      "city": "New York",
+      "state": "NY",
+      "postalCode": "10001",
+      "country": "US"
+    },
+    "routingNumber": "021000021",
+    "accountNumber": "9876543210",
+    "accountKind": "savings",
+    "bankName": "Example Bank",
+    "bankAddressText": "1 Bank Plaza, New York, NY",
+    "docType": "ein",
+    "docNumber": "12-3456789"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().id) {
+    bru.setVar("recipientAchId", res.getBody().id);
+  }
+}
+
+docs {
+  Guarda `recipientAchId`.
+}

@@ -1,0 +1,35 @@
+meta {
+  name: 03 user.verification.failed
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/webhooks/kira
+  body: text
+  auth: none
+}
+
+body:text {
+  {}
+}
+
+script:pre-request {
+  const CryptoJS = require("crypto-js");
+  const payload = { event: "user.verification.failed", data: { event_id: "evt_" + Date.now(), user_id: "usr_demo_001", status: "REJECTED", reason: "Documento ilegible" } };
+  const body = JSON.stringify(payload);
+  req.setBody(body);
+  req.setHeader("Content-Type", "application/json");
+  req.setHeader("x-signature-sha256",
+    CryptoJS.HmacSHA256(body, bru.getEnvVar("webhookSecret")).toString(CryptoJS.enc.Hex));
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  El cuerpo real lo construye y firma el pre-request script.
+}

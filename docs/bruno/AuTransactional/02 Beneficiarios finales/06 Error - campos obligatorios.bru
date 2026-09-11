@@ -1,0 +1,27 @@
+meta {
+  name: 06 Error - campos obligatorios
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/ubos
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "firstName": "María"
+  }
+}
+
+tests {
+  test("responde 400", function () {
+    expect([400]).to.include(res.getStatus());
+  });
+}

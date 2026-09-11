@@ -1,0 +1,31 @@
+meta {
+  name: 06 Crear sesion liveness
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/v1/liveness/session?verificationId={{verificationId}}
+  body: none
+  auth: none
+}
+
+params:query {
+  verificationId: {{verificationId}}
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().sessionId) {
+    bru.setVar("livenessSessionId", res.getBody().sessionId);
+  }
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Con `verificationId`, NUNCA con `clientId`.
+}

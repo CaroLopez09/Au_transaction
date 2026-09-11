@@ -1,0 +1,35 @@
+meta {
+  name: 05 virtual_account.deposit_funds_received
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/webhooks/kira
+  body: text
+  auth: none
+}
+
+body:text {
+  {}
+}
+
+script:pre-request {
+  const CryptoJS = require("crypto-js");
+  const payload = { event: "virtual_account.deposit_funds_received", data: { event_id: "evt_" + Date.now(), virtual_account_id: "kva_demo_001", deposit_id: "dep_" + Date.now(), amount: 5000, fee: 25, currency: "USD", status: "completed" } };
+  const body = JSON.stringify(payload);
+  req.setBody(body);
+  req.setHeader("Content-Type", "application/json");
+  req.setHeader("x-signature-sha256",
+    CryptoJS.HmacSHA256(body, bru.getEnvVar("webhookSecret")).toString(CryptoJS.enc.Hex));
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  El cuerpo real lo construye y firma el pre-request script.
+}

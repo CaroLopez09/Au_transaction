@@ -1,0 +1,19 @@
+meta {
+  name: 04 Sincronizar con Kira
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/ubos/sync
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+docs {
+  Requiere la empresa dada de alta en Kira. Sin ella: 422.
+}

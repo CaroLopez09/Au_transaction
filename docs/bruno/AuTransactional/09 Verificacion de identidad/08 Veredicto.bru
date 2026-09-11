@@ -1,0 +1,35 @@
+meta {
+  name: 08 Veredicto
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/v1/identity/validate?verificationId={{verificationId}}&challengeId={{challengeId}}&livenessSessionId={{livenessSessionId}}&countryCode=CO&documentType=NATIONAL_ID
+  body: multipartForm
+  auth: none
+}
+
+params:query {
+  verificationId: {{verificationId}}
+  challengeId: {{challengeId}}
+  livenessSessionId: {{livenessSessionId}}
+  countryCode: CO
+  documentType: NATIONAL_ID
+}
+
+body:multipart-form {
+  selfieImage: @file(muestras/selfie.png)
+  documentFrontImage: @file(muestras/documento-frente.png)
+  documentBackImage: @file(muestras/documento-reverso.png)
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+
+  test("veredicto APPROVED", function () {
+    expect(res.getBody().status).to.equal("APPROVED");
+  });
+}

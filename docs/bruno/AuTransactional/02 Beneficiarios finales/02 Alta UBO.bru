@@ -1,0 +1,47 @@
+meta {
+  name: 02 Alta UBO
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/ubos
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "firstName": "María",
+    "lastName": "Pérez",
+    "documentType": "national_id",
+    "documentNumber": "1020304050",
+    "hasOwnership": true,
+    "ownershipPercentage": 60.0,
+    "hasControl": true,
+    "isSigner": true,
+    "politicallyExposed": false,
+    "countryOfBirth": "COL",
+    "roleInCompany": "Socia fundadora"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().id) {
+    bru.setVar("uboId", res.getBody().id);
+  }
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Guarda `uboId`. Cada ejecucion crea un UBO NUEVO.
+}

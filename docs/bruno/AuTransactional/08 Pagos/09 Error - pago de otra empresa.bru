@@ -1,0 +1,21 @@
+meta {
+  name: 09 Error - pago de otra empresa
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/api/payouts/{{payoutId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenOtraEmpresa}}
+}
+
+tests {
+  test("responde 422", function () {
+    expect([422]).to.include(res.getStatus());
+  });
+}

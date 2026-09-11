@@ -1,0 +1,28 @@
+meta {
+  name: 06 Error - falta sourceOfFunds
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/onboarding
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "businessLegalName": "Juriscop S.A.S.",
+    "email": "finanzas@juriscop.co"
+  }
+}
+
+tests {
+  test("responde 400", function () {
+    expect([400]).to.include(res.getStatus());
+  });
+}

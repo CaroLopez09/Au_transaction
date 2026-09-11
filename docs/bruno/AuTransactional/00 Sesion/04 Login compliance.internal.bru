@@ -1,0 +1,34 @@
+meta {
+  name: 04 Login compliance.internal
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "compliance.internal@{{empresa}}.test",
+    "password": "{{password}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().accessToken) {
+    bru.setVar("tokenCompliance", res.getBody().accessToken);
+  }
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Guarda `tokenCompliance`.
+}

@@ -1,0 +1,14 @@
+auth {
+  mode: none
+}
+
+docs {
+  # AuTransactional BFF
+
+  Guia completa: `docs/GUIA-BRUNO.md`.
+
+  1. Arranca el BFF con `KIRA_WEBHOOK_SECRET=secreto-webhook-local ./mvnw spring-boot:run`.
+  2. Selecciona el entorno **local**.
+  3. Ejecuta primero la carpeta **00 Sesion**: guarda los tokens de los 5 roles.
+  4. Recorre las carpetas en orden; cada peticion guarda los ids que usa la siguiente.
+}

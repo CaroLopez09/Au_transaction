@@ -1,0 +1,17 @@
+meta {
+  name: 04 Config liveness
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v1/liveness/config
+  body: none
+  auth: none
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}

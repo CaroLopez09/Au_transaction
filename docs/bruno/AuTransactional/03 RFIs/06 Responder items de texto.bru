@@ -1,0 +1,30 @@
+meta {
+  name: 06 Responder items de texto
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}/items
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "items": [
+      {
+        "itemId": "i-ein",
+        "answerValue": "12-3456789"
+      }
+    ]
+  }
+}
+
+docs {
+  Solo items `identifier`. Llama a Kira: sin credenciales, 500.
+}

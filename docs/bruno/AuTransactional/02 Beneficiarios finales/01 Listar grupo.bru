@@ -1,0 +1,21 @@
+meta {
+  name: 01 Listar grupo
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/ubos
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}

@@ -1,0 +1,216 @@
+package com.example.autransactional.application.treasury;
+
+import com.example.autransactional.domain.shared.DomainException;
+import com.example.autransactional.domain.shared.IdempotencyKey;
+import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.Role;
+import com.example.autransactional.domain.tenant.Tenant;
+import com.example.autransactional.domain.tenant.TenantRepository;
+import com.example.autransactional.domain.tenant.TenantStatus;
+import com.example.autransactional.domain.treasury.Recipient;
+import com.example.autransactional.domain.treasury.RecipientRepository;
+import com.example.autransactional.infrastructure.audit.AuditTrail;
+import com.example.autransactional.infrastructure.kira.KiraApiClient;
+import com.example.autransactional.infrastructure.kira.KiraResponse;
+import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.ObjectMapper;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+class RegisterRecipientServiceTest {
+
+    private static final TenantId TENANT = TenantId.of("juriscop");
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final KiraApiClient kira = mock(KiraApiClient.class);
+    private final AuditTrail audit = mock(AuditTrail.class);
+    private final RecipientRepository recipients = mock(RecipientRepository.class);
+    private final TenantRepository tenants = mock(TenantRepository.class);
+
+    private RegisterRecipientService service;
+    private List<Recipient> registro;
+
+    private final AuthenticatedOperator maker =
+            new AuthenticatedOperator("u-1", "treasury.maker@juriscop.test", TENANT, Role.TREASURY_MAKER);
+
+    @BeforeEach
+    void setUp() {
+        Tenant empresa = new Tenant(TENANT, "Juriscop", "900123456-1", "Colombia");
+        empresa.linkKiraUser("usr_1");
+        empresa.applyRemoteState(TenantStatus.VERIFIED, null, null, true);
+        registro = new ArrayList<>();
+
+        when(tenants.findById(TENANT)).thenReturn(Optional.of(empresa));
+        when(recipients.save(any())).thenAnswer(i -> {
+            registro.add(i.getArgument(0));
+            return i.getArgument(0);
+        });
+        when(recipients.findByIdAndTenant(any(), any())).thenAnswer(i -> registro.stream()
+                .filter(r -> r.getId().equals(i.getArgument(0)))
+                .findFirst());
+        when(kira.createRecipient(any(), any())).thenReturn(
+                new KiraResponse(201, mapper.readTree("{\"recipient_id\":\"krec_1\"}")));
+
+        service = new RegisterRecipientService(recipients, tenants, kira, audit);
+    }
+
+    private RecipientCommands.RegisterRecipient wire() {
+        return new RecipientCommands.RegisterRecipient("WIRE", true, null, null, "Acme Corp",
+                "pagos@acme.com", "+13055551234",
+                new RecipientCommands.Address("1 Main St", "New York", "NY", "10001", "US"),
+                "021000021", "EXAMUS33XXX", "1234567890", "checking", "Example Bank",
+                null, new RecipientCommands.Address("1 Bank Plaza", "New York", "NY", "10001", "US"),
+                null, null, null, "ein", "12-3456789");
+    }
+
+    private RecipientCommands.RegisterRecipient wallet(String token, String network) {
+        return new RecipientCommands.RegisterRecipient("WALLET", false, "Ana", "Perez", null,
+                null, null, null,
+                null, null, null, null, null, null, null,
+                token, network, "0xabc123", "passport", "AB1234567");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> cuerpoEnviado() {
+        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
+        verify(kira).createRecipient(body.capture(), any(IdempotencyKey.class));
+        return body.getValue();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> cuentaEnviada() {
+        return (Map<String, Object>) cuerpoEnviado().get("account");
+    }
+
+    @Test
+    void elTitularSeInfiereDeLosNombresPorqueNoExisteHolderName() {
+        service.register(maker, wire());
+
+        Map<String, Object> body = cuerpoEnviado();
+        assertEquals("business", body.get("type"));
+        assertEquals("Acme Corp", body.get("company_name"));
+        assertFalse(body.containsKey("holder_name"));
+        assertEquals("usr_1", body.get("user_id"));
+    }
+
+    @Test
+    void enWireLaDireccionDelBancoEsUnObjeto() {
+        service.register(maker, wire());
+
+        Map<String, Object> cuenta = cuentaEnviada();
+        assertEquals("WIRE", cuenta.get("account_type"));
+        assertEquals("EXAMUS33XXX", cuenta.get("swift_code"));
+        assertInstanceOf(Map.class, cuenta.get("bank_address"));
+    }
+
+    @Test
+    void enAchLaDireccionDelBancoEsTextoPlano() {
+        var ach = new RecipientCommands.RegisterRecipient("ACH", true, null, null, "Acme Corp",
+                null, null, new RecipientCommands.Address("1 Main St", "NY", "NY", "10001", "US"),
+                "021000021", null, "1234567890", "savings", "Example Bank",
+                "1 Bank Plaza, NY", null, null, null, null, "ein", "12-3456789");
+
+        service.register(maker, ach);
+
+        Map<String, Object> cuenta = cuentaEnviada();
+        assertEquals("ACH", cuenta.get("account_type"));
+        assertEquals("1 Bank Plaza, NY", cuenta.get("bank_address"));
+        assertEquals("savings", cuenta.get("type"));
+        assertFalse(cuenta.containsKey("swift_code"));
+    }
+
+    @Test
+    void unaWalletViajaConTokenYRed() {
+        service.register(maker, wallet("USDT", "tron"));
+
+        Map<String, Object> cuenta = cuentaEnviada();
+        assertEquals("WALLET", cuenta.get("account_type"));
+        assertEquals("USDT", cuenta.get("token"));
+        assertEquals("tron", cuenta.get("network"));
+        // Una wallet no lleva datos bancarios.
+        assertFalse(cuenta.containsKey("routing_number"));
+    }
+
+    @Test
+    void unParTokenRedInvalidoSeCortaAntesDeLlamar() {
+        assertThrows(DomainException.class, () -> service.register(maker, wallet("USDC", "tron")));
+
+        verify(kira, never()).createRecipient(any(), any());
+    }
+
+    @Test
+    void seLeeRecipientIdNoId() {
+        var view = service.register(maker, wire());
+
+        assertEquals("krec_1", view.kiraRecipientId());
+        assertTrue(view.registeredInKira());
+    }
+
+    @Test
+    void unDoscientosDosEsExitoNoError() {
+        // "Ya existia, te devuelvo el registro existente".
+        when(kira.createRecipient(any(), any())).thenReturn(
+                new KiraResponse(202, mapper.readTree("{\"recipient_id\":\"krec_ya_existia\"}")));
+
+        var view = service.register(maker, wire());
+
+        assertTrue(view.alreadyExisted());
+        assertEquals("krec_ya_existia", view.kiraRecipientId());
+    }
+
+    @Test
+    void elEstadoYElCodigoPostalSalenDelEspejoLocal() {
+        // Kira los devuelve vacios aunque se hayan enviado.
+        var view = service.register(maker, wire());
+
+        assertEquals("NY", view.bankAddress().state());
+        assertEquals("10001", view.bankAddress().postalCode());
+    }
+
+    @Test
+    void laCuentaSeMuestraEnmascarada() {
+        var view = service.register(maker, wire());
+
+        assertEquals("****7890", view.maskedDestination());
+    }
+
+    @Test
+    void sinKybAprobadoNoHayDestinatarios() {
+        Tenant sinVerificar = new Tenant(TENANT, "Juriscop", "900123456-1", "Colombia");
+        sinVerificar.linkKiraUser("usr_1");
+        when(tenants.findById(TENANT)).thenReturn(Optional.of(sinVerificar));
+
+        assertThrows(DomainException.class, () -> service.register(maker, wire()));
+        verify(kira, never()).createRecipient(any(), any());
+    }
+
+    @Test
+    void archivarEnlazaConElReemplazo() {
+        var original = service.register(maker, wire());
+        var reemplazo = service.register(maker, wire());
+
+        var view = service.archive(maker, original.id(),
+                new RecipientCommands.ArchiveRecipient(reemplazo.id()));
+
+        assertEquals("ARCHIVED", view.status());
+        assertEquals(reemplazo.id(), view.replacedByRecipientId());
+    }
+
+    @Test
+    void unRolAprobadorNoRegistraDestinatarios() {
+        var approver = new AuthenticatedOperator("u-2", "treasury.approver@juriscop.test", TENANT,
+                Role.TREASURY_APPROVER);
+
+        assertThrows(DomainException.class, () -> service.register(approver, wire()));
+    }
+}

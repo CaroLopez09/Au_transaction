@@ -1,0 +1,19 @@
+meta {
+  name: 03 Sincronizar desde Kira
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/rfis/sync
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+docs {
+  Sin empresa dada de alta en Kira: 422.
+}

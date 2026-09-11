@@ -1,0 +1,33 @@
+meta {
+  name: 08 Error - USDC en tron
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/recipients
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "rail": "WALLET",
+    "business": false,
+    "firstName": "Ana",
+    "lastName": "Pérez",
+    "token": "USDC",
+    "network": "tron",
+    "walletAddress": "TXYZ",
+    "docType": "passport",
+    "docNumber": "AB1"
+  }
+}
+
+docs {
+  422. OJO: sin empresa en Kira el mensaje es "no dada de alta", porque esa comprobacion va primero.
+}

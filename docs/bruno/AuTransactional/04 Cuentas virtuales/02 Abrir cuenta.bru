@@ -1,0 +1,33 @@
+meta {
+  name: 02 Abrir cuenta
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/virtual-accounts
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "description": "Operativa Juriscop",
+    "mode": "fiat",
+    "currency": "USD"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().id) {
+    bru.setVar("vaId", res.getBody().id);
+  }
+}
+
+docs {
+  Guarda `vaId`. Sin KYB listo: 422.
+}

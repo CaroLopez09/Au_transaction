@@ -1,0 +1,24 @@
+meta {
+  name: 09 Error - email mal formado
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "no-es-un-email",
+    "password": ""
+  }
+}
+
+tests {
+  test("responde 400", function () {
+    expect([400]).to.include(res.getStatus());
+  });
+}

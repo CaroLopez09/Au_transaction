@@ -1,0 +1,27 @@
+meta {
+  name: 02 Alta minima en Kira
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/onboarding
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "businessLegalName": "Juriscop S.A.S.",
+    "email": "finanzas@juriscop.co",
+    "sourceOfFunds": "sales_of_goods_and_services"
+  }
+}
+
+docs {
+  Llama a `POST /v1/users`. Sin credenciales de Kira: 500 `internal_error`.
+}

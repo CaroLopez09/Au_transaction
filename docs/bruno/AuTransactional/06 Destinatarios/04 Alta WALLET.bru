@@ -1,0 +1,29 @@
+meta {
+  name: 04 Alta WALLET
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/recipients
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "rail": "WALLET",
+    "business": false,
+    "firstName": "Ana",
+    "lastName": "Pérez",
+    "token": "USDT",
+    "network": "tron",
+    "walletAddress": "TXYZ1234567890abcdefghijklmnopqrs",
+    "docType": "passport",
+    "docNumber": "AB1234567"
+  }
+}

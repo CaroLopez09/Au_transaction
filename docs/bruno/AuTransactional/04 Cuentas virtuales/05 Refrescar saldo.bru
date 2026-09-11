@@ -1,0 +1,15 @@
+meta {
+  name: 05 Refrescar saldo
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/virtual-accounts/{{vaId}}/balance
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}

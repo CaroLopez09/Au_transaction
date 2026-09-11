@@ -1,0 +1,52 @@
+meta {
+  name: 07 Error - routing de 3 digitos
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/recipients
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "rail": "WIRE",
+    "business": true,
+    "companyName": "Acme Corp",
+    "email": "pagos@acme.com",
+    "phone": "+13055551234",
+    "address": {
+      "streetName": "1 Main St",
+      "city": "New York",
+      "state": "NY",
+      "postalCode": "10001",
+      "country": "US"
+    },
+    "routingNumber": "123",
+    "swiftCode": "EXAMUS33XXX",
+    "accountNumber": "1234567890",
+    "accountKind": "checking",
+    "bankName": "Example Bank, N.A.",
+    "bankAddress": {
+      "streetName": "1 Bank Plaza",
+      "city": "New York",
+      "state": "NY",
+      "postalCode": "10001",
+      "country": "US"
+    },
+    "docType": "ein",
+    "docNumber": "12-3456789"
+  }
+}
+
+tests {
+  test("responde 400", function () {
+    expect([400]).to.include(res.getStatus());
+  });
+}

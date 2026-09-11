@@ -1,0 +1,32 @@
+meta {
+  name: 09 Error - tesoreria no responde RFIs
+  type: http
+  seq: 9
+}
+
+patch {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}/items
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "items": [
+      {
+        "itemId": "i-ein",
+        "answerValue": "1"
+      }
+    ]
+  }
+}
+
+tests {
+  test("responde 403", function () {
+    expect([403]).to.include(res.getStatus());
+  });
+}

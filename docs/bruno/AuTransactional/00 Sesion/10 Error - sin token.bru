@@ -1,0 +1,21 @@
+meta {
+  name: 10 Error - sin token
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/api/auth/me
+  body: none
+  auth: none
+}
+
+tests {
+  test("responde 403", function () {
+    expect([403]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Sin cabecera Authorization responde 403 con cuerpo VACIO (no 401).
+}

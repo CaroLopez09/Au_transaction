@@ -1,0 +1,27 @@
+meta {
+  name: 05 Aprobar y enviar (approver)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/payouts/{{payoutId}}/approve
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenApprover}}
+}
+
+body:json {
+  {
+    "comment": "Revisado por tesoreria",
+    "natureOfPayment": "vendor",
+    "memo": "Factura 42"
+  }
+}
+
+docs {
+  Llama a Kira. Sin credenciales: 500 y el pago sigue en PENDING_APPROVAL.
+}

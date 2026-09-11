@@ -1,0 +1,15 @@
+meta {
+  name: 05 Refrescar desde Kira
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}/refresh
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}

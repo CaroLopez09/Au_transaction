@@ -1,0 +1,36 @@
+meta {
+  name: 03 Completar perfil
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/api/onboarding
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "profile": {
+      "business_type": "corporation",
+      "formation_date": "2019-04-02",
+      "formation_country": "COL",
+      "expected_monthly_volume": "100000_to_500000",
+      "expected_transaction_count": "26_to_50",
+      "account_purpose": "operating_a_company",
+      "additional_info": {
+        "has_us_bank_account": "No",
+        "has_denied_bank_account": "No"
+      }
+    }
+  }
+}
+
+docs {
+  Los campos van con el nombre de Kira. Repite con lo que diga `pendingFields`.
+}

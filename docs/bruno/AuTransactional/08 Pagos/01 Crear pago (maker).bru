@@ -1,0 +1,50 @@
+meta {
+  name: 01 Crear pago (maker)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/payouts
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "virtualAccountId": "{{vaId}}",
+    "recipientId": "{{recipientId}}",
+    "amount": 125.50,
+    "currency": "USD",
+    "quotationId": "{{quotationId}}"
+  }
+}
+
+script:pre-request {
+  // Sin cotizacion previa, quotationId vacio falla con "Cotizacion no encontrada": se quita.
+  const body = req.getBody();
+  if (!bru.getVar("quotationId")) { delete body.quotationId; }
+  if (!bru.getVar("vaId")) { body.virtualAccountId = "va_demo_001"; }
+  if (!bru.getVar("recipientId")) { body.recipientId = "rec_demo_001"; }
+  req.setBody(body);
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().id) {
+    bru.setVar("payoutId", res.getBody().id);
+  }
+}
+
+tests {
+  test("responde 201", function () {
+    expect([201]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Guarda `payoutId`. Funciona sin Kira (no llama a Kira).
+}

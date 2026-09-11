@@ -1,0 +1,38 @@
+meta {
+  name: 03 Editar UBO
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/ubos
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "id": "{{uboId}}",
+    "firstName": "María",
+    "lastName": "Pérez",
+    "documentType": "national_id",
+    "documentNumber": "1020304050",
+    "hasOwnership": true,
+    "ownershipPercentage": 55.00,
+    "hasControl": true,
+    "isSigner": true,
+    "politicallyExposed": false,
+    "countryOfBirth": "COL",
+    "roleInCompany": "Socia"
+  }
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}

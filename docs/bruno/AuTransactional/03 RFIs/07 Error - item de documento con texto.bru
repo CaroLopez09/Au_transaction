@@ -1,0 +1,34 @@
+meta {
+  name: 07 Error - item de documento con texto
+  type: http
+  seq: 7
+}
+
+patch {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}/items
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "items": [
+      {
+        "itemId": "i-doc",
+        "answerValue": "adjunto"
+      },
+      {
+        "itemId": "i-inventado",
+        "answerValue": "x"
+      }
+    ]
+  }
+}
+
+docs {
+  Con el RFI de prueba: 422 `rfi_answer_rejected` con `details` por item, sin llamar a Kira.
+}

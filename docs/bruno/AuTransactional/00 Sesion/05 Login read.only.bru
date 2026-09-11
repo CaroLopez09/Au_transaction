@@ -1,0 +1,34 @@
+meta {
+  name: 05 Login read.only
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "read.only@{{empresa}}.test",
+    "password": "{{password}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().accessToken) {
+    bru.setVar("tokenReadOnly", res.getBody().accessToken);
+  }
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Guarda `tokenReadOnly`.
+}

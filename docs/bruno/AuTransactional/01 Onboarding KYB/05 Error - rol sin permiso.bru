@@ -1,0 +1,29 @@
+meta {
+  name: 05 Error - rol sin permiso
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/onboarding
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "businessLegalName": "X",
+    "email": "x@x.co",
+    "sourceOfFunds": "company_funds"
+  }
+}
+
+tests {
+  test("responde 403", function () {
+    expect([403]).to.include(res.getStatus());
+  });
+}

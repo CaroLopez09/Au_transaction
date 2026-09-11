@@ -1,0 +1,28 @@
+meta {
+  name: 08 Error - validacion deposito
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/virtual-accounts/{{vaId}}/simulate-deposit
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "amount": 0,
+    "paymentType": "swift"
+  }
+}
+
+tests {
+  test("responde 400", function () {
+    expect([400]).to.include(res.getStatus());
+  });
+}

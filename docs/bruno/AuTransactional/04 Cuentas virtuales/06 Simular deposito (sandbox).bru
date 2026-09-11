@@ -1,0 +1,26 @@
+meta {
+  name: 06 Simular deposito (sandbox)
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/virtual-accounts/{{vaId}}/simulate-deposit
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "amount": 5000.0,
+    "paymentType": "wire"
+  }
+}
+
+docs {
+  Monto `11` = deposito `refunded`.
+}

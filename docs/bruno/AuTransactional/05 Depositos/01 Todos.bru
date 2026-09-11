@@ -1,0 +1,25 @@
+meta {
+  name: 01 Todos
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/deposits?limit=50
+  body: none
+  auth: bearer
+}
+
+params:query {
+  limit: 50
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}

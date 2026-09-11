@@ -1,0 +1,29 @@
+meta {
+  name: 03 Verificar reto de voz
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/number-challenge/{{challengeId}}/verify
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  recording: @file(muestras/recording.txt)
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+
+  test("el reto se supera", function () {
+    expect(res.getBody().passed).to.equal(true);
+  });
+}
+
+docs {
+  `muestras/recording.txt` debe contener el `challengeNumber` de ESTE reto.
+}

@@ -1,0 +1,21 @@
+meta {
+  name: 06 Refrescar desde Kira
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/payouts/{{payoutId}}/refresh
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}

@@ -1,0 +1,21 @@
+meta {
+  name: 06 Archivar ACH apuntando al WIRE
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/recipients/{{recipientAchId}}/archive
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "replacedByRecipientId": "{{recipientId}}"
+  }
+}

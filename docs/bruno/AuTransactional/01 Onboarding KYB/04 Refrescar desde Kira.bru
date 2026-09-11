@@ -1,0 +1,15 @@
+meta {
+  name: 04 Refrescar desde Kira
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/onboarding/refresh
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}

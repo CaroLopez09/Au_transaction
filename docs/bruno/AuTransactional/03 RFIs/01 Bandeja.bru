@@ -1,0 +1,32 @@
+meta {
+  name: 01 Bandeja
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/rfis
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+script:post-response {
+  const lista = res.getBody();
+  if (Array.isArray(lista) && lista.length > 0) {
+    bru.setVar("rfiId", lista[0].id);
+  }
+}
+
+tests {
+  test("responde 200", function () {
+    expect([200]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Guarda `rfiId` con el primero de la lista, si hay alguno.
+}

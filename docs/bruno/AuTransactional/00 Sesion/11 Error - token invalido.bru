@@ -1,0 +1,21 @@
+meta {
+  name: 11 Error - token invalido
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/api/auth/me
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer abc.def.ghi
+}
+
+tests {
+  test("responde 401", function () {
+    expect([401]).to.include(res.getStatus());
+  });
+}

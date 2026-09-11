@@ -1,0 +1,33 @@
+meta {
+  name: 01 Cotizar
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/quotations
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenMaker}}
+}
+
+body:json {
+  {
+    "virtualAccountId": "{{vaId}}",
+    "recipientId": "{{recipientId}}",
+    "amount": 1000.00
+  }
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().id) {
+    bru.setVar("quotationId", res.getBody().id);
+  }
+}
+
+docs {
+  Guarda `quotationId`.
+}

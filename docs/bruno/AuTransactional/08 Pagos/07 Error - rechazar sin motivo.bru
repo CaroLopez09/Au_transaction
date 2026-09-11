@@ -1,0 +1,25 @@
+meta {
+  name: 07 Error - rechazar sin motivo
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/payouts/{{payoutId}}/reject
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenApprover}}
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("responde 400", function () {
+    expect([400]).to.include(res.getStatus());
+  });
+}

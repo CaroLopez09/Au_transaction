@@ -1,0 +1,79 @@
+# Configuracion comun a todos los entornos.
+# Lo que cambia entre entornos vive en application-{dev,cert,prod}.yaml.
+# Perfiles: dev (local), cert (certificacion contra el sandbox de Kira), prod.
+spring:
+  application:
+    name: AuTransactional
+
+  servlet:
+    multipart:
+      # La grabacion del reto de voz son ~5 s de webm; las imagenes del documento, JPEG q=0.92.
+      max-file-size: 10MB
+      max-request-size: 32MB
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  jackson:
+    default-property-inclusion: non_null
+
+# --- Integracion con KiraFin (https://docs.kirafin.ai) ---
+# Las credenciales NUNCA llevan valor por defecto: si faltan, el perfil las exige o falla.
+kira:
+  api-key: ${KIRA_API_KEY:}
+  client-id: ${KIRA_CLIENT_ID:}
+  password: ${KIRA_PASSWORD:}
+  webhook-secret: ${KIRA_WEBHOOK_SECRET:}
+  # Version documentada y recomendada para integrar. Se envia en cada peticion
+  # mientras la cuenta no este fijada con POST /v1/versioning/upgrade.
+  api-version: ${KIRA_API_VERSION:2026-04-14}
+  # El token vive 3600s y no hay refresh: se renueva con margen.
+  token-ttl-seconds: 3600
+  token-refresh-margin-seconds: 300
+  connect-timeout-ms: 5000
+  read-timeout-ms: 30000
+  # Banco de las cuentas virtuales. El valor valido depende del entorno: 'portage' contra
+  # el sandbox devuelve 400 "Invalid bank", y 'slovak_savings_bank' en produccion tambien.
+  bank: ${KIRA_BANK:slovak_savings_bank}
+  # Habilita lo que solo existe en el sandbox, como simular un deposito.
+  sandbox: ${KIRA_SANDBOX:true}
+
+# --- Configuracion propia del BFF ---
+bff:
+  # Verificacion biometrica de identidad (documento + rostro + voz).
+  # Complementa, no sustituye, la liveness alojada que Kira usa para el KYB de los UBO.
+  identity:
+    # dev = adaptadores locales deterministas. El adaptador de AWS se registrara con 'aws'.
+    provider: ${BFF_IDENTITY_PROVIDER:dev}
+    liveness-enabled: ${BFF_LIVENESS_ENABLED:true}
+    # Umbrales de riesgo: viven en el servidor porque un umbral que viaja al navegador
+    # es un umbral que el atacante edita.
+    min-liveness-score: 80
+    min-match-score: 85
+    review-floor: 70
+    challenge-ttl-seconds: 120
+    session-ttl-seconds: 1800
+    max-upload-bytes: 10485760
+    aws:
+      region: ${AWS_REGION:}
+      identity-pool-id: ${AWS_IDENTITY_POOL_ID:}
+
+  security:
+    jwt-secret: ${BFF_JWT_SECRET:}
+    jwt-issuer: ${BFF_JWT_ISSUER:autransactional-bff}
+    token-expiration-ms: ${BFF_JWT_TTL_MS:28800000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never

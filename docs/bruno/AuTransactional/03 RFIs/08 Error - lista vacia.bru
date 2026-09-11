@@ -1,0 +1,27 @@
+meta {
+  name: 08 Error - lista vacia
+  type: http
+  seq: 8
+}
+
+patch {
+  url: {{baseUrl}}/api/rfis/{{rfiId}}/items
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "items": []
+  }
+}
+
+tests {
+  test("responde 400", function () {
+    expect([400]).to.include(res.getStatus());
+  });
+}
