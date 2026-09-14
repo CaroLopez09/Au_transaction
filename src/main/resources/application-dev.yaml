@@ -2,8 +2,10 @@
 spring:
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/autransactional?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
-    username: root
-    password: 123456789!*
+    username: ${DB_USERNAME:root}
+    # La contrasena viene del entorno. El valor por defecto NO es el de tu MySQL local:
+    # exporta DB_PASSWORD antes de arrancar el perfil dev.
+    password: ${DB_PASSWORD:Dev12345!}
   jpa:
     hibernate:
       ddl-auto: ${DB_DDL_AUTO:update}

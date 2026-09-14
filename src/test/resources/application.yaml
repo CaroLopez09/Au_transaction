@@ -18,5 +18,8 @@ kira:
   webhook-secret: test-webhook-secret
 
 bff:
+  # Las pruebas no ejecutan los workers: cada una controla cuando se reconcilia.
+  reconciliation:
+    enabled: false
   security:
     jwt-secret: secreto-de-pruebas-suficientemente-largo-para-hmac256

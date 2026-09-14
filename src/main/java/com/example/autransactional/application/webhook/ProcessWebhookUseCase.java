@@ -115,6 +115,26 @@ public class ProcessWebhookUseCase {
     }
 
     /**
+     * Reintenta la proyeccion de un evento ya almacenado que nunca se proyecto.
+     *
+     * No se puede reutilizar {@link #process(String)}: ese metodo empieza deduplicando por
+     * event_id y, como la fila ya existe, saldria sin proyectar nada, que es justo lo contrario
+     * de lo que se busca aqui.
+     *
+     * Deja que la excepcion suba: quien llama decide si la fila queda marcada con el error o si
+     * el lote entero se corta (por ejemplo, cuando faltan las credenciales de Kira).
+     */
+    @Transactional
+    public void reproject(WebhookEventEntity stored) throws Exception {
+        KiraWebhookEnvelope envelope = KiraWebhookEnvelope.from(objectMapper.readTree(stored.getPayload()));
+        applyProjection(envelope, stored);
+        stored.setProcessed(true);
+        stored.setProcessedAt(Instant.now());
+        stored.setProcessingError(null);
+        events.save(stored);
+    }
+
+    /**
      * Proyecta el evento sobre el modelo de lectura propio.
      * Los pagos usan dos familias solapadas de eventos: payout.* y payout.status_changed
      * pueden traer la misma transicion. Se decide por el VALOR del estado, no por el nombre.

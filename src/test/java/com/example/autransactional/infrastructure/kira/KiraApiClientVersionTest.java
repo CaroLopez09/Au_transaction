@@ -63,6 +63,19 @@ class KiraApiClientVersionTest {
     }
 
     @Test
+    void laCotizacionViajaConLaVersionQueTraeElDesglose() {
+        // Con 2026-04-14 la respuesta no trae fees[] ni totals, y de ahi salen las comisiones reales.
+        server.expect(requestTo("/v1/quotations"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-Api-Version", "2026-06-01"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        client.createQuotation(Map.of("amount", "1000.00"));
+
+        server.verify();
+    }
+
+    @Test
     void elRestoDeRutasSigueConLaVersionConfigurada() {
         server.expect(requestTo("/v1/payouts/po_1"))
                 .andExpect(header("X-Api-Version", "2026-04-14"))

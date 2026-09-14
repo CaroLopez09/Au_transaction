@@ -76,8 +76,12 @@ public final class KiraAmounts {
     }
 
     /**
-     * El MISMO markup para POST /payout, donde la API lo espera como cadena decimal.
-     * Misma cifra, otra forma de onda: por eso las dos funciones estan juntas.
+     * El MISMO markup para POST /payout y /payout/preview, donde la API lo espera como cadenas
+     * decimales. Misma cifra, otra forma de onda: por eso las dos funciones estan juntas.
+     *
+     * percentage_fee es una FRACCION entre 0 y 1 ("0.01" = 1 %), no un porcentaje ni puntos
+     * basicos. Por eso se divide entre 10.000 y no entre 100: con 100, 50 bps viajaban como
+     * "0.50" y Kira cobraria un 50 %. Cuatro decimales representan exacto cualquier bps.
      */
     public static Map<String, Object> markupForPayout(BigDecimal fixedFee, int percentageBps) {
         if (percentageBps < 0 || percentageBps > MAX_PERCENTAGE_BPS) {
@@ -85,9 +89,7 @@ public final class KiraAmounts {
         }
         Map<String, Object> markup = new LinkedHashMap<>();
         markup.put("fixed_fee", fixedFee.setScale(FIAT_PRECISION, RoundingMode.HALF_UP).toPlainString());
-        markup.put("percentage_fee",
-                BigDecimal.valueOf(percentageBps).movePointLeft(2).setScale(2, RoundingMode.HALF_UP)
-                        .toPlainString());
+        markup.put("percentage_fee", BigDecimal.valueOf(percentageBps).movePointLeft(4).setScale(4).toPlainString());
         return markup;
     }
 

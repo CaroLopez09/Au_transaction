@@ -1,0 +1,301 @@
+{
+  "_leeme" : {
+    "que_es" : "Cuerpos exactos que el BFF envia a la API de Kira (Balampay). Capturados ejecutando los servicios reales con Kira simulado, no escritos a mano.",
+    "fecha" : "2026-09-11",
+    "base_url" : "https://api.balampay.com/sandbox (perfil dev)",
+    "ids" : "usr_1, kva_1, krec_wire, qt_1 y rfi_1 son de ejemplo: en real van los ids que devuelve Kira.",
+    "cabeceras" : {
+      "todas" : "x-api-key: <api_key> y Authorization: Bearer <token>",
+      "version" : "X-Api-Version: 2026-04-14; las rutas /v1/rfis usan 2026-06-01",
+      "idempotencia" : "Idempotency-Key: <uuid v4> en POST /v1/users, /v1/virtual-accounts, /v1/recipients y /v1/virtual-accounts/{id}/payout"
+    },
+    "token" : "POST /auth con x-api-key (sin Bearer) y cuerpo { \"client_id\": \"<KIRA_CLIENT_ID>\", \"password\": \"<KIRA_PASSWORD>\" }",
+    "no_json" : "Los documentos de RFI van como multipart/form-data a POST /v1/rfis/{id}/items/{item}/documents, una parte 'files' por archivo.",
+    "consultas" : "Las entradas *_query no son cuerpos: son los parametros de query de la peticion GET.",
+    "importes" : "amount siempre cadena con 2 decimales. Pago sin cotizacion: se envia el BRUTO (125.50 pedidos + 30.00 de comisiones = 155.50) porque Kira descuenta las comisiones del monto.",
+    "markup" : "Cotizacion: fixed_minor en unidades menores + percentage_bps. Pago y vista previa: fixed_fee decimal + percentage_fee como FRACCION 0-1 con 4 decimales (0.0050 = 0,5 %)."
+  },
+  "01_crear_empresa" : {
+    "method" : "POST",
+    "path" : "/v1/users",
+    "body" : {
+      "type" : "business",
+      "business_legal_name" : "Juriscop S.A.S.",
+      "email" : "finanzas@juriscop.co",
+      "source_of_funds" : "sales_of_goods_and_services",
+      "external_id" : "juriscop"
+    }
+  },
+  "02_completar_perfil" : {
+    "method" : "PUT",
+    "path" : "/v1/users/usr_1",
+    "body" : {
+      "type" : "business",
+      "business_legal_name" : "Juriscop S.A.S.",
+      "email" : "finanzas@juriscop.co",
+      "source_of_funds" : "sales_of_goods_and_services",
+      "external_id" : "juriscop",
+      "business_type" : "corporation",
+      "formation_date" : "2019-04-02",
+      "formation_country" : "COL",
+      "expected_monthly_volume" : "100000_to_500000",
+      "expected_transaction_count" : "26_to_50",
+      "account_purpose" : "operating_a_company",
+      "additional_info" : {
+        "has_us_bank_account" : "No",
+        "has_denied_bank_account" : "No"
+      }
+    }
+  },
+  "03_sincronizar_ubos" : {
+    "method" : "PUT",
+    "path" : "/v1/users/usr_1",
+    "body" : {
+      "type" : "business",
+      "business_legal_name" : "Juriscop S.A.S.",
+      "email" : "finanzas@juriscop.co",
+      "source_of_funds" : "sales_of_goods_and_services",
+      "external_id" : "juriscop",
+      "business_type" : "corporation",
+      "formation_date" : "2019-04-02",
+      "formation_country" : "COL",
+      "expected_monthly_volume" : "100000_to_500000",
+      "expected_transaction_count" : "26_to_50",
+      "account_purpose" : "operating_a_company",
+      "additional_info" : {
+        "has_us_bank_account" : "No",
+        "has_denied_bank_account" : "No"
+      },
+      "associated_persons" : [ {
+        "first_name" : "María",
+        "last_name" : "Pérez",
+        "has_ownership" : true,
+        "ownership_percentage" : 60.00,
+        "has_control" : true,
+        "is_signer" : true,
+        "pep_status" : false,
+        "country_of_birth" : "COL",
+        "title" : "Socia fundadora",
+        "document_type" : "national_id",
+        "document_number" : "1020304050"
+      } ]
+    }
+  },
+  "04_enlaces_liveness" : {
+    "method" : "POST",
+    "path" : "/v1/users/usr_1/liveness-link",
+    "body" : {
+      "redirect" : {
+        "reject_url" : "https://portal.juriscop.co/kyb/ko",
+        "success_url" : "https://portal.juriscop.co/kyb/ok"
+      }
+    }
+  },
+  "05_abrir_cuenta_virtual" : {
+    "method" : "POST",
+    "path" : "/v1/virtual-accounts",
+    "body" : {
+      "user_id" : "usr_1",
+      "type" : "US_BANK",
+      "bank" : "slovak_savings_bank",
+      "mode" : "fiat",
+      "description" : "Operativa Juriscop"
+    }
+  },
+  "06_simular_deposito" : {
+    "method" : "POST",
+    "path" : "/v1/virtual-accounts/kva_1/simulate-deposit",
+    "body" : {
+      "amount" : "5000.00",
+      "payment_type" : "wire"
+    }
+  },
+  "07_destinatario_wire" : {
+    "method" : "POST",
+    "path" : "/v1/recipients",
+    "body" : {
+      "user_id" : "usr_1",
+      "type" : "business",
+      "company_name" : "Acme Corp",
+      "email" : "pagos@acme.com",
+      "phone" : "+13055551234",
+      "address" : {
+        "street_name" : "1 Main St",
+        "city" : "New York",
+        "state" : "NY",
+        "postal_code" : "10001",
+        "country" : "US"
+      },
+      "account" : {
+        "account_type" : "WIRE",
+        "routing_number" : "021000021",
+        "swift_code" : "EXAMUS33XXX",
+        "account_number" : "1234567890",
+        "type" : "checking",
+        "bank_name" : "Example Bank, N.A.",
+        "bank_address" : {
+          "street_name" : "1 Bank Plaza",
+          "city" : "New York",
+          "state" : "NY",
+          "postal_code" : "10001",
+          "country" : "US"
+        },
+        "doc_type" : "ein",
+        "doc_number" : "12-3456789"
+      }
+    }
+  },
+  "08_destinatario_ach" : {
+    "method" : "POST",
+    "path" : "/v1/recipients",
+    "body" : {
+      "user_id" : "usr_1",
+      "type" : "business",
+      "company_name" : "Acme Corp",
+      "address" : {
+        "street_name" : "1 Main St",
+        "city" : "New York",
+        "state" : "NY",
+        "postal_code" : "10001",
+        "country" : "US"
+      },
+      "account" : {
+        "account_type" : "ACH",
+        "routing_number" : "021000021",
+        "account_number" : "9876543210",
+        "type" : "savings",
+        "bank_name" : "Example Bank",
+        "bank_address" : "1 Bank Plaza, New York, NY",
+        "doc_type" : "ein",
+        "doc_number" : "12-3456789"
+      }
+    }
+  },
+  "09_destinatario_wallet" : {
+    "method" : "POST",
+    "path" : "/v1/recipients",
+    "body" : {
+      "user_id" : "usr_1",
+      "type" : "individual",
+      "first_name" : "Ana",
+      "last_name" : "Pérez",
+      "account" : {
+        "account_type" : "WALLET",
+        "token" : "USDT",
+        "network" : "tron",
+        "address" : "TXYZ1234567890abcdefghijklmnopqrs",
+        "doc_type" : "passport",
+        "doc_number" : "AB1234567"
+      }
+    }
+  },
+  "10_cotizar" : {
+    "method" : "POST",
+    "path" : "/v1/quotations",
+    "body" : {
+      "virtual_account_id" : "kva_1",
+      "amount" : "1000.00",
+      "rail" : "WIRE_DOMESTIC",
+      "inverse" : true,
+      "from_held_balance" : true,
+      "client_markup" : {
+        "fixed_minor" : 1500,
+        "percentage_bps" : 0
+      },
+      "target" : {
+        "currency" : "USD"
+      }
+    }
+  },
+  "11_vista_previa_pago" : {
+    "method" : "POST",
+    "path" : "/v1/virtual-accounts/kva_1/payout/preview",
+    "body" : {
+      "amount" : "1000.00",
+      "recipient_id" : "krec_wire",
+      "inverse_calculation" : true,
+      "client_markup" : {
+        "fixed_fee" : "15.00",
+        "percentage_fee" : "0.0000"
+      }
+    }
+  },
+  "12_pago_sin_cotizacion" : {
+    "method" : "POST",
+    "path" : "/v1/virtual-accounts/kva_1/payout",
+    "body" : {
+      "recipient_id" : "krec_wire",
+      "amount" : "155.50",
+      "client_markup" : {
+        "fixed_fee" : "15.00",
+        "percentage_fee" : "0.0000"
+      },
+      "nature_of_payment" : "vendor",
+      "extra_info" : {
+        "memo" : "Factura 42",
+        "internal_notes" : "Revisado por tesoreria"
+      }
+    }
+  },
+  "13_pago_con_cotizacion" : {
+    "method" : "POST",
+    "path" : "/v1/virtual-accounts/kva_1/payout",
+    "body" : {
+      "recipient_id" : "krec_wire",
+      "amount" : "1030.00",
+      "quote_id" : "qt_1",
+      "nature_of_payment" : "vendor",
+      "supporting_documents" : [ {
+        "type" : "invoice",
+        "file" : "data:application/pdf;base64,JVBERi0xLjQK"
+      } ],
+      "extra_info" : {
+        "memo" : "Factura 43"
+      }
+    }
+  },
+  "14_historial_pagos_query" : {
+    "method" : "GET",
+    "path" : "/v1/payouts",
+    "body" : {
+      "user_id" : "usr_1",
+      "status" : "COMPLETED",
+      "from_date" : "2026-09-01",
+      "page" : 1,
+      "limit" : 20
+    }
+  },
+  "15_responder_rfi" : {
+    "method" : "PATCH",
+    "path" : "/v1/rfis/rfi_1/items",
+    "body" : {
+      "items" : [ {
+        "answer_value" : "12-3456789",
+        "item_id" : "i-ein"
+      }, {
+        "answer_value" : 42,
+        "item_id" : "i-empleados"
+      }, {
+        "answer_value" : false,
+        "item_id" : "i-pep"
+      } ]
+    }
+  },
+  "16_sincronizar_rfis_query" : {
+    "method" : "GET",
+    "path" : "/v1/rfis",
+    "body" : {
+      "user_id" : "usr_1",
+      "limit" : 100,
+      "offset" : 0
+    }
+  },
+  "17_sincronizar_depositos_query" : {
+    "method" : "GET",
+    "path" : "/v1/virtual-accounts/kva_1/deposits",
+    "body" : {
+      "limit" : 100,
+      "offset" : 0
+    }
+  }
+}

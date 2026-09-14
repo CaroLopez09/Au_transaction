@@ -33,6 +33,8 @@ class SubmitOnboardingServiceTest {
     private final KiraApiClient kira = mock(KiraApiClient.class);
     private final AuditTrail audit = mock(AuditTrail.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
+    private final com.example.autransactional.application.shared.IdempotencyKeyStore idempotencyKeys =
+            mock(com.example.autransactional.application.shared.IdempotencyKeyStore.class);
 
     private SubmitOnboardingService service;
     private Tenant empresa;
@@ -46,7 +48,7 @@ class SubmitOnboardingServiceTest {
         empresa = new Tenant(TENANT, "Juriscop", "900123456-1", "Colombia");
         when(tenants.findById(TENANT)).thenAnswer(i -> Optional.of(empresa));
         when(tenants.save(any())).thenAnswer(i -> i.getArgument(0));
-        service = new SubmitOnboardingService(tenants, kira, audit, mapper);
+        service = new SubmitOnboardingService(tenants, kira, audit, mapper, idempotencyKeys);
     }
 
     private JsonNode json(String raw) {
@@ -84,8 +86,10 @@ class SubmitOnboardingServiceTest {
 
         service.register(compliance, alta());
 
-        // Dos guardados: uno reservando la clave antes de la llamada, otro con el resultado.
-        verify(tenants, times(2)).save(any());
+        // La reserva se consolida en su propia transaccion (para que un rollback no la borre)
+        // y el resultado se guarda despues con el caso de uso.
+        verify(idempotencyKeys).persistNow(empresa);
+        verify(tenants).save(any());
         assertNotNull(empresa.getOnboardingIdempotencyKey());
     }
 

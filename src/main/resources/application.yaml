@@ -47,6 +47,19 @@ kira:
 
 # --- Configuracion propia del BFF ---
 bff:
+  # Workers que cubren el hueco de un webhook perdido: Kira entrega una sola vez y sin reintentos.
+  # Los intervalos son entre ejecuciones (fixedDelay), en milisegundos.
+  reconciliation:
+    enabled: ${BFF_RECONCILIATION_ENABLED:true}
+    initial-delay-ms: 60000
+    payouts-ms: 600000        # pagos en vuelo contra GET /v1/payouts/{id}
+    payout-batch: 50
+    quotations-ms: 300000     # cotizaciones ACTIVE cuyo TTL de 15 min ya paso (sin llamar a Kira)
+    liveness-ms: 3600000      # enlaces de liveness vencidos a los 7 dias (sin llamar a Kira)
+    rfis-ms: 900000           # RFIs abiertos de cada empresa registrada
+    webhooks-ms: 1800000      # eventos almacenados con processed = false: se vuelven a proyectar
+    webhook-batch: 50
+
   security:
     jwt-secret: ${BFF_JWT_SECRET:}
     jwt-issuer: ${BFF_JWT_ISSUER:autransactional-bff}

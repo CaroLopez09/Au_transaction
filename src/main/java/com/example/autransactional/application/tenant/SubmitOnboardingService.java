@@ -1,5 +1,6 @@
 package com.example.autransactional.application.tenant;
 
+import com.example.autransactional.application.shared.IdempotencyKeyStore;
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.IdempotencyKey;
 import com.example.autransactional.domain.shared.TenantId;
@@ -39,13 +40,16 @@ public class SubmitOnboardingService {
     private final KiraApiClient kira;
     private final AuditTrail audit;
     private final ObjectMapper objectMapper;
+    private final IdempotencyKeyStore idempotencyKeys;
 
     public SubmitOnboardingService(TenantRepository tenants, KiraApiClient kira, AuditTrail audit,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper,
+                                   IdempotencyKeyStore idempotencyKeys) {
         this.tenants = tenants;
         this.kira = kira;
         this.audit = audit;
         this.objectMapper = objectMapper;
+        this.idempotencyKeys = idempotencyKeys;
     }
 
     @Transactional(readOnly = true)
@@ -81,7 +85,8 @@ public class SubmitOnboardingService {
 
         // La clave se persiste ANTES de la llamada: un timeout no puede crear dos empresas.
         IdempotencyKey key = tenant.reserveOnboardingKey();
-        tenants.save(tenant);
+        // En transaccion propia: si Kira falla, el rollback de este metodo no puede borrar la clave.
+        idempotencyKeys.persistNow(tenant);
 
         try {
             KiraUserState state = KiraUserState.from(kira.createUser(body, key));

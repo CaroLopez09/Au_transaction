@@ -59,4 +59,12 @@ public class WebhookEventEntity {
 
     @Column(name = "processing_error", length = 1000)
     private String processingError;
+
+    /**
+     * Intentos de proyeccion fallidos. Corta dos problemas del reconciliador: la fila envenenada
+     * (un evento que nunca va a proyectarse y se reintenta para siempre) y la inanicion de los
+     * eventos nuevos, que quedaban detras de las filas viejas y rotas.
+     */
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount = 0;
 }

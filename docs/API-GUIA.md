@@ -21,7 +21,7 @@ devuelve o no ofrece: maker-checker, cuestionario KYB, espejo de depósitos y bi
 | Requisito | Detalle |
 |---|---|
 | Java | 21 |
-| MySQL | Base `autransactional` en `localhost:3306` (usuario `root`, ver `application-dev.yaml`) |
+| MySQL | Base `autransactional` en `localhost:3306` (usuario `root`; exporta `DB_PASSWORD` antes de arrancar) |
 | Perfil | `dev` (por defecto) |
 
 ### 1.2 Variables de entorno
@@ -1118,6 +1118,9 @@ usar cada endpoint del BFF y qué mockear si quieres probar sin sandbox.
 | `GET`/`PATCH` | `/v1/rfis`, `/v1/rfis/{id}`, `/v1/rfis/{id}/items` | `/api/rfis` — **`X-Api-Version: 2026-06-01`** |
 | `POST`/`DELETE`/`GET` | `/v1/rfis/{id}/items/{item}/documents[/{doc}]` | documentos de RFI — **`2026-06-01`** |
 | `GET` | `/v1/countries` | `GET /api/reference/countries` (cache 24 h) |
+
+**Cuerpos exactos** de cada una de estas llamadas, capturados de los servicios reales:
+[`kira-cuerpos-peticiones.json`](kira-cuerpos-peticiones.json).
 
 **No se usan:** `GET /v1/users` (listaría las empresas de todos los clientes del integrador),
 `GET /v1/virtual-accounts/deposits` global (se usa el de cada cuenta, que ya filtra por empresa) y

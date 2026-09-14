@@ -37,7 +37,7 @@ Thymeleaf (el BFF sólo devuelve JSON).
 
 ## 2. Estructura de paquetes
 
-`com.example.autransactional` — **163 clases** en main, 32 en test.
+`com.example.autransactional` — **169 clases** en main, 40 en test.
 
 ```
 domain/                     Lógica pura. Sin anotaciones de framework.
@@ -54,6 +54,7 @@ application/                Casos de uso. Orquestan dominio + puertos.
                             RegisterRecipientService (+ vistas de Kira)
   compliance/  (5)          AnswerRfiService (bandeja, respuestas, documentos)
   reference/   (2)          ReferenceCatalogService (países, cache 24 h)
+  shared/      (1)          IdempotencyKeyStore (clave de idempotencia en transaccion propia)
   webhook/     (2)          ProcessWebhookUseCase, KiraWebhookEnvelope
   auth/        (1)          LoginUseCase
 
@@ -64,7 +65,7 @@ infrastructure/             Adaptadores técnicos.
   bootstrap/    (3)         Semilla de desarrollo, validador de secretos
   config/       (2)         Async (pool de webhooks), OpenAPI
   audit/        (1)         AuditTrail
-  reconciliation/           Vacío. Ver §9.
+  reconciliation/ (5)       Workers: pagos, cotizaciones, liveness, RFIs y eventos no proyectados
 
 interfaces/                 Entrada HTTP.
   rest/        (11)         10 controladores + manejador de errores
@@ -182,7 +183,7 @@ Login  →  Onboarding KYB  →  UBOs + liveness  →  Cuenta virtual  →  Dep�
 | `quotations` | 28 | Precios en firme + snapshot de comisiones |
 | `payouts` | 29 | Pagos + control maker-checker |
 | `rfis` | 11 | Requerimientos de compliance + lo que bloquean |
-| `webhooks_log` | 11 | Bitácora inmutable de eventos |
+| `webhooks_log` | 12 | Bitácora inmutable de eventos |
 | `audit_logs` | 11 | Quién hizo qué |
 
 **Convenciones aplicadas**
@@ -213,7 +214,7 @@ Cada una tapa un hueco documentado de la API. **Ninguna es cosmética.**
 | `recipients` | 21 columnas (espejo completo) | Kira no permite actualizar: corregir obliga a reconstruir el alta entera |
 | `quotations` | `rail`, `destination_currency`, `balance_sufficient`, `rate_source`, `fees_snapshot` | Auditoría del precio mostrado |
 | `deposits` | `microdeposit`, `updated_at` | Un microdepósito no es un ingreso |
-| `webhooks_log` | `resource_id`, `normalized_status`, `processing_error` | Reconciliar sin reparsear el payload |
+| `webhooks_log` | `resource_id`, `normalized_status`, `processing_error`, `retry_count` | Reconciliar sin reparsear el payload; el contador corta la fila envenenada |
 | `rfis` | `blocking_type`, `blocking_resource_id` (+ índice `idx_rfis_blocking`) | Enlazar el RFI con el pago que detiene; la UI debe marcarlo como "detenido" |
 
 Una desviación en sentido contrario: **`payouts.quotation_id` es nullable**, no `NOT NULL`.
@@ -313,6 +314,8 @@ Esta es la tabla más útil del documento. Cada fila es un fallo silencioso evit
 | Un item `document` nunca lleva `answer_value` | `AnswerRfiService.validate()` |
 | El `PATCH` de items es all-or-nothing: `422` por `item_id` | `RfiAnswerRejectedException` |
 | `GET /v1/rfis` pagina con `limit`+`offset`, no con `page` | `AnswerRfiService.sync()` |
+| El desglose de la cotización (`fees[]`, `totals`) sólo existe en `2026-06-01` | `KiraApiClient.QUOTATION_API_VERSION` |
+| El rollback del caso de uso borraba la clave de idempotencia ya reservada | `IdempotencyKeyStore` (`REQUIRES_NEW`) |
 | `answer_value` es texto, número o booleano según `answer_type` | `RfiCommands.ItemAnswer`, `AnswerRfiService.isScalar()` |
 | Un RFI puede bloquear un pago **o un depósito** | `AnswerRfiService.applyDetail()` / `ownerOf()` |
 | Documentos de RFI: parte `files`, máx. 20 × 30 MB, MIME del `answer_spec` | `AnswerRfiService.validateFiles()` |
@@ -328,7 +331,7 @@ Esta es la tabla más útil del documento. Cada fila es un fallo silencioso evit
 
 ## 9. Pruebas
 
-**253 pruebas, todas verdes.** Sin mocks del propio dominio: las de dominio son puras y las
+**283 pruebas, todas verdes.** Sin mocks del propio dominio: las de dominio son puras y las
 de aplicación usan Mockito sólo para `KiraApiClient` y los repositorios.
 
 Nombres en español y en indicativo, describiendo la **regla de negocio**, no el método:
@@ -336,7 +339,7 @@ Nombres en español y en indicativo, describiendo la **regla de negocio**, no el
 `seEnviaElBrutoParaQueElDestinatarioRecibaLoPrometido`.
 
 ```bash
-./mvnw test                          # las 253
+./mvnw test                          # las 283
 ./mvnw test -Dtest=PayoutTest        # una clase
 ./mvnw clean test                    # ante cambios de firma (el incremental miente)
 ```

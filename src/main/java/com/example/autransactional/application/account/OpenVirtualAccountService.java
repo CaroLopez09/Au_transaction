@@ -4,6 +4,7 @@ import com.example.autransactional.domain.account.VirtualAccount;
 import com.example.autransactional.domain.account.VirtualAccountMode;
 import com.example.autransactional.domain.account.VirtualAccountRepository;
 import com.example.autransactional.domain.account.VirtualAccountStatus;
+import com.example.autransactional.application.shared.IdempotencyKeyStore;
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.IdempotencyKey;
 import com.example.autransactional.domain.shared.TenantId;
@@ -48,14 +49,17 @@ public class OpenVirtualAccountService {
     private final KiraApiClient kira;
     private final KiraProperties properties;
     private final AuditTrail audit;
+    private final IdempotencyKeyStore idempotencyKeys;
 
     public OpenVirtualAccountService(VirtualAccountRepository accounts, TenantRepository tenants,
-                                     KiraApiClient kira, KiraProperties properties, AuditTrail audit) {
+                                     KiraApiClient kira, KiraProperties properties, AuditTrail audit,
+                                     IdempotencyKeyStore idempotencyKeys) {
         this.accounts = accounts;
         this.tenants = tenants;
         this.kira = kira;
         this.properties = properties;
         this.audit = audit;
+        this.idempotencyKeys = idempotencyKeys;
     }
 
     @Transactional(readOnly = true)
@@ -94,7 +98,8 @@ public class OpenVirtualAccountService {
                 command.description());
 
         IdempotencyKey key = account.reserveOpeningKey();
-        accounts.save(account);
+        // En transaccion propia: si Kira falla, el rollback de este metodo no puede borrar la clave.
+        idempotencyKeys.persistNow(account);
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("user_id", tenant.getKiraUserId());

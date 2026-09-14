@@ -13,7 +13,9 @@
  *       {@code QuotationRepository#findActiveExpiredBefore};</li>
  *   <li>enlaces de liveness de UBOs vencidos a los 7 dias, via
  *       {@code UboRepository#findPendingLivenessExpiredBefore};</li>
- *   <li>filas de {@code webhooks_log} almacenadas con processing_error y nunca proyectadas.</li>
+ *   <li>filas de {@code webhooks_log} almacenadas con processing_error y nunca proyectadas, via
+ *       {@code WebhookEventJpaRepository#findByProcessedFalseOrderByCreatedAtAsc}. Este ultimo no
+ *       pregunta por ningun recurso: hay eventos cuyo dato no existe en ningun GET.</li>
  * </ul>
  *
  * El planificador ya esta habilitado en

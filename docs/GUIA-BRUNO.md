@@ -62,7 +62,7 @@ Casi todo pasa por Kira. **Sin las tres credenciales del sandbox** (`KIRA_API_KE
 |---|---|---|
 | Java 21 | `java -version` | `21.x` |
 | MySQL en marcha | `ss -ltn \| grep 3306` | una línea `LISTEN ... 127.0.0.1:3306` |
-| Base `autransactional` | `mysql -uroot -p -e "show databases like 'autransactional'"` | la base listada (contraseña en `application-dev.yaml`) |
+| Base `autransactional` | `mysql -uroot -p -e "show databases like 'autransactional'"` | la base listada (la contraseña ya no está en el repo: es la de tu MySQL local, la que exportas en `DB_PASSWORD`) |
 | Bruno de escritorio | `snap list bruno` | `bruno 4.1.0` |
 | Puerto 8080 libre | `ss -ltn \| grep 8080` | ninguna línea (si IntelliJ tiene la app corriendo, párala o reiníciala) |
 

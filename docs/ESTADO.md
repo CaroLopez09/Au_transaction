@@ -1,7 +1,7 @@
 # Estado del proyecto
 
 **Fecha:** 11 de septiembre de 2026 (tarde)
-**Build:** `Tests run: 253, Failures: 0, Errors: 0` — BUILD SUCCESS (verificado con `clean`)
+**Build:** `Tests run: 283, Failures: 0, Errors: 0` — BUILD SUCCESS (verificado con `clean`)
 **Rama:** `depuracion-bff` (sin commitear) · `master` = copia de seguridad previa (`dc6af92`)
 
 > Arquitectura: [`ARQUITECTURA.md`](ARQUITECTURA.md) · Contrato HTTP: [`API-GUIA.md`](API-GUIA.md) · Pruebas con Bruno: [`GUIA-BRUNO.md`](GUIA-BRUNO.md)
@@ -13,7 +13,7 @@
 ```bash
 cd ~/Documentos/AuTransactional
 git status                                   # rama depuracion-bff, cambios sin commitear
-./mvnw clean test                            # 253 verdes
+./mvnw clean test                            # 283 verdes
 KIRA_WEBHOOK_SECRET=secreto-webhook-local ./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"
 ```
 
@@ -75,7 +75,40 @@ pruebas no lo veían porque simulan Kira. Ahora ambos servicios traducen los ids
 
 Además `PayoutView.blockedByRfiId` marca el pago detenido por un RFI abierto.
 
-### 3.5 RFIs alineados con el contrato oficial
+### 3.5 Reconciliación, idempotencia y versión de la cotización *(11-sep, noche)*
+
+**Workers de reconciliación** en `infrastructure/reconciliation/`, todos con intervalo configurable e
+interruptor `bff.reconciliation.enabled` (apagado en las pruebas):
+
+| Worker | Cada | Qué hace |
+|---|---|---|
+| `PayoutReconciliationWorker` | 10 min | `findInFlight` → `GET /v1/payouts/{id}` → estado y comprobante |
+| `QuotationReconciliationWorker` | 5 min | Cotizaciones `ACTIVE` vencidas → `EXPIRED` (sin llamar a Kira) |
+| `LivenessReconciliationWorker` | 1 h | Enlaces de liveness vencidos → `EXPIRED` (sin llamar a Kira) |
+| `RfiReconciliationWorker` | 15 min | `AnswerRfiService.syncForTenant` por empresa registrada |
+| `WebhookReprojectionWorker` | 30 min | Filas de `webhooks_log` con `processed = false` → se vuelven a proyectar; **5 intentos como tope** |
+
+Un fallo en un elemento no detiene el lote y, sin credenciales de Kira, el lote se corta con un aviso
+en vez de repetir el error por fila. **Efecto lateral medido en dev:** como el lote va de más antiguo
+a más nuevo y corta en la primera fila que necesita Kira, un `rfi.*` pendiente sin credenciales deja
+bloqueada toda la cola de reproyección. Con credenciales (cert y prod) no se da; si se quisiera
+evitar del todo, habría que saltar esa fila en lugar de cortar el lote.
+
+**Verificación en vivo (11-sep):** con `scripts/verificar-reproyeccion-dev.sh` el worker reproyectó
+la fila de prueba (`processed = 1`, `processing_error` limpiado) y, de paso, recuperó un
+`virtual_account.deposit_funds_received` real que llevaba atascado desde primera hora de la tarde. Verificado con la app arrancada: una cotización y un enlace de
+liveness vencidos pasaron a `EXPIRED` en la base, y los de pagos y RFIs registraron el aviso.
+
+**Defecto F1 corregido:** `IdempotencyKeyStore` (`application/shared`) consolida la clave en una
+transacción propia (`REQUIRES_NEW`) antes de llamar a Kira, así que el rollback del caso de uso ya no
+la borra. Cubierto por `IdempotencyKeyPersistenceTest`, que es de integración con H2 porque con mocks
+el defecto no se ve.
+
+**Cotización con el desglose:** `createQuotation` viaja con `X-Api-Version: 2026-06-01`. La respuesta
+itemizada (`fees[]`, `totals`) —de donde salen las comisiones reales que hereda el pago— sólo existe
+desde esa versión; con `2026-04-14` Kira devuelve una forma simple.
+
+### 3.6 RFIs alineados con el contrato oficial
 - `answerValue` acepta **texto, número o booleano** (antes sólo texto).
 - `blocking` también puede ser un **depósito** (`virtual_account_deposit_uuid`) → `depositId`.
 - Se reconocen los 9 `answer_type`.
@@ -88,17 +121,17 @@ Además `PayoutView.blockedByRfiId` marca el pago detenido por un RFI abierto.
 Los cambios están en `depuracion-bff` sin commitear. Revisar con `git diff master` y commitear
 cuando se dé el visto bueno.
 
-### 4.2 Workers de reconciliación — *lo siguiente*
-`infrastructure/reconciliation/` sigue vacío. Puertos listos:
+### 4.2 Reconciliación: los cinco workers están hechos
+La fila envenenada ya está resuelta con `webhooks_log.retry_count` y un tope de 5 intentos
+(§3.7). Queda una sola decisión, y no es urgente: si conviene un sexto worker que llame a
+`RecordDepositService.syncFromKira()` por cuenta.
 
-| Qué reconciliar | Puerto / método |
-|---|---|
-| Pagos en vuelo | `PayoutRepository.findInFlight(limit)` |
-| Cotizaciones vencidas | `QuotationRepository.findActiveExpiredBefore(cutoff)` |
-| Enlaces de liveness caducados | `UboRepository.findPendingLivenessExpiredBefore(cutoff)` |
-| Eventos sin proyectar | `webhooks_log.processed = false` |
-| RFIs abiertos | `AnswerRfiService.sync()` |
-| Depósitos | `RecordDepositService.syncFromKira()` *(nuevo)* |
+**Ojo al desplegar:** cert y prod van con `ddl-auto: validate` y no hay Flyway, así que la columna
+nueva se aplica a mano ANTES de subir la versión, o el arranque falla la validación:
+
+```sql
+ALTER TABLE webhooks_log ADD COLUMN retry_count INT NOT NULL DEFAULT 0;
+```
 
 ### 4.3 Menor
 - `POST /v1/versioning/upgrade` no se expone: es una operación de cuenta, no de portal.
@@ -176,9 +209,9 @@ class TempDdlDumpTest { @Test void dump() {} }
 
 | | |
 |---|---|
-| Clases de producción | 163 (185 antes de depurar) |
-| Clases de prueba | 32 |
-| Pruebas | 253 |
+| Clases de producción | 169 (185 antes de depurar) |
+| Clases de prueba | 40 |
+| Pruebas | 283 |
 | Tablas | 12 |
 | Endpoints REST | 47 operaciones sobre 40 rutas |
 | Colección Bruno | 84 peticiones en 11 carpetas |

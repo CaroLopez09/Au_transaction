@@ -102,7 +102,21 @@ public class AnswerRfiService {
     @Transactional
     public List<RfiView> sync(AuthenticatedOperator operator) {
         assertCanManage(operator);
-        Tenant tenant = tenants.findById(operator.tenantId())
+        syncInternal(operator.tenantId(), operator);
+        return list(operator, false);
+    }
+
+    /**
+     * Lo mismo, sin operador: lo usa el worker de reconciliacion, que no actua en nombre de nadie.
+     * Devuelve cuantos RFIs quedaron asentados.
+     */
+    @Transactional
+    public int syncForTenant(TenantId tenantId) {
+        return syncInternal(tenantId, null);
+    }
+
+    private int syncInternal(TenantId tenantId, AuthenticatedOperator operator) {
+        Tenant tenant = tenants.findById(tenantId)
                 .orElseThrow(() -> new DomainException("La organizacion no existe."));
         tenant.assertRegisteredInKira();
 
@@ -135,7 +149,7 @@ public class AnswerRfiService {
 
         audit.record(operator, "compliance.rfis_synced", "tenant", tenant.getId().value(), null, "OK",
                 "rfis=" + asentados);
-        return list(operator, false);
+        return asentados;
     }
 
     @Transactional

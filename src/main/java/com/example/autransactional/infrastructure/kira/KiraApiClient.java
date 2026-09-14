@@ -42,6 +42,13 @@ public class KiraApiClient {
     /** Las seis rutas de RFI solo existen en esta version; con 2026-04-14 no se encuentran. */
     static final String RFI_API_VERSION = "2026-06-01";
 
+    /**
+     * La cotizacion desglosada (fees[], totals, pricing_context) solo existe desde esta version;
+     * con 2026-04-14 la respuesta es una forma simple sin totals, y de ahi salen las comisiones
+     * reales que hereda el pago.
+     */
+    static final String QUOTATION_API_VERSION = "2026-06-01";
+
     private final RestClient restClient;
     private final KiraCredentialManager credentialManager;
     private final KiraProperties properties;
@@ -140,7 +147,8 @@ public class KiraApiClient {
     }
 
     public JsonNode createQuotation(Object body) {
-        return exchange(HttpMethod.POST, "/v1/quotations", body, null);
+        return exchangeWithStatus(HttpMethod.POST, "/v1/quotations", body, null,
+                QUOTATION_API_VERSION).body();
     }
 
     public JsonNode previewPayout(String virtualAccountId, Object body) {

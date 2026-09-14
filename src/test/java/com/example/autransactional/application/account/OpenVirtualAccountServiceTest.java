@@ -43,6 +43,8 @@ class OpenVirtualAccountServiceTest {
     private final AuditTrail audit = mock(AuditTrail.class);
     private final VirtualAccountRepository accounts = mock(VirtualAccountRepository.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
+    private final com.example.autransactional.application.shared.IdempotencyKeyStore idempotencyKeys =
+            mock(com.example.autransactional.application.shared.IdempotencyKeyStore.class);
 
     private OpenVirtualAccountService service;
     private Tenant empresa;
@@ -74,7 +76,7 @@ class OpenVirtualAccountServiceTest {
                 .findFirst());
 
         service = new OpenVirtualAccountService(accounts, tenants, kira,
-                properties("slovak_savings_bank", true), audit);
+                properties("slovak_savings_bank", true), audit, idempotencyKeys);
     }
 
     private Tenant verificada() {
@@ -141,8 +143,9 @@ class OpenVirtualAccountServiceTest {
         VirtualAccount abierta = registro.stream()
                 .filter(a -> a.getId().equals(view.id())).findFirst().orElseThrow();
         assertNotNull(abierta.getOpeningIdempotencyKey());
-        // Dos guardados: la reserva de la clave y el resultado.
-        verify(accounts, atLeast(2)).save(any());
+        // La reserva se consolida en su propia transaccion; el resultado lo guarda el caso de uso.
+        verify(idempotencyKeys).persistNow(any(VirtualAccount.class));
+        verify(accounts, atLeastOnce()).save(any());
     }
 
     @Test
@@ -229,7 +232,7 @@ class OpenVirtualAccountServiceTest {
     @Test
     void simularDepositoNoExisteFueraDelSandbox() {
         service = new OpenVirtualAccountService(accounts, tenants, kira,
-                properties("portage", false), audit);
+                properties("portage", false), audit, idempotencyKeys);
         kiraAbre("approved", "1234567890");
         var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
 
