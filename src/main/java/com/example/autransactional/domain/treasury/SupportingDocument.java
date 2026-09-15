@@ -1,7 +1,9 @@
 package com.example.autransactional.domain.treasury;
 
 import com.example.autransactional.domain.shared.DomainException;
+import com.example.autransactional.domain.shared.FileSignature;
 
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 
@@ -32,7 +34,29 @@ public record SupportingDocument(String type, String file) {
         if (file.length() > MAX_FILE_BYTES) {
             throw new DomainException("El documento supera los 3 MB permitidos.");
         }
+        assertContentMatchesDeclaredType(file);
         type = type.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /** Si el data URI dice PDF, PNG o JPEG, los primeros bytes tienen que serlo (arquitectura §7). */
+    private static void assertContentMatchesDeclaredType(String dataUri) {
+        int comma = dataUri.indexOf(',');
+        String header = comma < 0 ? "" : dataUri.substring(5, comma).toLowerCase(Locale.ROOT);
+        if (comma < 0 || !header.endsWith(";base64")) {
+            throw new DomainException("El documento debe ir como data URI base64.");
+        }
+        String mime = header.substring(0, header.length() - ";base64".length());
+        // 16 caracteres de base64 son 12 bytes: suficientes para cualquier firma reconocida.
+        String head = dataUri.substring(comma + 1, Math.min(dataUri.length(), comma + 1 + 16));
+        byte[] start;
+        try {
+            start = Base64.getDecoder().decode(head.substring(0, head.length() - head.length() % 4));
+        } catch (IllegalArgumentException e) {
+            throw new DomainException("El documento no es base64 valido.");
+        }
+        if (List.of("application/pdf", "image/png", "image/jpeg").contains(mime) && !FileSignature.matches(mime, start)) {
+            throw new DomainException("El contenido del documento no es un " + mime + ".");
+        }
     }
 
     /** Un array vacio se rechaza: o no va el campo, o van uno o dos documentos. */

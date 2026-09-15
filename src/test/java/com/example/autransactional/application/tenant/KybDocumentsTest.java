@@ -18,9 +18,17 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class KybDocumentsTest {
 
+    /** Archivo del tamano pedido que empieza por la firma real de su tipo. */
     private static KybDocumentCommands.DocumentFile archivo(String tipo, String mime, int bytes) {
+        byte[] contenido = new byte[bytes];
+        byte[] firma = switch (mime) {
+            case "image/png" -> new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+            case "image/jpeg" -> new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0};
+            default -> "%PDF-".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        };
+        System.arraycopy(firma, 0, contenido, 0, Math.min(firma.length, bytes));
         return new KybDocumentCommands.DocumentFile(tipo,
-                new KybDocumentCommands.UploadedFile("doc.pdf", mime, new byte[bytes]));
+                new KybDocumentCommands.UploadedFile("doc.pdf", mime, contenido));
     }
 
     private static KybDocumentCommands.AttachDocuments comando(
@@ -32,14 +40,14 @@ class KybDocumentsTest {
     @Test
     void elArchivoViajaComoDataUriEnBase64() {
         var file = new KybDocumentCommands.UploadedFile("acta.pdf", "application/pdf",
-                "PDF".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                "%PDF-".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         Map<String, Object> entry = KybDocuments.toIdentifyingInformation(comando(
                 List.of(new KybDocumentCommands.DocumentFile("file_business_formation", file))));
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> documents = (List<Map<String, Object>>) entry.get("documents");
-        // "UERG" es "PDF" en base64.
-        assertEquals("data:application/pdf;base64,UERG", documents.get(0).get("file"));
+        // "JVBERi0=" es "%PDF-" en base64.
+        assertEquals("data:application/pdf;base64,JVBERi0=", documents.get(0).get("file"));
         assertEquals("file_business_formation", documents.get(0).get("type"));
         assertEquals("acta.pdf", documents.get(0).get("file_name"));
     }
@@ -53,6 +61,16 @@ class KybDocumentsTest {
         assertEquals("COL", entry.get("issuing_country"));
         assertEquals("business_formation", entry.get("type"));
         assertEquals("900123456", entry.get("number"));
+    }
+
+    @Test
+    void rechazaUnArchivoCuyoContenidoNoEsElTipoDeclarado() {
+        // Un ejecutable renombrado a .pdf declara application/pdf pero no empieza por %PDF-.
+        var falso = new KybDocumentCommands.UploadedFile("acta.pdf", "application/pdf",
+                new byte[]{(byte) 0x4D, (byte) 0x5A, (byte) 0x90, 0});
+        DomainException e = assertThrows(DomainException.class, () -> KybDocuments.toIdentifyingInformation(
+                comando(List.of(new KybDocumentCommands.DocumentFile("file_business_formation", falso)))));
+        assertTrue(e.getMessage().contains("no es un application/pdf"));
     }
 
     @Test

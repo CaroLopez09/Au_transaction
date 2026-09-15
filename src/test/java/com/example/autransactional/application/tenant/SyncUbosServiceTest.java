@@ -353,7 +353,7 @@ class SyncUbosServiceTest {
 
     private KybDocumentCommands.AttachDocuments pasaporte() {
         var file = new KybDocumentCommands.UploadedFile("pasaporte.png", "image/png",
-                "PNG".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A});
         return new KybDocumentCommands.AttachDocuments("passport", "COL", "AB1234567", "2030-01-01",
                 List.of(new KybDocumentCommands.DocumentFile("front", file),
                         new KybDocumentCommands.DocumentFile("selfie", file)));

@@ -6,6 +6,7 @@ import com.example.autransactional.domain.compliance.Rfi;
 import com.example.autransactional.domain.compliance.RfiRepository;
 import com.example.autransactional.domain.compliance.RfiStatus;
 import com.example.autransactional.domain.shared.DomainException;
+import com.example.autransactional.domain.shared.FileSignature;
 import com.example.autransactional.domain.shared.TenantId;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
@@ -510,6 +511,8 @@ public class AnswerRfiService {
                 errors.put(name, "Supera los 30 MB por archivo.");
             } else if (!allowed.contains(type)) {
                 errors.put(name, "Tipo no admitido (" + type + "). Permitidos: " + String.join(", ", allowed) + ".");
+            } else if (!FileSignature.matches(type, file.content())) {
+                errors.put(name, "El contenido no es un " + type + ": el archivo esta danado o tiene otra extension.");
             }
         }
         return errors;

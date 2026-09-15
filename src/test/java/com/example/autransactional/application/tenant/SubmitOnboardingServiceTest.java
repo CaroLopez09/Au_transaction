@@ -259,7 +259,7 @@ class SubmitOnboardingServiceTest {
 
     private KybDocumentCommands.AttachDocuments acta() {
         var file = new KybDocumentCommands.UploadedFile("acta.pdf", "application/pdf",
-                "PDF".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                "%PDF-".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return new KybDocumentCommands.AttachDocuments("business_formation", "COL", "900123456", null,
                 List.of(new KybDocumentCommands.DocumentFile("file_business_formation", file)));
     }
@@ -287,7 +287,7 @@ class SubmitOnboardingServiceTest {
                 (List<Map<String, Object>>) body.getValue().get("identifying_information");
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> documents = (List<Map<String, Object>>) entries.get(0).get("documents");
-        assertEquals("data:application/pdf;base64,UERG", documents.get(0).get("file"));
+        assertEquals("data:application/pdf;base64,JVBERi0=", documents.get(0).get("file"));
     }
 
     @Test

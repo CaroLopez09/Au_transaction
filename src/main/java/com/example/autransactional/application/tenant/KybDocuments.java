@@ -1,6 +1,7 @@
 package com.example.autransactional.application.tenant;
 
 import com.example.autransactional.domain.shared.DomainException;
+import com.example.autransactional.domain.shared.FileSignature;
 
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -100,6 +101,10 @@ public final class KybDocuments {
         if (!MIME_TYPES.contains(mime)) {
             throw new DomainException("Tipo no admitido en '" + name + "' (" + mime + "). "
                     + "Kira acepta en base64: " + String.join(", ", MIME_TYPES) + ".");
+        }
+        if (!FileSignature.matches(mime, file.content())) {
+            throw new DomainException("El contenido de '" + name + "' no es un " + mime
+                    + ": el archivo esta danado o tiene otra extension.");
         }
         return file.content().length;
     }
