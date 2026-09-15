@@ -10,6 +10,7 @@ import com.example.autransactional.domain.treasury.Payout;
 import com.example.autransactional.domain.treasury.Recipient;
 import com.example.autransactional.domain.treasury.RecipientRepository;
 import com.example.autransactional.domain.treasury.PayoutRepository;
+import com.example.autransactional.domain.treasury.PayoutApprovalState;
 import com.example.autransactional.domain.treasury.Quotation;
 import com.example.autransactional.domain.treasury.QuotationRepository;
 import com.example.autransactional.domain.shared.DomainException;
@@ -60,6 +61,7 @@ public class ExecutePayoutService {
     private final AuditTrail audit;
     private final ObjectMapper objectMapper;
     private final PayoutApprovalPolicy approvalPolicy;
+    private final CreateQuoteService quotes;
 
     /** Filtros que acepta GET /v1/payouts: cualquier otro parametro lo rechaza con 400. */
     private static final Set<String> KIRA_PAYOUT_STATUSES = Set.of(
@@ -68,7 +70,9 @@ public class ExecutePayoutService {
     public ExecutePayoutService(PayoutRepository payouts, QuotationRepository quotations,
                                 VirtualAccountRepository accounts, RecipientRepository recipients,
                                 TenantRepository tenants, RfiRepository rfis, KiraApiClient kira,
-                                AuditTrail audit, ObjectMapper objectMapper, PayoutApprovalPolicy approvalPolicy) {
+                                AuditTrail audit, ObjectMapper objectMapper, PayoutApprovalPolicy approvalPolicy,
+                                CreateQuoteService quotes) {
+        this.quotes = quotes;
         this.payouts = payouts;
         this.quotations = quotations;
         this.accounts = accounts;
@@ -282,6 +286,36 @@ public class ExecutePayoutService {
                 payout.isPriceLocked() ? "cotizacion=" + payout.getQuotationId() : "sin cotizacion");
 
         return view(submitToKira(operator, payout, quotation, command));
+    }
+
+    /**
+     * D9: la cotizacion vence a los 15 min y la aprobacion puede llegar mas tarde. Se pide una
+     * nueva a Kira con la misma cuenta, destinatario, riel e importe, y el pago muestra el precio
+     * nuevo antes de aprobarlo (arquitectura §7). Lo pueden pedir quien prepara y quien aprueba.
+     */
+    @Transactional
+    public PayoutView requote(AuthenticatedOperator operator, String payoutId) {
+        if (!operator.role().canCreatePayout() && !operator.role().canApprovePayout()) {
+            throw new DomainException("Tu rol no puede recotizar pagos.");
+        }
+        Payout payout = load(operator.tenantId(), payoutId);
+        if (payout.getQuotationId() == null) {
+            throw new DomainException("Este pago no tiene precio fijado: no hay cotizacion que renovar.");
+        }
+        Quotation previous = quotations.findByIdAndTenant(payout.getQuotationId(), operator.tenantId())
+                .orElseThrow(() -> new DomainException("Cotizacion no encontrada."));
+        if (payout.getApprovalState() != PayoutApprovalState.PENDING_APPROVAL) {
+            throw new DomainException("Solo se recotiza un pago pendiente de aprobacion.");
+        }
+
+        Quotation fresh = quotes.requote(operator, previous, payout.getAmount().amount());
+        payout.replaceQuotation(fresh, Instant.now());
+        previous.expire();
+        quotations.save(previous);
+        payouts.save(payout);
+        audit.record(operator, "payout.requoted", "payout", payout.getId(), null, "OK",
+                "cotizacion_anterior=" + previous.getId() + " nueva=" + fresh.getId());
+        return view(payout);
     }
 
     @Transactional

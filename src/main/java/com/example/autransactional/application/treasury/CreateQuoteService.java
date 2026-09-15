@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -80,6 +81,21 @@ public class CreateQuoteService {
             throw new DomainException("Tu rol no puede cotizar transferencias.");
         }
 
+        return QuotationView.from(quote(operator, command));
+    }
+
+    /**
+     * Cotizacion nueva para un pago pendiente cuya cotizacion vencio (D9). La llama
+     * ExecutePayoutService, que ya comprobo que el operador puede preparar o aprobar pagos.
+     */
+    @Transactional
+    public Quotation requote(AuthenticatedOperator operator, Quotation expired, BigDecimal amount) {
+        String target = expired.getDestinationCurrency();
+        return quote(operator, new QuotationCommands.CreateQuote(expired.getVirtualAccountId(),
+                expired.getRecipientId(), amount, expired.getRail().name(), target));
+    }
+
+    private Quotation quote(AuthenticatedOperator operator, QuotationCommands.CreateQuote command) {
         Tenant tenant = tenants.findById(operator.tenantId())
                 .orElseThrow(() -> new DomainException("La organizacion no existe."));
         tenant.assertCanOperateTreasury();
@@ -132,7 +148,7 @@ public class CreateQuoteService {
                 "kira_quote_id=" + quote.quoteId() + " riel=" + rail
                         + " saldo_suficiente=" + quote.balanceSufficient());
 
-        return QuotationView.from(quotation);
+        return quotation;
     }
 
     /**

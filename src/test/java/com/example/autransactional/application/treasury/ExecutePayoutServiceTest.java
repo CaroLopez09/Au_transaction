@@ -67,6 +67,7 @@ class ExecutePayoutServiceTest {
     private Payout pago;
     private Quotation cotizacion;
     private Recipient destinatario;
+    private final CreateQuoteService cotizador = mock(CreateQuoteService.class);
     /** Umbral de doble firma: 5.000 USD (el pago de prueba es de 1.000). */
     private final PayoutApprovalPolicy politica = new PayoutApprovalPolicy(new BigDecimal("5000"), null);
 
@@ -121,7 +122,35 @@ class ExecutePayoutServiceTest {
 
         when(rfis.findOpenBlocking(any())).thenReturn(Optional.empty());
         service = new ExecutePayoutService(payouts, quotations, accounts, recipients, tenants, rfis, kira,
-                audit, mapper, politica);
+                audit, mapper, politica, cotizador);
+    }
+
+    // --- D9: recotizar un pago pendiente cuya cotizacion vencio ---
+
+    @Test
+    void recotizarAtaUnaCotizacionNuevaYAnulaLaPrimeraFirma() {
+        pagoGrande();
+        pago.attachQuotation("q-1", Instant.now().plusSeconds(900));
+        service.approveAndSubmit(approver, "p-1", new PayoutCommands.ApprovePayout(null, null, null, null));
+        assertEquals("approver-2", pago.getFirstApproverUserId());
+
+        Quotation nueva = new Quotation("q-2", TENANT, "va-1", "rec-1", QuotationRail.WIRE_DOMESTIC,
+                new BigDecimal("5000.00"), FeeBreakdown.fromTotals(new BigDecimal("20.00"), new BigDecimal("15.00")),
+                Instant.now().plusSeconds(900));
+        when(cotizador.requote(eq(approver), eq(cotizacion), any())).thenReturn(nueva);
+
+        var vista = service.requote(approver, "p-1");
+
+        assertEquals("q-2", vista.quotationId());
+        assertNull(vista.firstApproverUserId());
+        assertEquals(0, new BigDecimal("35.00").compareTo(vista.totalFee()));
+        verify(audit).record(eq(approver), eq("payout.requoted"), eq("payout"), eq("p-1"), any(), eq("OK"), anyString());
+    }
+
+    @Test
+    void unPagoSinPrecioFijadoNoSeRecotiza() {
+        assertThrows(DomainException.class, () -> service.requote(approver, "p-1"));
+        verifyNoInteractions(cotizador);
     }
 
     // --- Limites y segregacion de funciones (arquitectura §5 y §7) ---

@@ -125,6 +125,21 @@ public class Payout {
         attachQuotation(quotation.getId(), quotation.getExpiresAt());
     }
 
+    /**
+     * Cambia la cotizacion de un pago pendiente por una nueva (la anterior vencio mientras
+     * esperaba aprobacion). El precio puede cambiar, asi que una primera firma ya dada no vale.
+     */
+    public void replaceQuotation(Quotation quotation, Instant now) {
+        if (approvalState != PayoutApprovalState.PENDING_APPROVAL) {
+            throw new DomainException("Solo se recotiza un pago pendiente de aprobacion.");
+        }
+        if (quotationId == null) {
+            throw new DomainException("Este pago no tiene precio fijado: no hay cotizacion que renovar.");
+        }
+        attachQuotation(quotation, now);
+        this.firstApproverUserId = null;
+    }
+
     public boolean isQuotationExpired(Instant now) {
         return quotationExpiresAt != null && !now.isBefore(quotationExpiresAt);
     }

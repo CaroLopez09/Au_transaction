@@ -87,6 +87,13 @@ public class PayoutController {
         return payoutService.approveAndSubmit(operator, id, command);
     }
 
+    /** Renueva la cotizacion vencida de un pago pendiente; devuelve el pago con el precio nuevo. */
+    @PostMapping("/{id}/requote")
+    @PreAuthorize("hasAnyRole('TREASURY_MAKER','TREASURY_APPROVER','ADMIN')")
+    public PayoutView requote(@AuthenticationPrincipal AuthenticatedOperator operator, @PathVariable String id) {
+        return payoutService.requote(operator, id);
+    }
+
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasAnyRole('TREASURY_APPROVER','ADMIN')")
     public PayoutView reject(@AuthenticationPrincipal AuthenticatedOperator operator,

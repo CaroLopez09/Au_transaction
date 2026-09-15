@@ -863,6 +863,7 @@ Kira no ofrece esto a los integradores, así que vive aquí.
 | `GET` | `/api/payouts/{id}` | cualquiera autenticado |
 | `POST` | `/api/payouts` | `TREASURY_MAKER` o `ADMIN` |
 | `POST` | `/api/payouts/{id}/approve` | `TREASURY_APPROVER` o `ADMIN` |
+| `POST` | `/api/payouts/{id}/requote` | `TREASURY_MAKER`, `TREASURY_APPROVER` o `ADMIN` |
 | `POST` | `/api/payouts/{id}/reject` | `TREASURY_APPROVER` o `ADMIN` |
 | `POST` | `/api/payouts/{id}/refresh` | todos menos `READ_ONLY` (consulta a Kira) |
 | `GET` | `/api/payouts/{id}/events` | cualquiera autenticado |
@@ -927,6 +928,15 @@ final**. Sólo aparece tras el envío.
 
 Al crear se genera y persiste una `Idempotency-Key` (UUID v4): un reintento replica el
 mismo pago en Kira en lugar de crear uno nuevo.
+
+#### `POST /api/payouts/{id}/requote` — renovar una cotización vencida
+
+Sin cuerpo. La cotización vive 15 min y la aprobación puede llegar después (D9). Pide a Kira
+una **nueva** con la misma cuenta, destinatario, riel e importe, la ata al pago pendiente y marca
+la anterior como vencida. Responde el `PayoutView` con el **desglose nuevo**, que es el que el
+aprobador revisa antes de aprobar. Si el pago necesitaba dos firmas, **una primera firma ya dada
+se anula** (el precio pudo cambiar). Queda auditado como `payout.requoted`. `422` si el pago no
+está pendiente o no tiene precio fijado.
 
 #### `POST /api/payouts/{id}/approve`
 
