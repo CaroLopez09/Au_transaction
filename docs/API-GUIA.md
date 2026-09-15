@@ -199,7 +199,7 @@ para el producto objetivo (`usa-virtual-accounts`).
 | `GET` | `/api/onboarding` | cualquiera autenticado |
 | `POST` | `/api/onboarding` | `ADMIN` o `COMPLIANCE_INTERNAL` |
 | `PUT` | `/api/onboarding` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `POST` | `/api/onboarding/refresh` | cualquiera autenticado |
+| `POST` | `/api/onboarding/refresh` | todos menos `READ_ONLY` (consulta a Kira) |
 
 #### `POST /api/onboarding` — alta mínima
 
@@ -453,8 +453,8 @@ mover fondos no hay cotización ni pago.
 | `GET` | `/api/virtual-accounts` | cualquiera autenticado |
 | `GET` | `/api/virtual-accounts/{id}` | cualquiera autenticado |
 | `POST` | `/api/virtual-accounts` | `ADMIN`, `TREASURY_MAKER` o `COMPLIANCE_INTERNAL` |
-| `POST` | `/api/virtual-accounts/{id}/refresh` | cualquiera autenticado |
-| `POST` | `/api/virtual-accounts/{id}/balance` | cualquiera autenticado |
+| `POST` | `/api/virtual-accounts/{id}/refresh` | todos menos `READ_ONLY` (consulta a Kira) |
+| `POST` | `/api/virtual-accounts/{id}/balance` | todos menos `READ_ONLY` (consulta a Kira) |
 | `POST` | `/api/virtual-accounts/{id}/simulate-deposit` | `ADMIN` o `TREASURY_MAKER` *(sólo sandbox)* |
 
 #### `POST /api/virtual-accounts`
@@ -541,7 +541,7 @@ como red de seguridad, se sincronizan desde Kira.
 |---|---|---|
 | `GET` | `/api/deposits?limit=50` | cualquiera autenticado |
 | `GET` | `/api/virtual-accounts/{id}/deposits?limit=50` | cualquiera autenticado |
-| `POST` | `/api/virtual-accounts/{id}/deposits/sync` | cualquiera autenticado |
+| `POST` | `/api/virtual-accounts/{id}/deposits/sync` | todos menos `READ_ONLY` (consulta a Kira) |
 
 `POST …/deposits/sync` trae de Kira (`GET /v1/virtual-accounts/{id}/deposits`, `limit`+`offset`)
 los depósitos de la cuenta y los asienta con la misma proyección que los webhooks, así que
@@ -825,7 +825,7 @@ Kira no ofrece esto a los integradores, así que vive aquí.
 | `POST` | `/api/payouts` | `TREASURY_MAKER` o `ADMIN` |
 | `POST` | `/api/payouts/{id}/approve` | `TREASURY_APPROVER` o `ADMIN` |
 | `POST` | `/api/payouts/{id}/reject` | `TREASURY_APPROVER` o `ADMIN` |
-| `POST` | `/api/payouts/{id}/refresh` | cualquiera autenticado |
+| `POST` | `/api/payouts/{id}/refresh` | todos menos `READ_ONLY` (consulta a Kira) |
 | `GET` | `/api/payouts/{id}/events` | cualquiera autenticado |
 | `POST` | `/api/payouts/preview` | `TREASURY_MAKER` o `ADMIN` |
 | `GET` | `/api/payouts/kira?status=&page=1&limit=20&fromDate=&toDate=` | cualquiera autenticado |
@@ -1102,7 +1102,7 @@ sigue bloqueado.
 | `PATCH` | `/api/rfis/{id}/items` | `ADMIN` o `COMPLIANCE_INTERNAL` |
 | `POST` | `/api/rfis/{id}/items/{itemId}/documents` *(multipart)* | `ADMIN` o `COMPLIANCE_INTERNAL` |
 | `DELETE` | `/api/rfis/{id}/items/{itemId}/documents/{documentId}` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `GET` | `/api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | cualquiera autenticado |
+| `GET` | `/api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | `ADMIN`, `COMPLIANCE_INTERNAL` (queda auditado) |
 
 #### Respuesta (`RfiView`)
 

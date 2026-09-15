@@ -89,6 +89,7 @@ public class OnboardingController {
     }
 
     @PostMapping("/refresh")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
     public OnboardingView refresh(@AuthenticationPrincipal AuthenticatedOperator operator) {
         return onboarding.refresh(operator);
     }

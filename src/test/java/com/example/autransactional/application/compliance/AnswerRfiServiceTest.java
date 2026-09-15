@@ -32,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 class AnswerRfiServiceTest {
@@ -489,5 +490,8 @@ class AnswerRfiServiceTest {
 
         assertEquals("https://files.kira.test/x?sig=abc", link.downloadUrl());
         assertEquals(java.time.Instant.parse("2026-09-11T15:05:00Z"), link.expiresAt());
+        // La descarga queda auditada, pero sin la URL firmada.
+        verify(audit).record(eq(cumplimiento), eq("compliance.rfi_document_link_issued"), eq("rfi"),
+                eq(rfi.getId()), isNull(), eq("OK"), eq("item=i-doc documento=doc-1"));
     }
 }

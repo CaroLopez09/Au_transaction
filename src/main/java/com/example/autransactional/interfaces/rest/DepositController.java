@@ -4,6 +4,7 @@ import com.example.autransactional.application.account.DepositView;
 import com.example.autransactional.application.account.RecordDepositService;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,6 +36,7 @@ public class DepositController {
 
     /** Trae de Kira los depositos de la cuenta y los asienta. Idempotente por id de deposito. */
     @PostMapping("/virtual-accounts/{id}/deposits/sync")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
     public List<DepositView> syncFromKira(@AuthenticationPrincipal AuthenticatedOperator operator,
                                           @PathVariable String id) {
         return deposits.syncFromKira(operator, id);

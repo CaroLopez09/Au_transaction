@@ -103,6 +103,7 @@ public class PayoutController {
     }
 
     @PostMapping("/{id}/refresh")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
     public PayoutView refresh(@AuthenticationPrincipal AuthenticatedOperator operator,
                               @PathVariable String id) {
         return payoutService.refreshFromKira(operator, id);

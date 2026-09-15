@@ -97,7 +97,7 @@ Recomendación de orden para lo que queda hasta el 15-oct, en §7.
 | Requisito ARQ | Estado | Falta |
 |---|---|---|
 | Bandeja, detalle, respuesta tipada (9 tipos), lote atómico | ✅ | — |
-| Documentos: subir, enlace temporal, borrar con confirmación | ✅ | **El enlace de descarga no se audita** (`AnswerRfiService.documentLink`); ARQ §7 y §10 lo piden |
+| Documentos: subir, enlace temporal, borrar con confirmación | ✅ | Enlace de descarga auditado desde el 15-sep |
 | Borrar documento como permiso configurable por rol | ◐ | Permiso fijo por rol en código; no es configurable |
 | `ubo_link`, retirados, motivo de cierre | ✅ | — |
 
@@ -138,7 +138,7 @@ Recomendación de orden para lo que queda hasta el 15-oct, en §7.
 
 | Servicio ARQ | Estado | Evidencia / falta |
 |---|---|---|
-| Autenticación propia y RBAC | ✅ | JWT, 6 roles, MFA TOTP, `@PreAuthorize`. **G-09:** `refresh`, `balance`, `deposits/sync`, `payouts/{id}/refresh`, `rfis/{id}/refresh` y el enlace de documento no tienen `@PreAuthorize`, así que `READ_ONLY` consume cuota de Kira |
+| Autenticación propia y RBAC | ✅ | JWT, 6 roles, MFA TOTP, `@PreAuthorize`. G-09 cerrado el 15-sep: los refrescos que consultan a Kira excluyen `READ_ONLY` y el enlace de documento RFI es de cumplimiento y queda auditado |
 | Kira credential manager | ✅ | `KiraCredentialManager`. Caché fija de 3300 s que no honra `expires_in` (seguro, pero impreciso). Credenciales del sandbox por rotar |
 | Kira API adapter | ◐ | **Versión mezclada**: `2026-04-14` por defecto y `2026-06-01` para RFIs y cotizaciones; el go-live checklist exige una sola |
 | Base de datos de dominio | ✅ | Borradores, campos no devueltos, razones, archivados. Sin Flyway: DDL a mano (ESTADO §7) |
@@ -148,7 +148,7 @@ Recomendación de orden para lo que queda hasta el 15-oct, en §7.
 | Reconciliation workers | ✅ | 7 workers. Queda abierto un worker de depósitos por cuenta (ESTADO §4.2) |
 | Idempotency manager | ✅ | Cuentas, destinatarios y pagos. G-23: una cuenta local sin `kiraAccountId` tras un fallo de Kira (no re-verificado hoy) |
 | **Approval engine** | ◐ | Maker-checker simple. **Sin límites, sin varias firmas y sin política configurable** |
-| Audit log inmutable | ◐ | Solo inserción desde la aplicación, sin garantía en base de datos. **Sin correlación ni idempotency key** en la fila |
+| Audit log inmutable | ◐ | Solo inserción desde la aplicación, sin garantía en base de datos. Guarda la idempotency key en `changes`; **sin id de correlación** |
 | Notification gateway | ✅ | Dentro de la app (alcance acordado) |
 | **Observabilidad** | ❌ | Solo `actuator/health`. Sin Micrometer ni Prometheus, sin trazas, sin `X-Request-Id` o MDC y sin alertas de webhooks o latencia de Kira |
 
@@ -197,7 +197,7 @@ cliente piloto esto es aceptable; hay que declararlo como deuda.
 | Maker-checker con política configurable | ◐ | Regla fija, no configurable |
 | Eventos duplicados y perdidos | ✅ | Deduplicación + reconciliación |
 | Estados case-insensitive y desconocidos | ✅ | Pruebas de estados |
-| **Documentos: descargas y borrados auditados** | ◐ | Borrado sí; **descarga no** |
+| Documentos: descargas y borrados auditados | ✅ | `compliance.rfi_document_link_issued` y `compliance.rfi_document_removed` |
 | Errores con acción concreta | ✅ | Mapeo en el front |
 
 ---
@@ -245,7 +245,7 @@ Estimación con 7,5 h/día (6,5 los viernes).
 | **P0** | D3 banco + `requested_banks` | Sin esto la cuenta real puede fallar | 0,5 d + respuesta de Kira |
 | **P0** | V1 versión única `2026-06-01` | Go-live checklist | 1,5 d (cuentas, pagos, depósitos, pruebas y Bruno) |
 | **P0** | D4 consentimiento + `tos_accepted_version` (pantalla, registro auditado, envío) | ARQ §7 y Kira | 1,5 d |
-| **P0** | G-09 `@PreAuthorize` en refrescos + auditar descarga de documentos RFI | Seguridad, pocas líneas | 0,5 d |
+| ~~P0~~ | ~~G-09 `@PreAuthorize` en refrescos + auditar descarga de documentos RFI~~ | **Hecho 15-sep** | — |
 | **P0** | DDL §7 en cert y `BFF_MFA_ENCRYPTION_KEY`; rotar credenciales | Despliegue | 0,5 d |
 | **P1** | Observabilidad mínima: Micrometer/Prometheus, `X-Request-Id` en MDC y en `audit_log`, métricas de webhooks y latencia de Kira | ARQ §5, operación en producción | 2 d |
 | **P1** | Validación de MIME real (firma de bytes) en KYB y RFI | ARQ §7 | 0,5 d |

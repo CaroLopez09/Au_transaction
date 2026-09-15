@@ -107,6 +107,7 @@ public class RfiController {
 
     /** Enlace temporal (minutos). Abrirlo al momento; si caduca, pedir otro. */
     @GetMapping("/{id}/items/{itemId}/documents/{documentId}/link")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
     public RfiDocumentLink documentLink(@AuthenticationPrincipal AuthenticatedOperator operator,
                                         @PathVariable String id, @PathVariable String itemId,
                                         @PathVariable String documentId) {

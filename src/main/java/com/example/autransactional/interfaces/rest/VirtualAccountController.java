@@ -6,9 +6,9 @@ import com.example.autransactional.application.account.VirtualAccountView;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -55,12 +55,14 @@ public class VirtualAccountController {
 
     /** Relee la cuenta. Cubre el hueco de un virtual_account.activated que nunca llego. */
     @PostMapping("/{id}/refresh")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
     public VirtualAccountView refresh(@AuthenticationPrincipal AuthenticatedOperator operator,
                                       @PathVariable String id) {
         return accounts.refresh(operator, id);
     }
 
     @PostMapping("/{id}/balance")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
     public VirtualAccountView refreshBalance(@AuthenticationPrincipal AuthenticatedOperator operator,
                                              @PathVariable String id) {
         return accounts.refreshBalance(operator, id);

@@ -310,8 +310,11 @@ public class AnswerRfiService {
         return toView(rfi);
     }
 
-    /** Enlace temporal de descarga. La URL no se registra: es una credencial al portador. */
-    @Transactional(readOnly = true)
+    /**
+     * Enlace temporal de descarga. La URL no se registra: es una credencial al portador. Si se
+     * registra quién la pidió (arquitectura §7: descargas sensibles auditadas).
+     */
+    @Transactional
     public RfiDocumentLink documentLink(AuthenticatedOperator operator, String rfiId, String itemId,
                                         String documentId) {
         Rfi rfi = load(operator.tenantId(), rfiId);
@@ -321,6 +324,8 @@ public class AnswerRfiService {
         if (url == null) {
             throw new DomainException("Kira no devolvio un enlace de descarga para ese archivo.");
         }
+        audit.record(operator, "compliance.rfi_document_link_issued", "rfi", rfi.getId(), null, "OK",
+                "item=" + itemId + " documento=" + documentId);
         return new RfiDocumentLink(url, parseInstant(text(link, "expires_at")));
     }
 
