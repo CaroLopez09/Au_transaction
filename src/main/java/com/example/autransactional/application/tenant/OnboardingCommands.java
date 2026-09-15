@@ -34,6 +34,13 @@ public final class OnboardingCommands {
     }
 
     /**
+     * Aceptacion de los terminos por el operador. La version debe ser la vigente
+     * (bff.terms.version): aceptar una anterior no vale.
+     */
+    public record AcceptTerms(@NotBlank String version) {
+    }
+
+    /**
      * Borrador completo del formulario de vinculacion, con los nombres de campo de Kira.
      * Reemplaza el anterior; un objeto vacio borra el borrador. Nunca se envia a Kira.
      */

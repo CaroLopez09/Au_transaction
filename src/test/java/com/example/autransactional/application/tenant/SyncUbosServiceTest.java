@@ -30,9 +30,13 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 class SyncUbosServiceTest {
+
+    private static final UboCommands.RequestLivenessLinks CONSENTIDO =
+            new UboCommands.RequestLivenessLinks(null, null, true);
 
     private static final TenantId TENANT = TenantId.of("juriscop");
 
@@ -232,7 +236,7 @@ class SyncUbosServiceTest {
         registrar("Ana", true, "60");
 
         assertThrows(DomainException.class,
-                () -> service.requestLivenessLinks(compliance, null));
+                () -> service.requestLivenessLinks(compliance, CONSENTIDO));
 
         verify(kira, never()).requestLivenessLink(anyString(), any());
     }
@@ -250,7 +254,7 @@ class SyncUbosServiceTest {
                 """));
 
         service.requestLivenessLinks(compliance,
-                new UboCommands.RequestLivenessLinks("https://portal/ok", "https://portal/ko"));
+                new UboCommands.RequestLivenessLinks("https://portal/ok", "https://portal/ko", true));
 
         assertEquals("https://kira/l/ana", ana.getLivenessLink());
         assertEquals(Instant.parse("2026-09-17T20:30:00.000Z"), ana.getLivenessExpiresAt());
@@ -267,7 +271,7 @@ class SyncUbosServiceTest {
                                           "liveness_link": "https://kira/l/ana" } ] } }
                 """));
 
-        service.requestLivenessLinks(compliance, null);
+        service.requestLivenessLinks(compliance, CONSENTIDO);
 
         assertEquals("per_nueva", ana.getPersonReferenceId());
         assertNotNull(ana.getLivenessLink());
@@ -281,7 +285,7 @@ class SyncUbosServiceTest {
         registrar("Ana", true, "60");
         when(kira.requestLivenessLink(anyString(), any())).thenReturn(json("{ \"links\": [] }"));
 
-        service.requestLivenessLinks(compliance, new UboCommands.RequestLivenessLinks(null, null));
+        service.requestLivenessLinks(compliance, CONSENTIDO);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
@@ -321,6 +325,32 @@ class SyncUbosServiceTest {
 
     // --- Documentos de identidad de una persona ---
 
+    @Test
+    void sinConsentimientoBiometricoNiSelfieNiEnlaces() {
+        kybEnCurso();
+        registrar("Ana", true, "60");
+
+        var e = assertThrows(DomainException.class, () -> service.attachDocuments(compliance, "ana", pasaporte(), false));
+        assertEquals(SyncUbosService.BIOMETRIC_CONSENT_REQUIRED, e.getMessage());
+        assertThrows(DomainException.class, () -> service.requestLivenessLinks(compliance, null));
+        assertThrows(DomainException.class, () -> service.requestLivenessLinks(compliance,
+                new UboCommands.RequestLivenessLinks(null, null, false)));
+
+        verifyNoInteractions(kira);
+    }
+
+    @Test
+    void elConsentimientoDeLaPruebaDeVidaQuedaAuditado() {
+        kybEnCurso();
+        registrar("Ana", true, "60");
+        when(kira.requestLivenessLink(anyString(), any())).thenReturn(json("{ \"links\": [] }"));
+
+        service.requestLivenessLinks(compliance, CONSENTIDO);
+
+        verify(audit).record(eq(compliance), eq("tenant.biometric_consent_recorded"), eq("tenant"), anyString(),
+                isNull(), eq("OK"), eq("liveness"));
+    }
+
     private KybDocumentCommands.AttachDocuments pasaporte() {
         var file = new KybDocumentCommands.UploadedFile("pasaporte.png", "image/png",
                 "PNG".getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -336,7 +366,7 @@ class SyncUbosServiceTest {
         ana.describeEmail("ana@juriscop.co");
         when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\" }"));
 
-        service.attachDocuments(compliance, "ana", pasaporte());
+        service.attachDocuments(compliance, "ana", pasaporte(), true);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
@@ -366,7 +396,7 @@ class SyncUbosServiceTest {
         registrar("ana", true, "60");
 
         var e = assertThrows(DomainException.class,
-                () -> service.attachDocuments(compliance, "ana", pasaporte()));
+                () -> service.attachDocuments(compliance, "ana", pasaporte(), true));
 
         assertTrue(e.getMessage().contains("email"), e.getMessage());
         verify(kira, never()).updateUser(anyString(), any());
@@ -377,7 +407,7 @@ class SyncUbosServiceTest {
         kybEnCurso();
 
         assertThrows(DomainException.class,
-                () -> service.attachDocuments(compliance, "de-otra-empresa", pasaporte()));
+                () -> service.attachDocuments(compliance, "de-otra-empresa", pasaporte(), true));
         verify(kira, never()).updateUser(anyString(), any());
     }
 

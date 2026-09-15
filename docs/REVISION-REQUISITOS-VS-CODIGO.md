@@ -242,9 +242,9 @@ Estimación con 7,5 h/día (6,5 los viernes).
 
 | Prioridad | Trabajo | Motivo | Estimación |
 |---|---|---|---|
-| **P0** | D3 banco + `requested_banks` | Sin esto la cuenta real puede fallar | 0,5 d + respuesta de Kira |
-| **P0** | V1 versión única `2026-06-01` | Go-live checklist | 1,5 d (cuentas, pagos, depósitos, pruebas y Bruno) |
-| **P0** | D4 consentimiento + `tos_accepted_version` (pantalla, registro auditado, envío) | ARQ §7 y Kira | 1,5 d |
+| ~~P0~~ | ~~D3 banco + `requested_banks`~~ | **Hecho 15-sep:** `jp_morgan` validado al arrancar | — |
+| ~~P0~~ | ~~V1 versión única `2026-06-01`~~ | **Hecho 15-sep** | — |
+| ~~P0~~ | ~~D4 consentimiento + `tos_accepted_version`~~ | **Hecho 15-sep;** falta la versión real de los términos | — |
 | ~~P0~~ | ~~G-09 `@PreAuthorize` en refrescos + auditar descarga de documentos RFI~~ | **Hecho 15-sep** | — |
 | **P0** | DDL §7 en cert y `BFF_MFA_ENCRYPTION_KEY`; rotar credenciales | Despliegue | 0,5 d |
 | **P1** | Observabilidad mínima: Micrometer/Prometheus, `X-Request-Id` en MDC y en `audit_log`, métricas de webhooks y latencia de Kira | ARQ §5, operación en producción | 2 d |
@@ -253,7 +253,7 @@ Estimación con 7,5 h/día (6,5 los viernes).
 | **P1** | D5 `ein` condicional | Evita rechazos | 0,5 d |
 | **P1** | Límites por monto por empresa (umbral en configuración → segunda firma) + segregación destinatario/aprobador | ARQ §5 y §7 | 2,5 d |
 | **P1** | Documentación desfasada (§8) | Entrega | 1 d |
-| **P2** | Instrucciones cripto (G-19) | Solo si el piloto usa cripto: **preguntar** | 2 d |
+| ~~P2~~ | ~~Instrucciones cripto (G-19)~~ | **Fuera de alcance:** el piloto no usa cripto (15-sep) | — |
 | **P2** | Administración de operadores (G-13) | Hoy se dan de alta por semilla o SQL | 2 d |
 | **P2** | Paginación y filtros de servidor (G-14), exportación de auditoría | Volumen | 1,5 d |
 | **P3** | Antimalware, parametrización y feature flags, conciliación, soporte, preferencias de avisos, refresh token o revocación | ARQ fase 5 o infraestructura | Fuera del 15-oct salvo que se pida |

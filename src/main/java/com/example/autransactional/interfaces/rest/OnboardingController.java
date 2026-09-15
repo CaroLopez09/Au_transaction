@@ -88,6 +88,21 @@ public class OnboardingController {
                 informationType, issuingCountry, number, expiration, toDocuments(files, types)));
     }
 
+    /** Terminos vigentes y la version aceptada por la empresa. */
+    @GetMapping("/terms")
+    public SubmitOnboardingService.TermsView terms(@AuthenticationPrincipal AuthenticatedOperator operator) {
+        return onboarding.terms(operator);
+    }
+
+    /** Acepta los terminos vigentes; exige el expediente creado en Kira. */
+    @PostMapping("/terms")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    public SubmitOnboardingService.TermsView acceptTerms(
+            @AuthenticationPrincipal AuthenticatedOperator operator,
+            @Valid @RequestBody OnboardingCommands.AcceptTerms command) {
+        return onboarding.acceptTerms(operator, command);
+    }
+
     @PostMapping("/refresh")
     @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
     public OnboardingView refresh(@AuthenticationPrincipal AuthenticatedOperator operator) {

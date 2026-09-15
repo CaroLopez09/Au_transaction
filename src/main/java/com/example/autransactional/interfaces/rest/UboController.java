@@ -76,7 +76,8 @@ public class UboController {
      *
      * Kira empareja las personas por email, asi que el beneficiario debe tener uno
      * registrado. La selfie junto al documento activa el face match sin sesion interactiva.
-     * Mismo multipart que el de la empresa: `files` y `types` emparejados por indice.
+     * Mismo multipart que el de la empresa: `files` y `types` emparejados por indice. Con una
+     * selfie hace falta `biometricConsent=true`: el consentimiento de la persona queda auditado.
      */
     @PostMapping(value = "/{id}/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
@@ -87,9 +88,11 @@ public class UboController {
                                    @RequestParam(required = false) String number,
                                    @RequestParam(required = false) String expiration,
                                    @RequestPart("files") List<MultipartFile> files,
-                                   @RequestParam("types") List<String> types) {
+                                   @RequestParam("types") List<String> types,
+                                   @RequestParam(defaultValue = "false") boolean biometricConsent) {
         return ubos.attachDocuments(operator, id, new KybDocumentCommands.AttachDocuments(
-                informationType, issuingCountry, number, expiration, toDocuments(files, types)));
+                informationType, issuingCountry, number, expiration, toDocuments(files, types)),
+                biometricConsent);
     }
 
     @PostMapping("/liveness-links")

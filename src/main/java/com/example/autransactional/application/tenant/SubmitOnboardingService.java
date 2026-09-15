@@ -13,6 +13,7 @@ import com.example.autransactional.infrastructure.kira.KiraProperties;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.type.TypeReference;
@@ -41,22 +42,31 @@ public class SubmitOnboardingService {
 
     private static final String IDENTIFYING_INFORMATION = "identifying_information";
 
+    /** Solo lo escribe acceptTerms: el perfil que manda el portal no puede fijarlo. */
+    static final String TOS_ACCEPTED_VERSION = "tos_accepted_version";
+
     private final TenantRepository tenants;
     private final KiraApiClient kira;
     private final AuditTrail audit;
     private final ObjectMapper objectMapper;
     private final IdempotencyKeyStore idempotencyKeys;
     private final String bank;
+    private final String termsVersion;
+    private final String termsUrl;
 
     public SubmitOnboardingService(TenantRepository tenants, KiraApiClient kira, AuditTrail audit,
                                    ObjectMapper objectMapper,
-                                   IdempotencyKeyStore idempotencyKeys, KiraProperties properties) {
+                                   IdempotencyKeyStore idempotencyKeys, KiraProperties properties,
+                                   @Value("${bff.terms.version:}") String termsVersion,
+                                   @Value("${bff.terms.url:}") String termsUrl) {
         this.tenants = tenants;
         this.kira = kira;
         this.audit = audit;
         this.objectMapper = objectMapper;
         this.idempotencyKeys = idempotencyKeys;
         this.bank = properties.bank();
+        this.termsVersion = termsVersion == null || termsVersion.isBlank() ? null : termsVersion.trim();
+        this.termsUrl = termsUrl == null || termsUrl.isBlank() ? null : termsUrl.trim();
     }
 
     @Transactional(readOnly = true)
@@ -131,7 +141,9 @@ public class SubmitOnboardingService {
         tenant.assertActive();
         tenant.assertRegisteredInKira();
 
-        Map<String, Object> body = forUpdate(merge(tenant.getOnboardingPayload(), command.profile()));
+        Map<String, Object> incoming = new LinkedHashMap<>(command.profile());
+        incoming.remove(TOS_ACCEPTED_VERSION);
+        Map<String, Object> body = forUpdate(merge(tenant.getOnboardingPayload(), incoming));
 
         KiraUserState state = KiraUserState.from(kira.updateUser(tenant.getKiraUserId(), body));
         tenant.recordOnboardingPayload(objectMapper.writeValueAsString(body));
@@ -188,6 +200,49 @@ public class SubmitOnboardingService {
         }
 
         return refreshInternal(operator, tenant);
+    }
+
+    /** Terminos vigentes y la version que la empresa acepto (arquitectura §2.1 y §7). */
+    @Transactional(readOnly = true)
+    public TermsView terms(AuthenticatedOperator operator) {
+        return termsOf(load(operator.tenantId()));
+    }
+
+    /**
+     * Registra la aceptacion de los terminos vigentes y la manda a Kira como
+     * tos_accepted_version (Kira sella tos_accepted_at). Queda auditada con el operador y su IP.
+     */
+    @Transactional
+    public TermsView acceptTerms(AuthenticatedOperator operator, OnboardingCommands.AcceptTerms command) {
+        assertCanManage(operator);
+        if (termsVersion == null) {
+            throw new DomainException("No hay terminos vigentes configurados (bff.terms.version).");
+        }
+        if (!termsVersion.equals(command.version())) {
+            throw new DomainException("Los terminos cambiaron: vuelve a leer la version " + termsVersion + ".");
+        }
+        Tenant tenant = load(operator.tenantId());
+        tenant.assertActive();
+        tenant.assertRegisteredInKira();
+
+        kira.updateUser(tenant.getKiraUserId(), Map.of(TOS_ACCEPTED_VERSION, termsVersion));
+        Map<String, Object> stored = readPayload(tenant.getOnboardingPayload());
+        stored.put(TOS_ACCEPTED_VERSION, termsVersion);
+        tenant.recordOnboardingPayload(objectMapper.writeValueAsString(stored));
+        tenants.save(tenant);
+
+        audit.record(operator, "tenant.terms_accepted", "tenant", tenant.getId().value(), null, "OK",
+                "version=" + termsVersion);
+        return termsOf(tenant);
+    }
+
+    private TermsView termsOf(Tenant tenant) {
+        Object accepted = readPayload(tenant.getOnboardingPayload()).get(TOS_ACCEPTED_VERSION);
+        return new TermsView(termsVersion, termsUrl, accepted == null ? null : accepted.toString());
+    }
+
+    /** version y url son null si no hay terminos configurados; acceptedVersion, si nunca se aceptaron. */
+    public record TermsView(String version, String url, String acceptedVersion) {
     }
 
     /** Paso 3: el recurso es la autoridad. Tambien cubre el hueco de un webhook perdido. */

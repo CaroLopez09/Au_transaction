@@ -35,6 +35,9 @@ import java.util.UUID;
 @Service
 public class SyncUbosService {
 
+    static final String BIOMETRIC_CONSENT_REQUIRED = "Confirma que las personas consintieron el tratamiento "
+            + "de sus datos biometricos antes de la selfie o la prueba de vida.";
+
     private static final Logger log = LoggerFactory.getLogger(SyncUbosService.class);
 
     private final UboRepository ubos;
@@ -148,8 +151,12 @@ public class SyncUbosService {
      */
     @Transactional
     public UboView attachDocuments(AuthenticatedOperator operator, String uboId,
-                                   KybDocumentCommands.AttachDocuments command) {
+                                   KybDocumentCommands.AttachDocuments command, boolean biometricConsent) {
         assertCanManage(operator);
+        boolean conSelfie = command.documents().stream().anyMatch(d -> "selfie".equalsIgnoreCase(d.documentType()));
+        if (conSelfie && !biometricConsent) {
+            throw new DomainException(BIOMETRIC_CONSENT_REQUIRED);
+        }
         Tenant tenant = load(operator.tenantId());
         tenant.assertRegisteredInKira();
 
@@ -173,6 +180,10 @@ public class SyncUbosService {
         ubo.markSyncedToKira();
         ubos.save(ubo);
 
+        if (conSelfie) {
+            audit.record(operator, "tenant.biometric_consent_recorded", "ubo", ubo.getId(), null, "OK",
+                    "selfie");
+        }
         // El archivo no se guarda en ningun sitio: lo custodia Kira.
         audit.record(operator, "tenant.ubo_documents_attached", "ubo", ubo.getId(), null, "OK",
                 "registro=" + entry.get("type") + " archivos=" + command.documents().size());
@@ -190,12 +201,15 @@ public class SyncUbosService {
     public UboView.Roster requestLivenessLinks(AuthenticatedOperator operator,
                                                UboCommands.RequestLivenessLinks command) {
         assertCanManage(operator);
+        if (command == null || !Boolean.TRUE.equals(command.biometricConsent())) {
+            throw new DomainException(BIOMETRIC_CONSENT_REQUIRED);
+        }
         Tenant tenant = load(operator.tenantId());
         // Sin verificacion en curso, Kira responde 422: se corta antes de gastar la llamada.
         tenant.assertVerificationInProgress();
 
         Map<String, Object> body = new LinkedHashMap<>();
-        if (command != null && command.successUrl() != null && command.rejectUrl() != null) {
+        if (command.successUrl() != null && command.rejectUrl() != null) {
             body.put("redirect", Map.of(
                     "success_url", command.successUrl(),
                     "reject_url", command.rejectUrl()));
@@ -212,6 +226,8 @@ public class SyncUbosService {
             }
         }
 
+        audit.record(operator, "tenant.biometric_consent_recorded", "tenant",
+                operator.tenantId().value(), null, "OK", "liveness");
         audit.record(operator, "tenant.liveness_links_requested", "tenant",
                 operator.tenantId().value(), null, "OK", "enlaces=" + asignados);
         return list(operator);

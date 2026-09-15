@@ -17,10 +17,11 @@ auth:bearer {
 body:json {
   {
     "successUrl": "https://portal.juriscop.co/kyb/ok",
-    "rejectUrl": "https://portal.juriscop.co/kyb/ko"
+    "rejectUrl": "https://portal.juriscop.co/kyb/ko",
+    "biometricConsent": true
   }
 }
 
 docs {
-  Requiere la verificacion disparada en Kira.
+  Requiere la verificacion disparada en Kira y biometricConsent: true (sin el, 422).
 }

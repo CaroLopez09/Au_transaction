@@ -202,6 +202,10 @@ para el producto objetivo (`usa-virtual-accounts`).
 | `POST` | `/api/onboarding` | `ADMIN` o `COMPLIANCE_INTERNAL` |
 | `PUT` | `/api/onboarding` | `ADMIN` o `COMPLIANCE_INTERNAL` |
 | `POST` | `/api/onboarding/refresh` | todos menos `READ_ONLY` (consulta a Kira) |
+| `GET` | `/api/onboarding/draft` | cualquiera autenticado |
+| `PUT` | `/api/onboarding/draft` | `ADMIN` o `COMPLIANCE_INTERNAL` |
+| `GET` | `/api/onboarding/terms` | cualquiera autenticado |
+| `POST` | `/api/onboarding/terms` | `ADMIN` o `COMPLIANCE_INTERNAL` |
 
 #### `POST /api/onboarding` — alta mínima
 
@@ -238,6 +242,30 @@ El BFF guarda el objeto enviado y en cada `PUT` reenvía **la fusión completa**
 parcial borra en silencio campos como `nationality`. La fusión es superficial —una clave
 nueva reemplaza entera a la guardada—, así que **`associated_persons` debe viajar siempre
 completo**, con todos los UBOs.
+
+#### `GET` / `PUT /api/onboarding/draft` — borrador del asistente
+
+```json
+{ "draft": { "company": { "business_legal_name": "Juriscop S.A.S." }, "activity": {} } }
+```
+
+Local al BFF: **nunca se envía a Kira**. `PUT` reemplaza el borrador entero y `{}` lo borra; la
+respuesta trae `draft` y `updatedAt`. No admite archivos: un data URI se rechaza con `422` (los
+documentos van por `POST /api/onboarding/documents` y solo con el expediente creado).
+
+#### `GET` / `POST /api/onboarding/terms` — términos aceptados
+
+```json
+{ "version": "2026-09" }
+```
+
+`GET` devuelve `{ version, url, acceptedVersion }`: la versión vigente y su enlace salen de
+`BFF_TERMS_VERSION` y `BFF_TERMS_URL` (sin ellas vienen vacías y el portal no pide nada), y
+`acceptedVersion` es la que la empresa aceptó. `POST` exige el expediente creado y **la versión
+vigente** (otra da `422`); la manda a Kira como `tos_accepted_version` (Kira sella
+`tos_accepted_at`, pero no la devuelve en `GET /v1/users`) y queda auditada como
+`tenant.terms_accepted`. El `PUT /api/onboarding` descarta `tos_accepted_version` si el portal
+lo manda en el perfil.
 
 #### Respuesta (`OnboardingView`)
 
@@ -406,10 +434,14 @@ actualizado. Si no hay beneficiario final, responde `422` **sin llamar a Kira**.
 #### `POST /api/ubos/liveness-links`
 
 ```json
-{ "successUrl": "https://portal.juriscop.co/kyb/ok", "rejectUrl": "https://portal.juriscop.co/kyb/ko" }
+{ "successUrl": "https://portal.juriscop.co/kyb/ok", "rejectUrl": "https://portal.juriscop.co/kyb/ko",
+  "biometricConsent": true }
 ```
 
-Body opcional; si se envía, **ambas** URLs son obligatorias y deben estar preautorizadas
+**`biometricConsent: true` es obligatorio** (desde el 15-sep): el operador declara que cada
+beneficiario autorizó el tratamiento biométrico. Sin él, `422` sin llamar a Kira. Queda auditado
+como `tenant.biometric_consent_recorded` (detalle `liveness`). Las URLs son opcionales; si se
+envían, **ambas** son obligatorias y deben estar preautorizadas
 por Kira (un `redirect` a medias es un `400`). Devuelve un enlace **por cada beneficiario
 final**, con vigencia de **7 días**. Repetir la llamada devuelve los mismos enlaces
 mientras no cambien las URLs, así que reintentar es seguro.
@@ -422,6 +454,10 @@ Requiere que la verificación ya esté disparada: si no, Kira responde
 > significa que haya aprobado.
 
 #### `POST /api/ubos/{id}/documents` — documento de identidad de una persona
+
+Si uno de los `types` es `selfie`, hace falta el campo `biometricConsent=true` en el multipart
+(consentimiento de la persona para comparar su imagen con el documento); sin él, `422`. Queda
+auditado como `tenant.biometric_consent_recorded` (detalle `selfie`).
 
 Mismo multipart que el de la empresa (`files` + `types` emparejados por índice), pero el
 registro se anida **dentro de la entrada de esa persona** en `associated_persons[]`.

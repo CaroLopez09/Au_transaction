@@ -1,8 +1,8 @@
 # Estado del proyecto
 
 **Fecha:** 15 de septiembre de 2026
-**Build:** `Tests run: 370, Failures: 0, Errors: 0` — BUILD SUCCESS
-**Rama:** `depuracion-bff` (sin commitear) · `master` = copia de seguridad previa (`dc6af92`)
+**Build:** `Tests run: 383, Failures: 0, Errors: 0` — BUILD SUCCESS
+**Rama:** `develop` (se sube a GitHub por SSH) · `main`, `certificacion` y `produccion` detrás
 
 > Arquitectura: [`ARQUITECTURA.md`](ARQUITECTURA.md) · Contrato HTTP: [`API-GUIA.md`](API-GUIA.md) · Pruebas con Bruno: [`GUIA-BRUNO.md`](GUIA-BRUNO.md)
 
@@ -12,14 +12,13 @@
 
 ```bash
 cd ~/Documentos/AuTransactional
-git status                                   # rama depuracion-bff, cambios sin commitear
-./mvnw clean test                            # 283 verdes
+git status                                   # rama develop
+./mvnw clean test                            # 383 verdes
 ./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"   # los secretos salen de .env (§3.7)
 ```
 
-Colección de Bruno: `docs/bruno/AuTransactional/`. Ejecutada entera el 11-sep: **84/84 peticiones,
-46/46 tests** (sin credenciales de Kira). Desde el 14-sep ya hay credenciales de sandbox: toca
-volver a recorrerla en modo B (§3.7).
+Colección de Bruno: `docs/bruno/AuTransactional/`. Última pasada completa contra el sandbox
+(15-sep, noche): **103/103 peticiones, 66/66 tests**.
 
 **Antes de tocar un flujo de Kira, verificar su contrato en la documentación oficial**
 (`https://docs.kirafin.ai/api-reference-2026-06-01/…`), no sólo en
@@ -302,13 +301,39 @@ falla sin ella) y `BFF_MFA_ENFORCED` (por defecto `true` en cert/prod, `false` e
 **Cifras finales del día:** BFF **370** pruebas verdes · front **144** unitarias, lint limpio,
 **E2E 33/33** (1 omitida por diseño) · Bruno **88/88 + 26/26** contra el sandbox.
 
+### 3.14 P0 de la entrega *(15-sep, noche)*
+
+Decisiones de Carolina tras [`REVISION-REQUISITOS-VS-CODIGO.md`](REVISION-REQUISITOS-VS-CODIGO.md):
+**sin pagos cripto**, **límites por monto fijos en configuración** y empezar por los P0.
+
+| P0 | Qué cambió |
+|---|---|
+| **G-09** permisos | `refresh`, `balance`, `deposits/sync` y `payouts/{id}/refresh` excluyen `READ_ONLY` (gastan cuota de Kira). El enlace de descarga de un documento RFI es solo de Administración y Cumplimiento y queda auditado (`compliance.rfi_document_link_issued`). Front: capacidad `provider.refresh` |
+| **D3** banco | `slovak_savings_bank` y `portage` **no existen** en la documentación: solo `jp_morgan` y `austin_capital_trust`, válidos en sandbox y producción. Por defecto `jp_morgan` (producto `usa-virtual-accounts`; `-act` es Austin). `KiraProperties` **no arranca** con otro banco. El alta declara `capabilities.requested_banks`. No se pudo abrir una cuenta de prueba: ningún user del sandbox está `VERIFIED` y Kira valida el estado antes que el banco |
+| **V1** versión única | `2026-06-01` en todas las peticiones; `KiraProperties` rechaza otra. Entre las dos versiones solo cambian los estados de cuenta (y la cotización, que ya iba en `2026-06-01`). `activating` ya no cuenta como activa; `active` habilita fondos. Verificado en sandbox: refresco de empresa, sincronización de beneficiarios y de RFIs responden 200 |
+| **D4** consentimiento | `GET/POST /api/onboarding/terms`: la empresa acepta la versión vigente (`BFF_TERMS_VERSION`, `BFF_TERMS_URL`), viaja como `tos_accepted_version` y queda auditada. Kira la acepta pero **no la devuelve** en el GET. Consentimiento biométrico obligatorio para pedir enlaces de prueba de vida y para subir una selfie (`tenant.biometric_consent_recorded`). Front: casillas en «Enviar», «Verificación» y el cajón de documentos |
+
+**Pendiente de P0 que no depende del código:** la versión real de los términos (hoy no hay
+ninguna configurada; en el sandbox de `juriscop` quedó `au-sandbox-2026-09` de la prueba), rotar
+las credenciales de Kira y el despliegue a cert (§4.8).
+
+**Cifras:** BFF **383** pruebas · front unitarias verdes, lint limpio, **E2E 33/33** (1 omitida)
+· Bruno **103/103, 66/66** contra el sandbox.
+
 ---
 
 ## 4. Qué falta
 
-### 4.1 Commit de la rama
-Los cambios están en `depuracion-bff` sin commitear. Revisar con `git diff master` y commitear
-cuando se dé el visto bueno.
+### 4.8 *(15-sep)* Lista para desplegar en certificación
+
+1. Aplicar el SQL de §7 (no hay Flyway y cert/prod validan el esquema).
+2. Variables: `BFF_MFA_ENCRYPTION_KEY` (obligatoria), `BFF_TERMS_VERSION` y `BFF_TERMS_URL`
+   (la versión real de AU), `KIRA_WEBHOOK_SECRET` y credenciales de Kira **rotadas**.
+3. `KIRA_BANK` y `KIRA_API_VERSION`: no definirlas (valen `jp_morgan` y `2026-06-01`). Si el
+   entorno arrastra `slovak_savings_bank`, `portage` o `2026-04-14`, el BFF no arranca.
+4. Pedir a Kira la suscripción a `rfi.*` y fijar la cuenta a `2026-06-01`
+   (`POST /v1/versioning/upgrade`; el pin solo avanza, y la cabecera ya se manda siempre).
+
 
 ### 4.2 Reconciliación: los cinco workers están hechos
 La fila envenenada ya está resuelta con `webhooks_log.retry_count` y un tope de 5 intentos
@@ -331,9 +356,6 @@ ALTER TABLE webhooks_log ADD COLUMN retry_count INT NOT NULL DEFAULT 0;
 
 ### 4.4 Menor
 - `POST /v1/versioning/upgrade` no se expone: es una operación de cuenta, no de portal.
-- `resolution_reason` de un RFI cerrado (`expired` / `rejected`) no se guarda.
-- La cotización detallada también es exclusiva de `2026-06-01`; `CreateQuoteService` sigue en
-  `2026-04-14`. Sin verificar qué campos se pierden.
 - No hay endpoint de gestión de operadores.
 
 ### 4.7 *(15-sep)* Revisión integral front + BFF + arquitectura + Kira
@@ -432,7 +454,7 @@ Cambio contenido al `RecipientMapper`.
 
 | Riesgo | Detalle | Mitigación actual |
 |---|---|---|
-| **Flujo real sin probar** | Ya hay credenciales de sandbox y `/auth` responde `200` (§3.7), pero sólo se ha ejercitado `GET /v1/countries`: onboarding, cuentas y pagos siguen sin recorrerse contra Kira | Recorrer la colección de Bruno en modo B |
+| **Cuentas y pagos sin recorrer en real** | Vinculación, beneficiarios y RFIs ya se probaron contra el sandbox (§3.9–§3.14); abrir cuenta, depositar y pagar no, porque ningún user del sandbox está `VERIFIED` | Completar `juriscop` (faltan 2 documentos) o crear un user con los valores forzados del sandbox |
 | **Credenciales compartidas por chat** | La `api_key` y el secreto de Cognito del sandbox viajaron por un canal no seguro | Rotarlas con Kira antes de producción |
 | **Webhook perdido** | Kira reintenta 4 veces (~80 min) y después lo da por perdido | Evento guardado antes del 2xx, reenvío desde el dashboard y 7 workers de reconciliación |
 | **`rfi.*` no suscrito** | Exige suscripción explícita en Kira | `POST /api/rfis/sync`; pedirla a Kira |
@@ -542,9 +564,6 @@ class TempDdlDumpTest { @Test void dump() {} }
 
 | | |
 |---|---|
-| Clases de producción | 171 |
-| Clases de prueba | 42 |
-| Pruebas | 305 |
-| Tablas | 12 |
-| Endpoints REST | 49 operaciones sobre 42 rutas |
-| Colección Bruno | 86 peticiones en 11 carpetas |
+| Pruebas | 383 |
+| Endpoints REST | 68 operaciones |
+| Colección Bruno | 103 peticiones en 13 carpetas |

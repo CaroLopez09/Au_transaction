@@ -1,0 +1,27 @@
+meta {
+  name: 09 Terminos vigentes
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/api/onboarding/terms
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+tests {
+  test("responde 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+}
+
+docs {
+  version y url salen de BFF_TERMS_VERSION y BFF_TERMS_URL; sin ellas vienen vacias y el portal no pide aceptar.
+  Aceptar: POST /api/onboarding/terms {"version": "<la vigente>"} (ADMIN o COMPLIANCE_INTERNAL, expediente creado).
+  Viaja a Kira como tos_accepted_version y queda auditado como tenant.terms_accepted.
+}

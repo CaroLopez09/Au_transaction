@@ -69,6 +69,10 @@ public final class UboCommands {
      * URLs a las que Kira devuelve a la persona tras la prueba de vida. Deben estar
      * preautorizadas por Kira; la landing NO es fuente de verdad del resultado.
      */
-    public record RequestLivenessLinks(String successUrl, String rejectUrl) {
+    /**
+     * biometricConsent: el operador declara que cada persona consintio el tratamiento biometrico
+     * antes de recibir su enlace (arquitectura §7). Sin esa declaracion no se piden enlaces.
+     */
+    public record RequestLivenessLinks(String successUrl, String rejectUrl, Boolean biometricConsent) {
     }
 }

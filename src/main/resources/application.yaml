@@ -63,6 +63,12 @@ bff:
     tenants-ms: 1800000       # empresas registradas que aun no pueden operar (GET /v1/users/{id})
     accounts-ms: 3600000      # cuentas abiertas: failed, deactivated y frozen no tienen webhook
 
+  # Terminos que la empresa acepta antes de enviar su expediente. Viaja a Kira como
+  # tos_accepted_version. Sin version, el portal no pide la aceptacion.
+  terms:
+    version: ${BFF_TERMS_VERSION:}
+    url: ${BFF_TERMS_URL:}
+
   security:
     jwt-secret: ${BFF_JWT_SECRET:}
     jwt-issuer: ${BFF_JWT_ISSUER:autransactional-bff}

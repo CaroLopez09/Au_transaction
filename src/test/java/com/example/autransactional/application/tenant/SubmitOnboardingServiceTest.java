@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 class SubmitOnboardingServiceTest {
@@ -51,7 +52,7 @@ class SubmitOnboardingServiceTest {
         when(tenants.save(any())).thenAnswer(i -> i.getArgument(0));
         service = new SubmitOnboardingService(tenants, kira, audit, mapper, idempotencyKeys,
                 new KiraProperties("https://kira.test", "k", "c", "p", "2026-06-01", "w", null,
-                        3600, 300, 5000, 30000, "jp_morgan", true));
+                        3600, 300, 5000, 30000, "jp_morgan", true), "2026-09", "https://au.test/terminos");
     }
 
     private JsonNode json(String raw) {
@@ -338,5 +339,49 @@ class SubmitOnboardingServiceTest {
 
         assertThrows(DomainException.class, () -> service.attachDocuments(maker, acta()));
         verify(kira, never()).updateUser(anyString(), any());
+    }
+
+    // --- Terminos (arquitectura §2.1 y §7; Kira: tos_accepted_version) ---
+
+    private void registrada() {
+        empresa.linkKiraUser("usr_1");
+    }
+
+    @Test
+    void aceptarLosTerminosVigentesLosMandaAKiraYQuedaAuditado() {
+        registrada();
+
+        var vista = service.acceptTerms(compliance, new OnboardingCommands.AcceptTerms("2026-09"));
+
+        verify(kira).updateUser("usr_1", Map.of("tos_accepted_version", "2026-09"));
+        verify(audit).record(eq(compliance), eq("tenant.terms_accepted"), eq("tenant"), eq("juriscop"),
+                isNull(), eq("OK"), eq("version=2026-09"));
+        assertEquals("2026-09", vista.acceptedVersion());
+        assertEquals("https://au.test/terminos", vista.url());
+    }
+
+    @Test
+    void unaVersionQueNoEsLaVigenteSeRechaza() {
+        registrada();
+
+        assertThrows(DomainException.class,
+                () -> service.acceptTerms(compliance, new OnboardingCommands.AcceptTerms("2026-01")));
+        verify(kira, never()).updateUser(anyString(), any());
+    }
+
+    @Test
+    void elPerfilQueMandaElPortalNoPuedeFijarLaAceptacion() {
+        registrada();
+        when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+        when(kira.getUser("usr_1")).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+
+        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(
+                Map.of("business_description", "Abogados", "tos_accepted_version", "2026-09")));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
+        verify(kira).updateUser(eq("usr_1"), body.capture());
+        assertFalse(body.getValue().containsKey("tos_accepted_version"));
+        assertNull(service.terms(compliance).acceptedVersion());
     }
 }
