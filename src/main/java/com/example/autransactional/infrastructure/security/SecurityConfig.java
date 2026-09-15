@@ -30,6 +30,8 @@ public class SecurityConfig {
                         .permitAll()
                         .requestMatchers("/api/webhooks/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
+                        // Metricas de la integracion: sin datos de empresas, pero solo para la plataforma.
+                        .requestMatchers("/actuator/**").hasRole("PLATFORM_OPERATOR")
                         // Swagger UI. Se apaga por configuracion en prod, no por esta regla.
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .anyRequest().authenticated())

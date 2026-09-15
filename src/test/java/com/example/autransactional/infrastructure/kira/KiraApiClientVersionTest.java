@@ -39,7 +39,9 @@ class KiraApiClientVersionTest {
         when(credentials.getAccessToken()).thenReturn("token");
         ObjectMapper mapper = new ObjectMapper();
 
-        client = new KiraApiClient(builder.build(), credentials, properties, new KiraErrorParser(mapper), mapper);
+        client = new KiraApiClient(builder.build(), credentials, properties, new KiraErrorParser(mapper), mapper,
+                new com.example.autransactional.infrastructure.observability.IntegrationMetrics(
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
     }
 
     @Test

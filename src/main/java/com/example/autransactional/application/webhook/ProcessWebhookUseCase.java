@@ -16,6 +16,7 @@ import com.example.autransactional.domain.treasury.Payout;
 import com.example.autransactional.domain.treasury.PayoutRepository;
 import com.example.autransactional.domain.treasury.PayoutStatus;
 import com.example.autransactional.infrastructure.config.AsyncConfig;
+import com.example.autransactional.infrastructure.observability.IntegrationMetrics;
 import com.example.autransactional.infrastructure.persistence.WebhookEventEntity;
 import com.example.autransactional.infrastructure.persistence.WebhookEventJpaRepository;
 import tools.jackson.databind.JsonNode;
@@ -62,6 +63,10 @@ public class ProcessWebhookUseCase {
     @Autowired
     @Lazy
     private ProcessWebhookUseCase self;
+
+    /** Opcional para que las pruebas que construyen el caso de uso a mano no lo necesiten. */
+    @Autowired(required = false)
+    private IntegrationMetrics metrics;
 
     public ProcessWebhookUseCase(WebhookEventJpaRepository events, PayoutRepository payouts,
                                  TenantRepository tenants, VirtualAccountRepository accounts,
@@ -134,6 +139,9 @@ public class ProcessWebhookUseCase {
             } catch (Exception e) {
                 stored.setProcessingError(truncate(e.getMessage()));
                 events.save(stored);
+                if (metrics != null) {
+                    metrics.webhookProjectionFailed(stored.getEventType());
+                }
                 log.error("Evento {} almacenado pero no proyectado: {}", stored.getEventId(), e.getMessage());
             }
         });

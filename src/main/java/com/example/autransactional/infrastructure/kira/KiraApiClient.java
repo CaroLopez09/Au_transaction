@@ -3,6 +3,7 @@ package com.example.autransactional.infrastructure.kira;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.example.autransactional.domain.shared.IdempotencyKey;
+import com.example.autransactional.infrastructure.observability.IntegrationMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
@@ -44,12 +45,15 @@ public class KiraApiClient {
     private final KiraProperties properties;
     private final KiraErrorParser errorParser;
     private final ObjectMapper objectMapper;
+    private final IntegrationMetrics metrics;
 
     public KiraApiClient(RestClient kiraRestClient,
                          KiraCredentialManager credentialManager,
                          KiraProperties properties,
                          KiraErrorParser errorParser,
-                         ObjectMapper objectMapper) {
+                         ObjectMapper objectMapper,
+                         IntegrationMetrics metrics) {
+        this.metrics = metrics;
         this.restClient = kiraRestClient;
         this.credentialManager = credentialManager;
         this.properties = properties;
@@ -232,6 +236,22 @@ public class KiraApiClient {
     }
 
     public KiraResponse exchangeWithStatus(HttpMethod method, String path, Object body,
+                                           IdempotencyKey idempotencyKey) {
+        long start = System.nanoTime();
+        String outcome = "io_error";
+        try {
+            KiraResponse response = exchangeWithRetry(method, path, body, idempotencyKey);
+            outcome = String.valueOf(response.status());
+            return response;
+        } catch (KiraApiException e) {
+            outcome = String.valueOf(e.getStatusCode());
+            throw e;
+        } finally {
+            metrics.recordKiraCall(method.name(), path, outcome, System.nanoTime() - start);
+        }
+    }
+
+    private KiraResponse exchangeWithRetry(HttpMethod method, String path, Object body,
                                            IdempotencyKey idempotencyKey) {
         try {
             return doExchange(method, path, body, idempotencyKey);

@@ -2,8 +2,10 @@ package com.example.autransactional.infrastructure.audit;
 
 import com.example.autransactional.domain.compliance.AuditLog;
 import com.example.autransactional.domain.compliance.AuditLogRepository;
+import com.example.autransactional.infrastructure.observability.RequestIdFilter;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -44,6 +46,11 @@ public class AuditTrail {
         }
         if (detail != null) {
             changes.put("detail", detail);
+        }
+        // Correlacion con los logs de la misma peticion (RequestIdFilter).
+        String requestId = MDC.get(RequestIdFilter.MDC_KEY);
+        if (requestId != null) {
+            changes.put("requestId", requestId);
         }
 
         repository.append(new AuditLog(

@@ -2,6 +2,7 @@ package com.example.autransactional.interfaces.webhook;
 
 import com.example.autransactional.application.webhook.ProcessWebhookUseCase;
 import com.example.autransactional.infrastructure.kira.KiraWebhookVerifier;
+import com.example.autransactional.infrastructure.observability.IntegrationMetrics;
 import org.slf4j.Logger;
 import tools.jackson.core.JacksonException;
 import org.slf4j.LoggerFactory;
@@ -38,8 +39,11 @@ public class KiraWebhookController {
 
     private final ProcessWebhookUseCase processWebhook;
     private final KiraWebhookVerifier verifier;
+    private final IntegrationMetrics metrics;
 
-    public KiraWebhookController(ProcessWebhookUseCase processWebhook, KiraWebhookVerifier verifier) {
+    public KiraWebhookController(ProcessWebhookUseCase processWebhook, KiraWebhookVerifier verifier,
+                                 IntegrationMetrics metrics) {
+        this.metrics = metrics;
         this.processWebhook = processWebhook;
         this.verifier = verifier;
     }
@@ -51,6 +55,7 @@ public class KiraWebhookController {
 
         if (!verifier.isConfigured()) {
             log.error("Llego un webhook pero no hay secreto de firma configurado (KIRA_WEBHOOK_SECRET).");
+            metrics.webhookReceived("not_configured");
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(Map.of("error", "webhook_secret_not_configured"));
         }
@@ -58,6 +63,7 @@ public class KiraWebhookController {
         if (!verifier.verify(rawBody, signature)) {
             log.warn("Webhook rechazado: firma x-signature-sha256 invalida ({} bytes).",
                     rawBody == null ? 0 : rawBody.length);
+            metrics.webhookReceived("invalid_signature");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "invalid_signature"));
         }
@@ -71,9 +77,11 @@ public class KiraWebhookController {
         } catch (JacksonException malformed) {
             // Firmado pero ilegible: reintentarlo daria lo mismo, y un 4xx es lo unico que Kira no reintenta.
             log.error("Webhook con firma valida pero JSON ilegible ({} bytes).", rawBody.length);
+            metrics.webhookReceived("invalid_json");
             return ResponseEntity.badRequest().body(Map.of("error", "invalid_json"));
         }
         storedId.ifPresent(processWebhook::projectLater);
+        metrics.webhookReceived(storedId.isPresent() ? "received" : "duplicate");
 
         return ResponseEntity.ok(Map.of("status", storedId.isPresent() ? "received" : "duplicate"));
     }

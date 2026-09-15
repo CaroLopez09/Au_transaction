@@ -1460,3 +1460,23 @@ Los avisos se generan al proyectar webhooks, solo cuando el estado cambia. `seve
 
 El operador de la plataforma no pertenece a ninguna empresa (`tenantId: "__platform__"`): en las
 rutas de empresa no ve datos de nadie. Un rol de empresa en `/api/platform/*` recibe `403`.
+
+### 5.4 Observabilidad *(15-sep)*
+
+**Correlación.** Cada respuesta lleva `X-Request-Id`. Si la petición trae uno con forma de id
+(`[A-Za-z0-9-]{8,64}`) se respeta; si no, se genera. El mismo valor aparece entre corchetes en
+cada línea de log de esa petición y como `requestId` en el detalle de la auditoría
+(`GET /api/audit`), así que soporte puede ir de una pantalla a los logs con un solo dato.
+
+**Métricas** (`GET /actuator/metrics/{nombre}`, **solo `PLATFORM_OPERATOR`**; una empresa recibe
+`403`). Las etiquetas nunca llevan ids ni datos de una organización.
+
+| Métrica | Etiquetas | Para qué |
+|---|---|---|
+| `kira.api.requests` (timer) | `method`, `route` (ids como `{id}`), `outcome` (código HTTP o `io_error`) | Latencia y errores del proveedor |
+| `kira.webhooks.received` (contador) | `result`: `received`, `duplicate`, `invalid_signature`, `invalid_json`, `not_configured` | Firmas rotas, secreto sin configurar, reintentos de Kira |
+| `kira.webhooks.projection.failures` (contador) | `event` | Eventos guardados que no se proyectaron (los retoma el worker) |
+
+Además están las métricas estándar de Spring (`http.server.requests`, JVM, pool de base de datos).
+Para enviarlas a un sistema de monitoreo (Prometheus, OTLP…) falta elegir el registro y añadir su
+dependencia: es una decisión de despliegue, no está hecha.

@@ -83,11 +83,17 @@ bff:
     mfa-encryption-key: ${BFF_MFA_ENCRYPTION_KEY:}
     mfa-enforced: ${BFF_MFA_ENFORCED:false}
 
+# El requestId (X-Request-Id) de cada peticion va en cada linea de log.
+logging:
+  pattern:
+    level: "%5p [%X{requestId:-}]"
+
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # metrics solo para PLATFORM_OPERATOR (SecurityConfig): kira.api.requests, kira.webhooks.*
+        include: health,info,metrics
   endpoint:
     health:
       show-details: never
