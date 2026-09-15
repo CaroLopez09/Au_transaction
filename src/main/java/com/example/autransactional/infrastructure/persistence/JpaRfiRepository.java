@@ -32,6 +32,7 @@ public class JpaRfiRepository implements RfiRepository {
         e.setDueDate(rfi.getDueDate());
         e.setBlockingType(rfi.getBlockingType());
         e.setBlockingResourceId(rfi.getBlockingResourceId());
+        e.setResolutionReason(rfi.getResolutionReason());
         e.setCreatedAt(rfi.getCreatedAt());
         e.setUpdatedAt(rfi.getUpdatedAt());
         jpa.save(e);
@@ -74,6 +75,6 @@ public class JpaRfiRepository implements RfiRepository {
     private static Rfi toDomain(RfiEntity e) {
         return Rfi.rehydrate(e.getId(), TenantId.of(e.getTenantId()), e.getKiraRfiId(), e.getStatus(),
                 e.getItemsPayload(), e.getDueDate(), e.getBlockingType(), e.getBlockingResourceId(),
-                e.getCreatedAt(), e.getUpdatedAt());
+                e.getResolutionReason(), e.getCreatedAt(), e.getUpdatedAt());
     }
 }

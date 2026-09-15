@@ -18,6 +18,8 @@ public record RfiView(
         String id,
         String kiraRfiId,
         String status,
+        /** expired, rejected o withdrawn cuando el RFI cerro sin resolverse. */
+        String resolutionReason,
         boolean open,
         boolean overdue,
         Instant dueDate,
@@ -57,6 +59,7 @@ public record RfiView(
                 rfi.getId(),
                 rfi.getKiraRfiId(),
                 rfi.getStatus().name(),
+                rfi.getResolutionReason(),
                 rfi.getStatus().isOpen(),
                 rfi.isOverdue(Instant.now()),
                 rfi.getDueDate(),

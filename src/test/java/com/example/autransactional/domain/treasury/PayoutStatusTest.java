@@ -14,10 +14,18 @@ class PayoutStatusTest {
     }
 
     @Test
-    void returnedYCancelledResuelvenEnFailed() {
-        // No existen como estado del recurso: el GET devuelve FAILED en ambos casos.
+    void returnedResuelveEnFailed() {
+        // Una devolucion bancaria no es un estado del recurso: el GET devuelve FAILED.
         assertEquals(PayoutStatus.FAILED, PayoutStatus.fromWire("returned"));
-        assertEquals(PayoutStatus.FAILED, PayoutStatus.fromWire("cancelled"));
+    }
+
+    @Test
+    void cancelledEsUnEstadoFinalPropio() {
+        // docs.kirafin.ai/reference/payouts/values: "Stopped before it was sent", distinto de FAILED.
+        assertEquals(PayoutStatus.CANCELLED, PayoutStatus.fromWire("CANCELLED"));
+        assertEquals(PayoutStatus.CANCELLED, PayoutStatus.fromWire("canceled"));
+        assertTrue(PayoutStatus.CANCELLED.isTerminal());
+        assertFalse(PayoutStatus.CANCELLED.isInFlight());
     }
 
     @Test

@@ -32,4 +32,9 @@ class VirtualAccountReadinessTest {
         assertFalse(VirtualAccountReadiness.isFundsReady("declined", "1234567890", false));
         assertFalse(VirtualAccountReadiness.isFundsReady("DEACTIVATED", "1234567890", false));
     }
+
+    @Test
+    void unaCuentaCongeladaNoMueveFondosAunqueSeHayaActivado() {
+        assertFalse(VirtualAccountReadiness.isFundsReady("frozen", "1234567890", true));
+    }
 }

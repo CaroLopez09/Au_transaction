@@ -93,6 +93,8 @@ class AnswerRfiServiceTest {
                 .findFirst());
         when(rfis.findByTenant(any())).thenAnswer(i -> registro.stream()
                 .filter(r -> r.getTenantId().equals(i.getArgument(0))).toList());
+        when(rfis.findOpenByTenant(any())).thenAnswer(i -> registro.stream()
+                .filter(r -> r.getTenantId().equals(i.getArgument(0)) && r.getStatus().isOpen()).toList());
 
         service = new AnswerRfiService(rfis, tenants, payouts, deposits, kira, audit, mapper);
     }
@@ -114,6 +116,89 @@ class AnswerRfiServiceTest {
         assertEquals(RfiStatus.PENDING, rfi.getStatus());
         assertEquals("kpo_9", rfi.getBlockingResourceId());
         assertNotNull(rfi.getDueDate());
+    }
+
+    // --- RFI retirado, motivo de cierre y enlace de beneficiario (docs 15-sep) ---
+
+    private KiraApiException noEncontrado() {
+        return new KiraApiException(404, "not_found", "Not found", "{}");
+    }
+
+    @Test
+    void unRfiQueDesapareceDelListadoYDa404QuedaRetirado() {
+        Rfi rfi = sincronizarUno();
+        when(kira.listRfis(any())).thenReturn(json("{\"data\": []}"));
+        when(kira.getRfi("rfi_1")).thenThrow(noEncontrado());
+
+        service.sync(cumplimiento);
+
+        assertEquals(RfiStatus.WITHDRAWN, rfi.getStatus());
+        assertEquals("withdrawn", rfi.getResolutionReason());
+        assertFalse(rfi.getStatus().isOpen());
+    }
+
+    @Test
+    void refrescarUnRfiRetiradoLoCierraSinError() {
+        Rfi rfi = sincronizarUno();
+        when(kira.getRfi("rfi_1")).thenThrow(noEncontrado());
+
+        var vista = service.refresh(cumplimiento, rfi.getId());
+
+        assertEquals("WITHDRAWN", vista.status());
+        assertFalse(vista.open());
+    }
+
+    @Test
+    void seGuardaElMotivoDeUnRfiCerradoSinResolver() {
+        Rfi rfi = sincronizarUno();
+        when(kira.getRfi("rfi_1")).thenReturn(json("""
+                { "rfi_id": "rfi_1", "user_id": "usr_1", "status": "not_resolved", "resolution_reason": "expired",
+                  "items": [ { "item_id": "i-ein", "answer_type": "identifier", "status": "pending" } ] }
+                """));
+
+        var vista = service.refresh(cumplimiento, rfi.getId());
+
+        assertEquals("NOT_RESOLVED", vista.status());
+        assertEquals("expired", vista.resolutionReason());
+    }
+
+    private Rfi rfiConBeneficiario(String answerSpec) {
+        when(kira.listRfis(any())).thenReturn(json("""
+                { "data": [ { "rfi_id": "rfi_1", "user_id": "usr_1", "status": "pending",
+                  "items": [ { "item_id": "i-ubo", "answer_type": "ubo_link", "answer_spec": %s, "status": "pending" } ] } ] }
+                """.formatted(answerSpec)));
+        service.sync(cumplimiento);
+        return registro.getFirst();
+    }
+
+    @Test
+    void seAcunaElEnlaceDelBeneficiarioCuandoElItemNoTraeUrl() {
+        Rfi rfi = rfiConBeneficiario("{ \"applicant_id\": \"ap_1\", \"person_id\": \"pe_1\" }");
+        when(kira.mintRfiUboLink("rfi_1", "i-ubo")).thenReturn(json(
+                "{ \"url\": \"https://verify.example/abc\", \"expires_at\": \"2026-09-15T20:00:00Z\" }"));
+
+        var enlace = service.mintUboLink(cumplimiento, rfi.getId(), "i-ubo");
+
+        assertEquals("https://verify.example/abc", enlace.url());
+        assertNotNull(enlace.expiresAt());
+    }
+
+    @Test
+    void siElItemYaTraeUrlSeDevuelveSinLlamarAKira() {
+        Rfi rfi = rfiConBeneficiario("{ \"url\": \"https://verify.example/listo\" }");
+
+        var enlace = service.mintUboLink(cumplimiento, rfi.getId(), "i-ubo");
+
+        assertEquals("https://verify.example/listo", enlace.url());
+        verify(kira, never()).mintRfiUboLink(anyString(), anyString());
+    }
+
+    @Test
+    void noSeAcunaEnlaceParaUnItemQueNoEsDeBeneficiario() {
+        Rfi rfi = sincronizarUno();
+
+        assertThrows(RfiAnswerRejectedException.class, () -> service.mintUboLink(cumplimiento, rfi.getId(), "i-ein"));
+        verify(kira, never()).mintRfiUboLink(anyString(), anyString());
     }
 
     @Test

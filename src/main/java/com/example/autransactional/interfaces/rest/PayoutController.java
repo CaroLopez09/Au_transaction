@@ -65,8 +65,11 @@ public class PayoutController {
     @PostMapping
     @PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")
     public ResponseEntity<PayoutView> create(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                             @RequestHeader(value = "Idempotency-Key", required = false)
+                                             String idempotencyKey,
                                              @Valid @RequestBody PayoutCommands.CreatePayout command) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(payoutService.create(operator, command));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(payoutService.create(operator, command, idempotencyKey));
     }
 
     /**

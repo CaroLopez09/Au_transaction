@@ -22,6 +22,18 @@ public record IdempotencyKey(String value) {
         return new IdempotencyKey(value);
     }
 
+    /**
+     * Clave que manda el portal para que un doble clic o un reintento de red no cree dos
+     * operaciones. Kira solo acepta UUID: se valida aqui para no descubrirlo en su 400.
+     */
+    public static IdempotencyKey fromClient(String value) {
+        try {
+            return new IdempotencyKey(UUID.fromString(value.trim()).toString());
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new DomainException("La cabecera Idempotency-Key debe ser un UUID.");
+        }
+    }
+
     @Override
     public String toString() {
         return value;

@@ -25,6 +25,8 @@ public record DepositView(
         String status,
         boolean microdeposit,
         boolean creditsBalance,
+        /** Retenido por cumplimiento (KYT_PENDING o KYT_REJECTED): mientras dure, la cuenta no paga. */
+        boolean held,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -38,12 +40,23 @@ public record DepositView(
                 d.getNetAmount(),
                 d.getCurrency(),
                 d.getSenderName(),
-                d.getSenderAccount(),
+                maskAccount(d.getSenderAccount()),
                 d.getRail() == null ? null : d.getRail().name(),
                 d.getStatus().name(),
                 d.isMicrodeposit(),
                 d.creditsBalance(),
+                d.getStatus().isHeld(),
                 d.getCreatedAt(),
                 d.getUpdatedAt());
+    }
+
+    /** La cuenta del ordenante nunca sale completa hacia el navegador (G-25). */
+    static String maskAccount(String account) {
+        if (account == null || account.isBlank()) {
+            return null;
+        }
+        // Mismo formato que RecipientView.maskedDestination.
+        String trimmed = account.trim();
+        return trimmed.length() <= 4 ? "****" : "****" + trimmed.substring(trimmed.length() - 4);
     }
 }

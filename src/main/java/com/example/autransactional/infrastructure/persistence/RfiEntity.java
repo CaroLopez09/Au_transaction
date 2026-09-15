@@ -53,6 +53,9 @@ public class RfiEntity {
     @Column(name = "blocking_resource_id", length = 100)
     private String blockingResourceId;
 
+    @Column(name = "resolution_reason", length = 20)
+    private String resolutionReason;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 

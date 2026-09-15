@@ -16,6 +16,10 @@ public final class VirtualAccountReadiness {
     }
 
     public static boolean isFundsReady(String status, String accountNumber, boolean activatedEventSeen) {
+        // Una cuenta congelada ya estuvo activa: el evento visto no la habilita mientras dure.
+        if (StatusNormalizer.matches(status, "frozen")) {
+            return false;
+        }
         if (activatedEventSeen) {
             return true;
         }

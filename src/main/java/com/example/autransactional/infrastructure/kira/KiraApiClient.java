@@ -39,7 +39,7 @@ public class KiraApiClient {
 
     private static final Logger log = LoggerFactory.getLogger(KiraApiClient.class);
 
-    /** Las seis rutas de RFI solo existen en esta version; con 2026-04-14 no se encuentran. */
+    /** Las rutas de RFI solo existen en esta version; con 2026-04-14 no se encuentran. */
     static final String RFI_API_VERSION = "2026-06-01";
 
     /**
@@ -218,6 +218,16 @@ public class KiraApiClient {
     public JsonNode getRfiDocumentLink(String rfiId, String itemId, String documentId) {
         return exchangeWithStatus(HttpMethod.GET, rfiDocumentsPath(rfiId, itemId) + "/" + documentId,
                 null, null, RFI_API_VERSION).body();
+    }
+
+    /**
+     * Acuna el enlace de verificacion de un beneficiario para un item ubo_link cuyo answer_spec
+     * trae applicant_id y person_id en vez de url. 409 si el RFI esta cerrado; 422 si el item ya
+     * trae url; 404 si el RFI fue retirado.
+     */
+    public JsonNode mintRfiUboLink(String rfiId, String itemId) {
+        return exchangeWithStatus(HttpMethod.POST, "/v1/rfis/" + rfiId + "/items/" + itemId + "/ubo-link",
+                Map.of(), null, RFI_API_VERSION).body();
     }
 
     private static String rfiDocumentsPath(String rfiId, String itemId) {

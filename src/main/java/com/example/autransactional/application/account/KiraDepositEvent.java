@@ -31,6 +31,10 @@ public record KiraDepositEvent(
         BigDecimal gross = decimal(payload, "amount", "gross_amount", "grossAmount");
         BigDecimal fee = decimal(payload, "fee", "fee_amount", "feeAmount");
         BigDecimal net = decimal(payload, "net_amount", "netAmount");
+        // Forma documentada: el ordenante y el riel van anidados en 'source'.
+        JsonNode source = payload.path("source");
+        String senderName = text(payload, "sender_name", "senderName");
+        String rail = text(payload, "rail", "payment_type", "paymentType");
 
         return new KiraDepositEvent(
                 text(payload, "deposit_id", "depositId", "internalPaymentId", "id"),
@@ -41,9 +45,9 @@ public record KiraDepositEvent(
                 fee,
                 net,
                 text(payload, "currency"),
-                text(payload, "sender_name", "senderName"),
+                senderName != null ? senderName : text(source, "sender_name"),
                 text(payload, "sender_account", "senderAccount"),
-                Rail.fromWireOrNull(text(payload, "rail", "payment_type", "paymentType")));
+                Rail.fromWireOrNull(rail != null ? rail : text(source, "payment_rail")));
     }
 
     /**

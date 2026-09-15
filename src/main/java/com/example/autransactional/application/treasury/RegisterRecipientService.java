@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -129,6 +130,13 @@ public class RegisterRecipientService {
     @Transactional
     public RecipientView register(AuthenticatedOperator operator,
                                   RecipientCommands.RegisterRecipient command) {
+        return register(operator, command, null);
+    }
+
+    /** Con la clave del portal, un reintento devuelve el mismo destinatario (G-07). */
+    @Transactional
+    public RecipientView register(AuthenticatedOperator operator,
+                                  RecipientCommands.RegisterRecipient command, String clientIdempotencyKey) {
         if (!operator.role().canCreatePayout()) {
             throw new DomainException("Tu rol no puede registrar destinatarios.");
         }
@@ -146,7 +154,9 @@ public class RegisterRecipientService {
                 toAddress(command.address()));
 
         // Una clave por intencion: el reintento devuelve el mismo destinatario, no otro.
-        IdempotencyKey key = IdempotencyKey.newKey();
+        IdempotencyKey key = clientIdempotencyKey == null || clientIdempotencyKey.isBlank()
+                ? IdempotencyKey.newKey()
+                : IdempotencyKey.fromClient(clientIdempotencyKey);
         KiraResponse response = kira.createRecipient(buildBody(tenant, recipient, command), key);
         JsonNode data = response.data();
 
@@ -154,6 +164,14 @@ public class RegisterRecipientService {
         String kiraRecipientId = data.path("recipient_id").asText(null);
         if (kiraRecipientId == null) {
             kiraRecipientId = data.path("id").asText(null);
+        }
+        // Reintento con la misma clave (Kira devuelve el original) o 202 "ya existia": si ya lo
+        // tenemos en esta empresa, se devuelve ese en vez de guardar una segunda fila.
+        Optional<Recipient> known = kiraRecipientId == null ? Optional.empty()
+                : recipients.findByKiraRecipientId(kiraRecipientId)
+                .filter(existing -> existing.getTenantId().equals(operator.tenantId()));
+        if (known.isPresent()) {
+            return RecipientView.from(known.get(), true);
         }
         recipient.linkKiraRecipient(kiraRecipientId);
         recipients.save(recipient);

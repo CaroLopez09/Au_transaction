@@ -61,8 +61,10 @@ public class RecipientController {
     @PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")
     public ResponseEntity<RecipientView> register(
             @AuthenticationPrincipal AuthenticatedOperator operator,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody RecipientCommands.RegisterRecipient command) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(recipients.register(operator, command));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(recipients.register(operator, command, idempotencyKey));
     }
 
     /** Archiva el destinatario. Con `replacedByRecipientId` queda enlazado a su sustituto. */

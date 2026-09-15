@@ -3,6 +3,7 @@ package com.example.autransactional.interfaces.rest;
 import com.example.autransactional.application.compliance.AnswerRfiService;
 import com.example.autransactional.application.compliance.RfiCommands;
 import com.example.autransactional.application.compliance.RfiDocumentLink;
+import com.example.autransactional.application.compliance.RfiUboLink;
 import com.example.autransactional.application.compliance.RfiView;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -91,6 +92,17 @@ public class RfiController {
                                   @PathVariable String id, @PathVariable String itemId,
                                   @PathVariable String documentId) {
         return rfis.removeDocument(operator, id, itemId, documentId);
+    }
+
+    /**
+     * Enlace de verificacion de un beneficiario (item ubo_link). Pedirlo cuando la persona pulsa:
+     * caduca en torno a una hora. Si el item ya trae url, se devuelve esa.
+     */
+    @PostMapping("/{id}/items/{itemId}/ubo-link")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    public RfiUboLink mintUboLink(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                  @PathVariable String id, @PathVariable String itemId) {
+        return rfis.mintUboLink(operator, id, itemId);
     }
 
     /** Enlace temporal (minutos). Abrirlo al momento; si caduca, pedir otro. */

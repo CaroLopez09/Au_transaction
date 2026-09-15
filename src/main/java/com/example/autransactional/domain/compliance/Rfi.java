@@ -27,6 +27,8 @@ public class Rfi {
     private Instant dueDate;
     private String blockingType;
     private String blockingResourceId;
+    /** expired o rejected. Solo en un RFI not_resolved: la diferencia entre plazo vencido y respuesta rechazada. */
+    private String resolutionReason;
     private Instant updatedAt;
 
     public Rfi(String id, TenantId tenantId, String kiraRfiId, String itemsPayload, Instant dueDate) {
@@ -50,11 +52,13 @@ public class Rfi {
 
     public static Rfi rehydrate(String id, TenantId tenantId, String kiraRfiId, RfiStatus status,
                                 String itemsPayload, Instant dueDate, String blockingType,
-                                String blockingResourceId, Instant createdAt, Instant updatedAt) {
+                                String blockingResourceId, String resolutionReason,
+                                Instant createdAt, Instant updatedAt) {
         Rfi r = new Rfi(id, tenantId, kiraRfiId, itemsPayload, dueDate, createdAt);
         r.status = status == null ? RfiStatus.PENDING : status;
         r.blockingType = blockingType;
         r.blockingResourceId = blockingResourceId;
+        r.resolutionReason = resolutionReason;
         r.updatedAt = updatedAt;
         return r;
     }
@@ -93,6 +97,21 @@ public class Rfi {
         if (resourceId != null && !resourceId.isBlank()) {
             this.blockingType = type;
             this.blockingResourceId = resourceId;
+        }
+    }
+
+    public void describeResolutionReason(String reason) {
+        if (reason != null && !reason.isBlank()) {
+            this.resolutionReason = reason.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
+    /** Kira lo retiro: responde 404 y ya no hay nada que contestar. */
+    public void withdraw() {
+        if (!status.isTerminal()) {
+            this.status = RfiStatus.WITHDRAWN;
+            this.resolutionReason = "withdrawn";
+            touch();
         }
     }
 

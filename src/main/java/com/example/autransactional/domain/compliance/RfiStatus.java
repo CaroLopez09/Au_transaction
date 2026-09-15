@@ -5,14 +5,16 @@ import com.example.autransactional.domain.shared.StatusNormalizer;
 /**
  * Ciclo de vida de una solicitud de informacion (RFI) planteada por KiraFin.
  *
- * Son los cuatro estados de Kira y ninguno mas. Un item devuelto no crea un estado propio:
- * el RFI vuelve a PENDING, que significa siempre "te toca responder".
+ * Los cuatro estados que Kira devuelve mas WITHDRAWN: Kira lo cuenta como cierre, pero un RFI
+ * retirado responde 404 en todas sus rutas y nunca aparece como estado, asi que lo asienta el BFF
+ * al recibir ese 404. Un item devuelto no crea un estado propio: el RFI vuelve a PENDING.
  */
 public enum RfiStatus {
     PENDING,
     ANSWERED,
     RESOLVED,
-    NOT_RESOLVED;
+    NOT_RESOLVED,
+    WITHDRAWN;
 
     /**
      * Un valor desconocido cae a PENDING: mostrar de mas un RFI en la bandeja es un susto,
@@ -35,7 +37,7 @@ public enum RfiStatus {
     }
 
     public boolean isTerminal() {
-        return this == RESOLVED || this == NOT_RESOLVED;
+        return this == RESOLVED || this == NOT_RESOLVED || this == WITHDRAWN;
     }
 
     /** Mientras no este cerrado admite respuestas: tambien en ANSWERED, si Kira devuelve un item. */

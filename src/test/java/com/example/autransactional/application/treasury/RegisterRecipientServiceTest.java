@@ -60,6 +60,9 @@ class RegisterRecipientServiceTest {
                 .findFirst());
         when(kira.createRecipient(any(), any())).thenReturn(
                 new KiraResponse(201, mapper.readTree("{\"recipient_id\":\"krec_1\"}")));
+        when(recipients.findByKiraRecipientId(any())).thenAnswer(i -> registro.stream()
+                .filter(r -> i.getArgument(0).equals(r.getKiraRecipientId()))
+                .findFirst());
 
         service = new RegisterRecipientService(recipients, tenants, kira, audit);
     }
@@ -166,6 +169,20 @@ class RegisterRecipientServiceTest {
 
         assertTrue(view.alreadyExisted());
         assertEquals("krec_ya_existia", view.kiraRecipientId());
+    }
+
+    @Test
+    void unReintentoConLaMismaClaveNoGuardaUnSegundoDestinatario() {
+        String clave = "8c2b1d40-5e6f-4a7b-9c8d-2e3f4a5b6c7d";
+
+        var primero = service.register(maker, wire(), clave);
+        var segundo = service.register(maker, wire(), clave);
+
+        assertEquals(1, registro.size());
+        assertEquals(primero.id(), segundo.id());
+        ArgumentCaptor<IdempotencyKey> enviada = ArgumentCaptor.forClass(IdempotencyKey.class);
+        verify(kira, times(2)).createRecipient(any(), enviada.capture());
+        assertEquals(clave, enviada.getValue().value());
     }
 
     @Test

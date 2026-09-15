@@ -136,6 +136,89 @@ class RecordDepositServiceTest {
         assertFalse(d.creditsBalance());
     }
 
+    // --- Payloads copiados de docs.kirafin.ai/webhooks/notification-examples (15-sep) ---
+
+    @Test
+    void docs_depositFundsReceivedLeeOrdenanteYRielDeSource() {
+        evento("virtual_account.deposit_funds_received", """
+                { "event_id": "7c8d9e00-1f2a-4b3c-8d4e-5f6a7b8c9d0e", "user_id": "e687484f",
+                  "virtual_account_id": "kva_1", "deposit_id": "dep_doc", "amount": "100.00",
+                  "currency": "USD", "created_at": "2026-09-01T12:00:00.000Z",
+                  "source": { "payment_rail": "wire", "description": "Invoice 4471",
+                              "sender_name": "Northwind Trading LLC", "trace_number": "20260901MMQFMP3K000123",
+                              "sender_bank_routing_number": "000000001" } }
+                """);
+
+        Deposit d = registro.getFirst();
+        assertEquals(DepositStatus.COMPLETED, d.getStatus());
+        assertEquals("Northwind Trading LLC", d.getSenderName());
+        assertEquals(Rail.WIRE, d.getRail());
+        assertEquals(0, new BigDecimal("100.00").compareTo(d.getGrossAmount()));
+    }
+
+    @Test
+    void docs_depositFundsRefundedNoQuedaComoAcreditado() {
+        recibido();
+        evento("virtual_account.deposit_funds_refunded", """
+                { "event_id": "6d7e8f90-0a1b-4c2d-8e3f-4a5b6c7d8e9f", "virtual_account_id": "kva_1",
+                  "deposit_id": "dep_1", "amount": "100.00", "currency": "USD",
+                  "created_at": "2026-09-01T12:00:00.000Z",
+                  "return_details": { "code": "R01", "reason": "Insufficient funds at the sending bank",
+                                      "refunded_at": "2026-09-02T09:00:00.000Z" } }
+                """);
+
+        Deposit d = registro.getFirst();
+        assertEquals(DepositStatus.REFUNDED, d.getStatus());
+        assertFalse(d.creditsBalance());
+    }
+
+    @Test
+    void docs_depositoProgramadoOEnRevisionNoAcredita() {
+        evento("virtual_account.deposit_scheduled", """
+                { "deposit_id": "dep_s", "virtual_account_id": "kva_1", "amount": "10.00" }
+                """);
+        evento("virtual_account.deposit_in_review", """
+                { "deposit_id": "dep_r", "virtual_account_id": "kva_1", "amount": "10.00" }
+                """);
+
+        assertTrue(registro.stream().noneMatch(Deposit::creditsBalance));
+    }
+
+    @Test
+    void unDepositoRetenidoNoAcreditaYPuedeLiberarse() {
+        recibido();
+        evento("virtual_account.deposit_in_review", """
+                { "deposit_id": "dep_1", "virtual_account_id": "kva_1", "status": "KYT_PENDING" }
+                """);
+        assertEquals(DepositStatus.KYT_PENDING, registro.getFirst().getStatus());
+        assertFalse(registro.getFirst().creditsBalance());
+
+        evento("virtual_account.deposit_in_review", """
+                { "deposit_id": "dep_1", "virtual_account_id": "kva_1", "status": "KYT_REJECTED" }
+                """);
+        assertEquals(DepositStatus.KYT_REJECTED, registro.getFirst().getStatus());
+        assertFalse(DepositStatus.KYT_REJECTED.isTerminal());
+
+        // Cumplimiento retira el rechazo: el deposito se libera y acredita.
+        recibido();
+        assertEquals(DepositStatus.COMPLETED, registro.getFirst().getStatus());
+    }
+
+    @Test
+    void laCuentaDelOrdenanteSaleEnmascarada() {
+        recibido();
+        assertEquals("****", com.example.autransactional.application.account.DepositView
+                .from(registro.getFirst()).senderAccount());
+        assertEquals("****7890", com.example.autransactional.application.account.DepositView.maskAccount("1234567890"));
+    }
+
+    @Test
+    void unEstadoDesconocidoNuncaAcreditaSaldo() {
+        assertEquals(DepositStatus.PENDING, DepositStatus.fromWire("something_new"));
+        assertEquals(DepositStatus.PENDING,
+                DepositStatus.fromEventName("virtual_account.deposit_something_new", null));
+    }
+
     @Test
     void unEventoTardioNoResucitaUnDepositoDevuelto() {
         recibido();
@@ -235,8 +318,10 @@ class RecordDepositServiceTest {
     }
 
     @Test
-    void kytRechazadoEsUnDepositoFallido() {
-        assertEquals(DepositStatus.FAILED, DepositStatus.fromWire("KYT_REJECTED"));
-        assertEquals(DepositStatus.PENDING, DepositStatus.fromWire("KYT_PENDING"));
+    void losEstadosDeRetencionSeConservanYNoSonFallos() {
+        // KYT_REJECTED es una decision de cumplimiento, no un fallo tecnico, y puede revertirse.
+        assertEquals(DepositStatus.KYT_REJECTED, DepositStatus.fromWire("KYT_REJECTED"));
+        assertEquals(DepositStatus.KYT_PENDING, DepositStatus.fromWire("kyt_pending"));
+        assertTrue(DepositStatus.KYT_PENDING.isHeld());
     }
 }

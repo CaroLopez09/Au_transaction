@@ -122,6 +122,7 @@ public class AnswerRfiService {
 
         int asentados = 0;
         int ajenos = 0;
+        Set<String> vistos = new HashSet<>();
         for (int page = 0; page < MAX_PAGES; page++) {
             Map<String, Object> query = new LinkedHashMap<>();
             query.put("user_id", tenant.getKiraUserId());
@@ -136,6 +137,7 @@ public class AnswerRfiService {
                     continue;
                 }
                 upsert(tenant.getId(), completeIfNeeded(entry));
+                vistos.add(kiraRfiIdOf(entry));
                 asentados++;
             }
             if (entries.size() < PAGE_SIZE) {
@@ -146,6 +148,13 @@ public class AnswerRfiService {
             log.warn("Sincronizacion de RFIs de {}: {} entradas descartadas por no poder atribuirse a la empresa.",
                     tenant.getId().value(), ajenos);
         }
+        // Un RFI retirado desaparece del listado y responde 404: sin esto quedaria abierto aqui para siempre.
+        for (Rfi abierto : rfis.findOpenByTenant(tenant.getId())) {
+            if (abierto.getKiraRfiId() != null && !vistos.contains(abierto.getKiraRfiId())) {
+                reloadOrWithdraw(abierto);
+                rfis.save(abierto);
+            }
+        }
 
         audit.record(operator, "compliance.rfis_synced", "tenant", tenant.getId().value(), null, "OK",
                 "rfis=" + asentados);
@@ -155,9 +164,55 @@ public class AnswerRfiService {
     @Transactional
     public RfiView refresh(AuthenticatedOperator operator, String rfiId) {
         Rfi rfi = load(operator.tenantId(), rfiId);
-        applyDetail(rfi, kira.getRfi(rfi.getKiraRfiId()));
+        reloadOrWithdraw(rfi);
         rfis.save(rfi);
         return toView(rfi);
+    }
+
+    /**
+     * Enlace de verificacion de un beneficiario para un item ubo_link sin url ya hecha.
+     *
+     * No se persiste: caduca en una hora y es una credencial de esa persona. Un 409 asienta el
+     * cierre del RFI; un 404 que fue retirado.
+     */
+    @Transactional(noRollbackFor = DomainException.class)
+    public RfiUboLink mintUboLink(AuthenticatedOperator operator, String rfiId, String itemId) {
+        assertCanManage(operator);
+        Rfi rfi = load(operator.tenantId(), rfiId);
+        rfi.assertAcceptsAnswers();
+        JsonNode item = itemOf(rfi, itemId);
+        if (!"ubo_link".equalsIgnoreCase(text(item, "answer_type"))) {
+            throw new RfiAnswerRejectedException("El item no pide la verificacion de un beneficiario.",
+                    Map.of(itemId, "Este item no es de tipo ubo_link."));
+        }
+        String readyUrl = text(item.path("answer_spec"), "url");
+        if (readyUrl != null) {
+            // Kira ya dio el enlace: acunar otro responderia 422.
+            return new RfiUboLink(readyUrl, null);
+        }
+
+        JsonNode link;
+        try {
+            link = unwrap(kira.mintRfiUboLink(rfi.getKiraRfiId(), itemId));
+        } catch (KiraApiException e) {
+            if (e.getStatusCode() == 404) {
+                rfi.withdraw();
+                rfis.save(rfi);
+                throw new DomainException("Kira retiro este RFI; ya no hace falta la verificacion.");
+            }
+            if (e.getStatusCode() == 409) {
+                applyDetail(rfi, kira.getRfi(rfi.getKiraRfiId()));
+                rfis.save(rfi);
+                throw new DomainException("Kira ya cerro este RFI (" + rfi.getStatus() + ").");
+            }
+            throw e;
+        }
+        String url = text(link, "url");
+        if (url == null) {
+            throw new DomainException("Kira no devolvio el enlace de verificacion.");
+        }
+        audit.record(operator, "compliance.rfi_ubo_link_minted", "rfi", rfi.getId(), null, "OK", "item=" + itemId);
+        return new RfiUboLink(url, parseInstant(text(link, "expires_at")));
     }
 
     /**
@@ -288,7 +343,17 @@ public class AnswerRfiService {
         }
 
         // El evento no trae items, plazo ni bloqueo: el detalle se lee siempre de Kira.
-        JsonNode detail = unwrap(kira.getRfi(kiraRfiId));
+        JsonNode detail;
+        try {
+            detail = unwrap(kira.getRfi(kiraRfiId));
+        } catch (KiraApiException e) {
+            if (e.getStatusCode() != 404 || local.isEmpty()) {
+                throw e;
+            }
+            local.get().withdraw();
+            rfis.save(local.get());
+            return;
+        }
         Optional<TenantId> owner = local.map(Rfi::getTenantId).or(() -> ownerOf(detail));
         if (owner.isEmpty()) {
             log.info("RFI {} sin empresa local a la que atribuirlo. Pendiente de reconciliacion.", kiraRfiId);
@@ -322,6 +387,7 @@ public class AnswerRfiService {
         rfi.applyRemoteStatus(status == null ? null : RfiStatus.fromWire(status),
                 detail.has("items") ? itemsOf(detail) : null);
         rfi.describeDueDate(parseInstant(text(detail, "due_at")));
+        rfi.describeResolutionReason(text(detail, "resolution_reason"));
         JsonNode blocking = detail.path("blocking");
         // Una transferencia o un deposito: cada tipo trae su id en un campo distinto.
         rfi.describeBlocking(text(blocking, "type"),
@@ -387,6 +453,16 @@ public class AnswerRfiService {
     /** Jackson puede entregar un numero como BigDecimal/Integer: se reenvia tal cual, sin comillas. */
     private static Object normalizeValue(Object value) {
         return value instanceof String text ? text.trim() : value;
+    }
+
+    private JsonNode itemOf(Rfi rfi, String itemId) {
+        for (JsonNode item : readItems(rfi)) {
+            if (itemId.equals(text(item, "item_id"))) {
+                return item;
+            }
+        }
+        throw new RfiAnswerRejectedException("El item no pertenece a este RFI.",
+                Map.of(itemId, "El item no pertenece a este RFI."));
     }
 
     private JsonNode documentItem(Rfi rfi, String itemId) {
@@ -455,9 +531,22 @@ public class AnswerRfiService {
         }
     }
 
-    private void reloadQuietly(Rfi rfi) {
+    /** Relee de Kira; un 404 es un RFI retirado (docs: "a withdrawn RFI 404s"), no un error. */
+    private void reloadOrWithdraw(Rfi rfi) {
         try {
             applyDetail(rfi, kira.getRfi(rfi.getKiraRfiId()));
+        } catch (KiraApiException e) {
+            if (e.getStatusCode() != 404) {
+                throw e;
+            }
+            log.info("RFI {} responde 404: Kira lo retiro. Se cierra en local.", rfi.getKiraRfiId());
+            rfi.withdraw();
+        }
+    }
+
+    private void reloadQuietly(Rfi rfi) {
+        try {
+            reloadOrWithdraw(rfi);
         } catch (KiraApiException e) {
             log.warn("RFI {} modificado pero no se pudo releer: {}. Pendiente de refresco.",
                     rfi.getKiraRfiId(), e.getMessage());

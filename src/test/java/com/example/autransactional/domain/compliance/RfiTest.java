@@ -72,7 +72,7 @@ class RfiTest {
         Instant creado = Instant.parse("2026-08-01T10:00:00Z");
 
         Rfi rfi = Rfi.rehydrate("r-1", TENANT, "rfi_1", RfiStatus.PENDING, "[]", null,
-                "transfer", "po_1", creado, creado);
+                "transfer", "po_1", null, creado, creado);
 
         assertEquals(creado, rfi.getCreatedAt());
         assertEquals("po_1", rfi.getBlockingResourceId());

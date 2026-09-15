@@ -13,7 +13,9 @@ public enum VirtualAccountStatus {
     PENDING,
     ACTIVE,
     INACTIVE,
-    FAILED;
+    FAILED,
+    /** Congelada por un operador de Kira: no mueve fondos mientras dure. */
+    FROZEN;
 
     public static VirtualAccountStatus fromWire(String raw) {
         String normalized = StatusNormalizer.normalize(raw);

@@ -312,6 +312,31 @@ class ExecutePayoutServiceTest {
     }
 
     @Test
+    void conLaMismaClaveDelPortalNoSeCreaUnSegundoPago() {
+        String clave = "3f1a9c20-4b5d-4e6f-8a90-1c2d3e4f5a6b";
+        var comando = new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null);
+        when(payouts.findByIdempotencyKey(IdempotencyKey.of(clave))).thenReturn(Optional.empty());
+
+        var primero = service.create(maker, comando, clave);
+        ArgumentCaptor<Payout> guardado = ArgumentCaptor.forClass(Payout.class);
+        verify(payouts).save(guardado.capture());
+        assertEquals(clave, guardado.getValue().getIdempotencyKey().value());
+
+        when(payouts.findByIdempotencyKey(IdempotencyKey.of(clave))).thenReturn(Optional.of(guardado.getValue()));
+        var segundo = service.create(maker, comando, clave);
+
+        assertEquals(primero.id(), segundo.id());
+        verify(payouts, times(1)).save(any());
+    }
+
+    @Test
+    void unaClaveDelPortalQueNoEsUuidSeRechaza() {
+        assertThrows(DomainException.class, () -> service.create(maker,
+                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null), "doble-clic"));
+        verify(payouts, never()).save(any());
+    }
+
+    @Test
     void crearUnPagoConUnDestinatarioInexistenteSeRechazaAlPreparar() {
         when(recipients.findByIdAndTenant("rec-x", TENANT)).thenReturn(Optional.empty());
 

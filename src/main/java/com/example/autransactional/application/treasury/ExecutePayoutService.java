@@ -36,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -186,6 +187,16 @@ public class ExecutePayoutService {
 
     @Transactional
     public PayoutView create(AuthenticatedOperator operator, PayoutCommands.CreatePayout command) {
+        return create(operator, command, null);
+    }
+
+    /**
+     * Con la clave del portal, repetir la peticion devuelve el pago ya creado en lugar de crear
+     * otro (G-07). La clave es la misma que viaja despues a Kira al aprobar.
+     */
+    @Transactional
+    public PayoutView create(AuthenticatedOperator operator, PayoutCommands.CreatePayout command,
+                             String clientIdempotencyKey) {
         if (!operator.role().canCreatePayout()) {
             throw new DomainException("Tu rol no puede preparar pagos.");
         }
@@ -202,7 +213,16 @@ public class ExecutePayoutService {
 
         // Una clave por intencion. Se persiste para que un reintento replique el mismo pago
         // en Kira en vez de crear uno nuevo.
-        IdempotencyKey key = IdempotencyKey.newKey();
+        IdempotencyKey key = clientIdempotencyKey == null || clientIdempotencyKey.isBlank()
+                ? IdempotencyKey.newKey()
+                : IdempotencyKey.fromClient(clientIdempotencyKey);
+        Optional<Payout> previous = payouts.findByIdempotencyKey(key);
+        if (previous.isPresent()) {
+            if (!previous.get().getTenantId().equals(operator.tenantId())) {
+                throw new DomainException("Esa clave de idempotencia ya esta en uso.");
+            }
+            return PayoutView.from(previous.get());
+        }
 
         // El desglose comisional vigente: 15 USD de Kira + 15 USD de margen = 30 USD.
         Payout payout = new Payout(
