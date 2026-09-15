@@ -50,7 +50,7 @@ public class VirtualAccountEntity {
     @Column(nullable = false, length = 20)
     private VirtualAccountMode mode = VirtualAccountMode.FIAT;
 
-    /** slovak_savings_bank (sandbox), portage (prod), austin_capital_trust. Depende del entorno. */
+    /** Banco con el que se abrio (kira.bank): jp_morgan o austin_capital_trust. */
     @Column(length = 60)
     private String bank;
 
@@ -66,9 +66,8 @@ public class VirtualAccountEntity {
     private BigDecimal balanceAvailable = BigDecimal.ZERO;
 
     /**
-     * Columna propia del BFF: 'approved' colapsa activating/active en el pin 2026-04-14,
-     * asi que el evento virtual_account.activated es la unica senal fondos-listos fiable
-     * y hay que recordar haberlo visto.
+     * Columna propia del BFF: el evento virtual_account.activated es la senal fondos-listos, y
+     * se recuerda haberlo visto aunque una consulta posterior tarde en reflejar 'active'.
      */
     @Column(name = "activated_event_seen", nullable = false)
     private boolean activatedEventSeen = false;

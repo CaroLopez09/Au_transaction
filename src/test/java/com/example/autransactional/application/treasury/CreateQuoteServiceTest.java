@@ -77,7 +77,7 @@ class CreateQuoteServiceTest {
         empresa.linkKiraUser("usr_1");
         empresa.applyRemoteState(TenantStatus.VERIFIED, null, null, true);
 
-        cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT, "slovak_savings_bank", null);
+        cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT, "jp_morgan", null);
         cuenta.linkKiraAccount("kva-1");
         cuenta.describeBank("Bank", "1234567890", "021000021");
 
@@ -177,7 +177,7 @@ class CreateQuoteServiceTest {
     @Test
     void unaCuentaSinNumeroRealNoPuedeCotizar() {
         // 'approved' no significa fondos disponibles.
-        cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT, "slovak_savings_bank", null);
+        cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT, "jp_morgan", null);
 
         assertThrows(DomainException.class, () -> service.create(maker, peticion(null)));
         verify(kira, never()).createQuotation(any());

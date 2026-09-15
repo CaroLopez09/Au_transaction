@@ -54,7 +54,7 @@ class OpenVirtualAccountServiceTest {
             new AuthenticatedOperator("u-1", "treasury.maker@juriscop.test", TENANT, Role.TREASURY_MAKER);
 
     private KiraProperties properties(String bank, boolean sandbox) {
-        return new KiraProperties("https://api.balampay.com/sandbox", "k", "c", "p", "2026-04-14",
+        return new KiraProperties("https://api.balampay.com/sandbox", "k", "c", "p", "2026-06-01",
                 "w", null, 3600, 300, 5000, 30000, bank, sandbox);
     }
 
@@ -76,7 +76,7 @@ class OpenVirtualAccountServiceTest {
                 .findFirst());
 
         service = new OpenVirtualAccountService(accounts, tenants, kira,
-                properties("slovak_savings_bank", true), audit, idempotencyKeys);
+                properties("jp_morgan", true), audit, idempotencyKeys);
     }
 
     private Tenant verificada() {
@@ -107,13 +107,12 @@ class OpenVirtualAccountServiceTest {
 
     @Test
     void elBancoLoFijaElEntornoNoElFormulario() {
-        // 'portage' contra el sandbox devuelve 400 "Invalid bank".
         kiraAbre("pending", null);
 
         service.open(maker, new VirtualAccountCommands.OpenAccount("Operativa", "fiat", "USD"));
 
         Map<String, Object> body = cuerpoEnviado();
-        assertEquals("slovak_savings_bank", body.get("bank"));
+        assertEquals("jp_morgan", body.get("bank"));
         assertEquals("US_BANK", body.get("type"));
         assertEquals("fiat", body.get("mode"));
         assertEquals("usr_1", body.get("user_id"));
@@ -159,18 +158,28 @@ class OpenVirtualAccountServiceTest {
     }
 
     @Test
-    void approvedSinNumeroRealSigueSinEstarLista() {
-        // La API colapsa activating y active en 'approved': por si solo no dice nada.
-        kiraAbre("approved", "PENDING-ACT-ACCOUNT");
+    void activatingSinNumeroRealSigueSinEstarLista() {
+        // 2026-06-01: una cuenta nueva vuelve 'activating'; el banco aun la esta abriendo.
+        kiraAbre("activating", "PENDING-ACT-ACCOUNT");
 
         var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
 
         assertFalse(view.fundsReady());
+        assertEquals("PENDING", view.status());
+    }
+
+    @Test
+    void activeLaHabilitaAunqueNoHayaLlegadoElEvento() {
+        kiraAbre("active", null);
+
+        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+
+        assertTrue(view.fundsReady());
     }
 
     @Test
     void unNumeroDeCuentaRealSiLaHabilita() {
-        kiraAbre("approved", "1234567890");
+        kiraAbre("active", "1234567890");
 
         var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
 
@@ -186,7 +195,7 @@ class OpenVirtualAccountServiceTest {
         when(kira.listVirtualAccounts(any())).thenReturn(json("{\"data\":[{\"id\":\"kva_previa\"}]}"));
         // El listado devuelve provider y currency nulos: hay que releer la cuenta individual.
         when(kira.getVirtualAccount("kva_previa")).thenReturn(json(
-                "{\"id\":\"kva_previa\",\"status\":\"approved\",\"account_number\":\"999888777\"}"));
+                "{\"id\":\"kva_previa\",\"status\":\"active\",\"account_number\":\"999888777\"}"));
 
         var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
 
@@ -218,7 +227,7 @@ class OpenVirtualAccountServiceTest {
 
     @Test
     void elSaldoLlegaEnDecimalNoEnUnidadesMenores() {
-        kiraAbre("approved", "1234567890");
+        kiraAbre("active", "1234567890");
         var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
         when(kira.getVirtualAccountBalance("kva_1"))
                 .thenReturn(json("{\"available_balance\":5000.00,\"currency\":\"USD\"}"));
@@ -232,8 +241,8 @@ class OpenVirtualAccountServiceTest {
     @Test
     void simularDepositoNoExisteFueraDelSandbox() {
         service = new OpenVirtualAccountService(accounts, tenants, kira,
-                properties("portage", false), audit, idempotencyKeys);
-        kiraAbre("approved", "1234567890");
+                properties("jp_morgan", false), audit, idempotencyKeys);
+        kiraAbre("active", "1234567890");
         var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
 
         assertThrows(DomainException.class, () -> service.simulateDeposit(maker, view.id(),
@@ -243,7 +252,7 @@ class OpenVirtualAccountServiceTest {
 
     @Test
     void enSandboxSimularDepositoRefrescaElSaldo() {
-        kiraAbre("approved", "1234567890");
+        kiraAbre("active", "1234567890");
         var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
         when(kira.getVirtualAccountBalance("kva_1"))
                 .thenReturn(json("{\"available_balance\":5000.00,\"currency\":\"USD\"}"));

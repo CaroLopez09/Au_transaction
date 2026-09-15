@@ -68,12 +68,14 @@ Reglas que no se negocian al desplegar:
 - Los secretos no se escriben en logs: `KiraCredentialManager` registra que pide un token, no el
   token ni la clave.
 
-El banco de las cuentas virtuales depende del entorno y **no es intercambiable**: usar el
-de producción contra el sandbox devuelve `400 "Invalid bank"`.
+El banco de las cuentas virtuales es el mismo en todos los entornos: Kira documenta
+`jp_morgan` y `austin_capital_trust`, y los dos valen en sandbox y producción. El BFF solo admite
+`jp_morgan` (producto `usa-virtual-accounts`) y **no arranca** con otro valor, ni con una
+`KIRA_API_VERSION` distinta de `2026-06-01`.
 
 | Variable | `dev` / `cert` | `prod` |
 |---|---|---|
-| `KIRA_BANK` | `slovak_savings_bank` *(por defecto)* | `portage` |
+| `KIRA_BANK` | `jp_morgan` *(por defecto)* | `jp_morgan` *(por defecto)* |
 | `KIRA_SANDBOX` | `true` *(habilita simular depósitos)* | `false` *(fijo)* |
 
 ### 1.3 Arrancar
@@ -463,9 +465,10 @@ mover fondos no hay cotización ni pago.
 { "description": "Operativa Juriscop", "mode": "fiat", "currency": "USD" }
 ```
 
-**No se pide el banco**: lo fija la configuración del entorno (`kira.bank`), porque el
-valor válido depende de a dónde se apunte — `slovak_savings_bank` en sandbox, `portage` en
-producción — y equivocarlo devuelve `400 "Invalid bank"`.
+**No se pide el banco**: lo fija la configuración (`kira.bank`, hoy `jp_morgan`). El mismo
+valor viaja como `capabilities.requested_banks` en el alta de la empresa, porque la elegibilidad
+del producto depende de él. Un banco no autorizado para la cuenta integradora devuelve
+`400 "Invalid bank"`.
 
 `mode` (`fiat` | `crypto`) es **inmutable** una vez creada: cambiarlo significa abrir otra
 cuenta.
@@ -483,7 +486,7 @@ y se devuelve `201` con sus datos: no es un error.
 {
   "id": "9c1f...", "kiraAccountId": "kva_1",
   "status": "PENDING", "mode": "FIAT",
-  "bank": "slovak_savings_bank", "bankName": null,
+  "bank": "jp_morgan", "bankName": null,
   "description": "Operativa Juriscop",
   "accountNumber": null, "routingNumber": null,
   "currency": "USD",
@@ -1290,9 +1293,10 @@ usar cada endpoint del BFF y qué mockear si quieres probar sin sandbox.
 `/v1/virtual-accounts/{id}/payout`. El token vive 3600 s sin refresh: se renueva con 300 s
 de margen, y ante un `401` el cliente reautentica y reintenta una vez.
 
-Versión de API enviada en cada petición: `2026-04-14` (`KIRA_API_VERSION`), **salvo las rutas
-de RFI** (incluidos sus documentos), que sólo existen en `2026-06-01` y la sobrescriben por
-petición (`KiraApiClient.RFI_API_VERSION`).
+Versión de API: **`2026-06-01` en todas las peticiones**, en la cabecera `X-Api-Version` (el
+go-live checklist exige una sola). Los RFIs y la cotización desglosada solo existen en esa
+versión, y las cuentas virtuales devuelven `pending`, `activating`, `active`, `failed` y
+`deactivated`: solo `active` (o el evento `virtual_account.activated`) habilita mover fondos.
 
 **Ids:** el portal sólo ve y envía ids propios del BFF. El BFF los traduce a los de Kira
 (`kiraAccountId`, `kiraRecipientId`, `kiraUserId`) justo antes de llamar.

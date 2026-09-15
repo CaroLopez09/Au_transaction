@@ -14,7 +14,7 @@ kira:
   api-key: test-api-key
   client-id: test-client-id
   password: test-password
-  api-version: "2026-04-14"
+  api-version: "2026-06-01"
   webhook-secret: test-webhook-secret
 
 bff:

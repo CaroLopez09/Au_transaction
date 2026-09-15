@@ -3,10 +3,10 @@ package com.example.autransactional.domain.account;
 import com.example.autransactional.domain.shared.StatusNormalizer;
 
 /**
- * En el pin 2026-04-14 la API colapsa activating/active en "approved", asi que 'approved'
- * NO significa que la cuenta pueda mover fondos. La documentacion indica detectar la cuenta
- * realmente operativa por un account_number real: no nulo y distinto del centinela
- * "PENDING-ACT-ACCOUNT". El evento virtual_account.activated es la unica senal fondos-listos.
+ * Cuando una cuenta puede mover fondos. En 2026-06-01 lo dice el estado 'active' (y el evento
+ * virtual_account.activated, que trae ese mismo estado). Se conserva la deteccion por un
+ * account_number real, no nulo y distinto del centinela "PENDING-ACT-ACCOUNT", para las filas
+ * que se proyectaron con la version anterior.
  */
 public final class VirtualAccountReadiness {
 
@@ -20,7 +20,7 @@ public final class VirtualAccountReadiness {
         if (StatusNormalizer.matches(status, "frozen")) {
             return false;
         }
-        if (activatedEventSeen) {
+        if (activatedEventSeen || StatusNormalizer.matches(status, "active")) {
             return true;
         }
         if (StatusNormalizer.matches(status, "declined") || StatusNormalizer.matches(status, "deactivated")

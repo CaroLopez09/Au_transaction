@@ -356,11 +356,11 @@ Las pruebas de integración levantan H2 en memoria (`MODE=MySQL`), sin MySQL arr
 | `cert` | según entorno | sandbox | **exigidos al arrancar** | sí |
 | `prod` | `ddl-auto: validate` | producción | **exigidos al arrancar** | no |
 
-Variables por entorno que **no son intercambiables**:
+Variables por entorno (el BFF no arranca con un banco distinto de `jp_morgan` ni con otra versión que `2026-06-01`):
 
 | Variable | dev / cert | prod |
 |---|---|---|
-| `KIRA_BANK` | `slovak_savings_bank` | `portage` |
+| `KIRA_BANK` | `jp_morgan` | `jp_morgan` |
 | `KIRA_SANDBOX` | `true` | `false` |
 
 `bff.dev.seed=true` (sólo `dev`) crea 3 empresas × 5 roles, idempotente. Un operador por rol

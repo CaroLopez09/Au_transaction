@@ -687,7 +687,7 @@ Kira. Ejemplo con un depósito (verificado):
 ```sql
 INSERT INTO virtual_accounts (id, tenant_id, kira_account_id, bank, status, mode, currency,
                               balance_available, activated_event_seen, created_at, updated_at)
-VALUES ('va-demo-1', 'juriscop', 'kva_demo_001', 'slovak_savings_bank', 'PENDING', 'FIAT', 'USD',
+VALUES ('va-demo-1', 'juriscop', 'kva_demo_001', 'jp_morgan', 'PENDING', 'FIAT', 'USD',
         0, false, UTC_TIMESTAMP(), UTC_TIMESTAMP());
 ```
 

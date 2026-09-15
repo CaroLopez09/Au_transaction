@@ -8,6 +8,7 @@ import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
 import com.example.autransactional.infrastructure.kira.KiraApiClient;
+import com.example.autransactional.infrastructure.kira.KiraProperties;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +49,9 @@ class SubmitOnboardingServiceTest {
         empresa = new Tenant(TENANT, "Juriscop", "900123456-1", "Colombia");
         when(tenants.findById(TENANT)).thenAnswer(i -> Optional.of(empresa));
         when(tenants.save(any())).thenAnswer(i -> i.getArgument(0));
-        service = new SubmitOnboardingService(tenants, kira, audit, mapper, idempotencyKeys);
+        service = new SubmitOnboardingService(tenants, kira, audit, mapper, idempotencyKeys,
+                new KiraProperties("https://kira.test", "k", "c", "p", "2026-06-01", "w", null,
+                        3600, 300, 5000, 30000, "jp_morgan", true));
     }
 
     private JsonNode json(String raw) {
@@ -77,6 +80,8 @@ class SubmitOnboardingServiceTest {
         assertEquals("business", body.getValue().get("type"));
         assertEquals("sales_of_goods_and_services", body.getValue().get("source_of_funds"));
         assertEquals("juriscop", body.getValue().get("external_id"));
+        // La elegibilidad del producto depende del banco que la empresa declara.
+        assertEquals(Map.of("requested_banks", List.of("jp_morgan")), body.getValue().get("capabilities"));
         assertEquals("usr_9c1f", empresa.getKiraUserId());
     }
 

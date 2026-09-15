@@ -1,0 +1,25 @@
+meta {
+  name: 08 Error - solo lectura no consulta a Kira
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/onboarding/refresh
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+tests {
+  test("responde 403", function () {
+    expect([403]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  G-09: las consultas a Kira (refrescos, saldo, sincronizar depósitos) gastan cuota del integrador. Solo lectura no las usa.
+}

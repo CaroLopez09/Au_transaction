@@ -9,6 +9,7 @@ import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
 import com.example.autransactional.infrastructure.kira.KiraApiClient;
+import com.example.autransactional.infrastructure.kira.KiraProperties;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,15 +46,17 @@ public class SubmitOnboardingService {
     private final AuditTrail audit;
     private final ObjectMapper objectMapper;
     private final IdempotencyKeyStore idempotencyKeys;
+    private final String bank;
 
     public SubmitOnboardingService(TenantRepository tenants, KiraApiClient kira, AuditTrail audit,
                                    ObjectMapper objectMapper,
-                                   IdempotencyKeyStore idempotencyKeys) {
+                                   IdempotencyKeyStore idempotencyKeys, KiraProperties properties) {
         this.tenants = tenants;
         this.kira = kira;
         this.audit = audit;
         this.objectMapper = objectMapper;
         this.idempotencyKeys = idempotencyKeys;
+        this.bank = properties.bank();
     }
 
     @Transactional(readOnly = true)
@@ -84,6 +87,8 @@ public class SubmitOnboardingService {
         body.put("business_legal_name", command.businessLegalName());
         body.put("email", command.email());
         body.put("source_of_funds", command.sourceOfFunds());
+        // La elegibilidad del producto depende del banco declarado.
+        body.put("capabilities", Map.of("requested_banks", List.of(bank)));
         // Amarra el registro de Kira con el id interno, para reconciliar sin adivinar.
         body.put("external_id", tenant.getId().value());
 

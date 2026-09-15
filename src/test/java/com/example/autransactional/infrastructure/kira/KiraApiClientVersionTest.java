@@ -19,9 +19,9 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Los RFIs solo existen en 2026-06-01 y la cuenta integra con 2026-04-14. Si la cabecera
- * por peticion no se sobrescribe, las rutas de RFI no se encuentran y la bandeja queda vacia
- * sin ningun error visible.
+ * Una sola version en todas las peticiones (go-live checklist). Los RFIs y la cotizacion
+ * desglosada solo existen en 2026-06-01: con otra version las rutas de RFI no se encuentran y la
+ * bandeja queda vacia sin ningun error visible.
  */
 class KiraApiClientVersionTest {
 
@@ -34,7 +34,7 @@ class KiraApiClientVersionTest {
         server = MockRestServiceServer.bindTo(builder).build();
 
         KiraProperties properties = new KiraProperties("https://kira.test", "key", "client", "pw",
-                "2026-04-14", "secret", null, 3600, 300, 5000, 30000, "slovak_savings_bank", true);
+                "2026-06-01", "secret", null, 3600, 300, 5000, 30000, "jp_morgan", true);
         KiraCredentialManager credentials = mock(KiraCredentialManager.class);
         when(credentials.getAccessToken()).thenReturn("token");
         ObjectMapper mapper = new ObjectMapper();
@@ -64,7 +64,7 @@ class KiraApiClientVersionTest {
 
     @Test
     void laCotizacionViajaConLaVersionQueTraeElDesglose() {
-        // Con 2026-04-14 la respuesta no trae fees[] ni totals, y de ahi salen las comisiones reales.
+        // Sin 2026-06-01 la respuesta no trae fees[] ni totals, y de ahi salen las comisiones reales.
         server.expect(requestTo("/v1/quotations"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("X-Api-Version", "2026-06-01"))
@@ -76,9 +76,9 @@ class KiraApiClientVersionTest {
     }
 
     @Test
-    void elRestoDeRutasSigueConLaVersionConfigurada() {
+    void elRestoDeRutasViajaConLaMismaVersion() {
         server.expect(requestTo("/v1/payouts/po_1"))
-                .andExpect(header("X-Api-Version", "2026-04-14"))
+                .andExpect(header("X-Api-Version", "2026-06-01"))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
         client.getPayout("po_1");
@@ -87,7 +87,7 @@ class KiraApiClientVersionTest {
     }
 
     @Test
-    void losDocumentosDeUnRfiViajanComoMultipartConLaParteFilesYLaVersionDeRfis() {
+    void losDocumentosDeUnRfiViajanComoMultipartConLaParteFilesYLaMismaVersion() {
         server.expect(requestTo("/v1/rfis/rfi_1/items/item_1/documents"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("X-Api-Version", "2026-06-01"))

@@ -104,7 +104,7 @@ public class OpenVirtualAccountService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("user_id", tenant.getKiraUserId());
         body.put("type", ACCOUNT_TYPE);
-        // El banco viene de la configuracion: 'portage' en sandbox da 400 "Invalid bank".
+        // El banco viene de la configuracion (KiraProperties lo valida): uno no autorizado da 400 "Invalid bank".
         body.put("bank", account.getBank());
         body.put("mode", account.getMode().wireValue());
         if (account.getDescription() != null && !account.getDescription().isBlank()) {

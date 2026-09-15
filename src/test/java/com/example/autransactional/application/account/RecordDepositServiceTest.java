@@ -43,7 +43,7 @@ class RecordDepositServiceTest {
     @BeforeEach
     void setUp() {
         cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT,
-                "slovak_savings_bank", null);
+                "jp_morgan", null);
         cuenta.linkKiraAccount("kva_1");
         cuenta.describeBank("Example Bank", "1234567890", "021000021");
         cuenta.refreshBalance(new BigDecimal("5000.00"), Instant.now());

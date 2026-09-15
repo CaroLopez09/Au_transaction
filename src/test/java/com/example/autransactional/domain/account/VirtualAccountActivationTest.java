@@ -16,7 +16,7 @@ class VirtualAccountActivationTest {
 
     private VirtualAccount leidaDeLaBase(Instant creada) {
         return VirtualAccount.rehydrate("va-1", TenantId.of("juriscop"), "kva_1", null, null, null,
-                "USD", VirtualAccountMode.FIAT, "slovak_savings_bank", "Operativa",
+                "USD", VirtualAccountMode.FIAT, "jp_morgan", "Operativa",
                 VirtualAccountStatus.PENDING, BigDecimal.ZERO, false, null, null, creada, creada);
     }
 

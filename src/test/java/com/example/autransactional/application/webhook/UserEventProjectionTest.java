@@ -256,7 +256,7 @@ class UserEventProjectionTest {
         // 'approved' colapsa activating y active: solo este evento (o un numero de cuenta
         // real) dice que la cuenta puede mover dinero.
         VirtualAccount cuenta = new VirtualAccount("va-1", TenantId.of("juriscop"), "USD",
-                VirtualAccountMode.FIAT, "slovak_savings_bank", null);
+                VirtualAccountMode.FIAT, "jp_morgan", null);
         cuenta.linkKiraAccount("kva_1");
         when(accounts.findByKiraAccountId("kva_1")).thenReturn(Optional.of(cuenta));
 
@@ -274,7 +274,7 @@ class UserEventProjectionTest {
     @Test
     void unEventoDeCuentaSinNumeroNoBorraElQueYaTeniamos() throws Exception {
         VirtualAccount cuenta = new VirtualAccount("va-1", TenantId.of("juriscop"), "USD",
-                VirtualAccountMode.FIAT, "slovak_savings_bank", null);
+                VirtualAccountMode.FIAT, "jp_morgan", null);
         cuenta.linkKiraAccount("kva_1");
         cuenta.describeBank("Example Bank", "1234567890", "021000021");
         when(accounts.findByKiraAccountId("kva_1")).thenReturn(Optional.of(cuenta));

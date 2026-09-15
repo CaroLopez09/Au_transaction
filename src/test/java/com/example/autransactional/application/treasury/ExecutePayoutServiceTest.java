@@ -92,7 +92,7 @@ class ExecutePayoutServiceTest {
         empresa.linkKiraUser("usr_1");
         empresa.applyRemoteState(TenantStatus.VERIFIED, null, null, true);
         VirtualAccount cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT,
-                "slovak_savings_bank", null);
+                "jp_morgan", null);
         cuenta.linkKiraAccount("kva-1");
         cuenta.describeBank("Bank", "1234567890", "021000021");
         Recipient destinatario = new Recipient("rec-1", TENANT,

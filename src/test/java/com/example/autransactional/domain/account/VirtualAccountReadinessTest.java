@@ -28,6 +28,12 @@ class VirtualAccountReadinessTest {
     }
 
     @Test
+    void activeEsLaSenalDe20260601() {
+        assertTrue(VirtualAccountReadiness.isFundsReady("ACTIVE", null, false));
+        assertFalse(VirtualAccountReadiness.isFundsReady("PENDING", null, false));
+    }
+
+    @Test
     void unaCuentaRechazadaNuncaEstaLista() {
         assertFalse(VirtualAccountReadiness.isFundsReady("declined", "1234567890", false));
         assertFalse(VirtualAccountReadiness.isFundsReady("DEACTIVATED", "1234567890", false));

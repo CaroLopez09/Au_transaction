@@ -12,8 +12,8 @@ class KiraWebhookVerifierTest {
 
     private KiraWebhookVerifier verifier(String secret) {
         return new KiraWebhookVerifier(new KiraProperties(
-                "https://api.balampay.com/sandbox", "k", "c", "p", "2026-04-14",
-                secret, null, 3600, 300, 5000, 30000, "slovak_savings_bank", true));
+                "https://api.balampay.com/sandbox", "k", "c", "p", "2026-06-01",
+                secret, null, 3600, 300, 5000, 30000, "jp_morgan", true));
     }
 
     /** Firma de referencia calculada con HMAC-SHA256 hex sobre los bytes exactos del cuerpo. */
@@ -52,8 +52,8 @@ class KiraWebhookVerifierTest {
     void duranteLaRotacionAceptaTambienElSecretoAnterior() throws Exception {
         // Kira firma con el secreto viejo cerca de un minuto tras rotarlo.
         var rotando = new KiraWebhookVerifier(new KiraProperties(
-                "https://api.balampay.com/sandbox", "k", "c", "p", "2026-04-14",
-                "secreto-nuevo", SECRET, 3600, 300, 5000, 30000, "slovak_savings_bank", true));
+                "https://api.balampay.com/sandbox", "k", "c", "p", "2026-06-01",
+                "secreto-nuevo", SECRET, 3600, 300, 5000, 30000, "jp_morgan", true));
         byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
 
         assertTrue(rotando.verify(body, sign(body, SECRET)));

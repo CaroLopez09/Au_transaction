@@ -32,17 +32,17 @@ kira:
   password: ${KIRA_PASSWORD:}
   webhook-secret: ${KIRA_WEBHOOK_SECRET:}
   webhook-secret-previous: ${KIRA_WEBHOOK_SECRET_PREVIOUS:}
-  # Version documentada y recomendada para integrar. Se envia en cada peticion
-  # mientras la cuenta no este fijada con POST /v1/versioning/upgrade.
-  api-version: ${KIRA_API_VERSION:2026-04-14}
+  # Una sola version, enviada en la cabecera de cada peticion (la documentacion lo recomienda
+  # aunque la cuenta este fijada). Solo se admite 2026-06-01.
+  api-version: ${KIRA_API_VERSION:2026-06-01}
   # El token vive 3600s y no hay refresh: se renueva con margen.
   token-ttl-seconds: 3600
   token-refresh-margin-seconds: 300
   connect-timeout-ms: 5000
   read-timeout-ms: 30000
-  # Banco de las cuentas virtuales. El valor valido depende del entorno: 'portage' contra
-  # el sandbox devuelve 400 "Invalid bank", y 'slovak_savings_bank' en produccion tambien.
-  bank: ${KIRA_BANK:slovak_savings_bank}
+  # Banco de las cuentas virtuales. Documentados: jp_morgan y austin_capital_trust (este ultimo
+  # aun no soportado). KiraProperties rechaza cualquier otro al arrancar.
+  bank: ${KIRA_BANK:jp_morgan}
   # Habilita lo que solo existe en el sandbox, como simular un deposito.
   sandbox: ${KIRA_SANDBOX:true}
 

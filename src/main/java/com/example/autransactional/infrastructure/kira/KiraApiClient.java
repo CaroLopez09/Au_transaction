@@ -27,8 +27,8 @@ import java.util.Map;
  * Responsabilidades que la documentacion exige y que ningun caso de uso debe repetir:
  *  - x-api-key en TODA peticion, incluida POST /auth.
  *  - Authorization: Bearer en toda peticion salvo POST /auth.
- *  - X-Api-Version en cada peticion mientras la cuenta no este fijada. Los RFIs la
- *    sobrescriben: solo existen en 2026-06-01, y la cabecera por peticion gana al pin.
+ *  - X-Api-Version en cada peticion, siempre la misma (KiraProperties.API_VERSION): la
+ *    cabecera gana al pin de la cuenta y el go-live checklist exige una sola version.
  *  - Idempotency-Key (UUID v4) en POST /v1/users, /v1/recipients, /v1/virtual-accounts
  *    y /v1/virtual-accounts/{id}/payout.
  *  - Reautenticar y reintentar una vez ante un 401.
@@ -38,16 +38,6 @@ import java.util.Map;
 public class KiraApiClient {
 
     private static final Logger log = LoggerFactory.getLogger(KiraApiClient.class);
-
-    /** Las rutas de RFI solo existen en esta version; con 2026-04-14 no se encuentran. */
-    static final String RFI_API_VERSION = "2026-06-01";
-
-    /**
-     * La cotizacion desglosada (fees[], totals, pricing_context) solo existe desde esta version;
-     * con 2026-04-14 la respuesta es una forma simple sin totals, y de ahi salen las comisiones
-     * reales que hereda el pago.
-     */
-    static final String QUOTATION_API_VERSION = "2026-06-01";
 
     private final RestClient restClient;
     private final KiraCredentialManager credentialManager;
@@ -147,8 +137,7 @@ public class KiraApiClient {
     }
 
     public JsonNode createQuotation(Object body) {
-        return exchangeWithStatus(HttpMethod.POST, "/v1/quotations", body, null,
-                QUOTATION_API_VERSION).body();
+        return exchangeWithStatus(HttpMethod.POST, "/v1/quotations", body, null).body();
     }
 
     public JsonNode previewPayout(String virtualAccountId, Object body) {
@@ -172,18 +161,16 @@ public class KiraApiClient {
 
     /** Pagina con limit + offset (tope 100), no con page como pagos y depositos. */
     public JsonNode listRfis(Map<String, ?> query) {
-        return exchangeWithStatus(HttpMethod.GET, withQuery("/v1/rfis", query), null, null,
-                RFI_API_VERSION).body();
+        return exchangeWithStatus(HttpMethod.GET, withQuery("/v1/rfis", query), null, null).body();
     }
 
     public JsonNode getRfi(String rfiId) {
-        return exchangeWithStatus(HttpMethod.GET, "/v1/rfis/" + rfiId, null, null, RFI_API_VERSION).body();
+        return exchangeWithStatus(HttpMethod.GET, "/v1/rfis/" + rfiId, null, null).body();
     }
 
     /** All-or-nothing: si un item no cumple su answer_spec, 422 y no se guarda ninguno. 409 si esta cerrado. */
     public JsonNode answerRfiItems(String rfiId, Object body) {
-        return exchangeWithStatus(HttpMethod.PATCH, "/v1/rfis/" + rfiId + "/items", body, null,
-                RFI_API_VERSION).body();
+        return exchangeWithStatus(HttpMethod.PATCH, "/v1/rfis/" + rfiId + "/items", body, null).body();
     }
 
     /**
@@ -204,20 +191,19 @@ public class KiraApiClient {
             };
             parts.add("files", new HttpEntity<>(resource, headers));
         }
-        return exchangeWithStatus(HttpMethod.POST, rfiDocumentsPath(rfiId, itemId), parts, null,
-                RFI_API_VERSION).body();
+        return exchangeWithStatus(HttpMethod.POST, rfiDocumentsPath(rfiId, itemId), parts, null).body();
     }
 
     /** 422 "The last file cannot be removed": un item respondido necesita al menos un archivo. */
     public JsonNode removeRfiDocument(String rfiId, String itemId, String documentId) {
         return exchangeWithStatus(HttpMethod.DELETE, rfiDocumentsPath(rfiId, itemId) + "/" + documentId,
-                null, null, RFI_API_VERSION).body();
+                null, null).body();
     }
 
     /** La URL es una credencial al portador que caduca en minutos: no se guarda ni se registra. */
     public JsonNode getRfiDocumentLink(String rfiId, String itemId, String documentId) {
         return exchangeWithStatus(HttpMethod.GET, rfiDocumentsPath(rfiId, itemId) + "/" + documentId,
-                null, null, RFI_API_VERSION).body();
+                null, null).body();
     }
 
     /**
@@ -227,7 +213,7 @@ public class KiraApiClient {
      */
     public JsonNode mintRfiUboLink(String rfiId, String itemId) {
         return exchangeWithStatus(HttpMethod.POST, "/v1/rfis/" + rfiId + "/items/" + itemId + "/ubo-link",
-                Map.of(), null, RFI_API_VERSION).body();
+                Map.of(), null).body();
     }
 
     private static String rfiDocumentsPath(String rfiId, String itemId) {
@@ -247,13 +233,8 @@ public class KiraApiClient {
 
     public KiraResponse exchangeWithStatus(HttpMethod method, String path, Object body,
                                            IdempotencyKey idempotencyKey) {
-        return exchangeWithStatus(method, path, body, idempotencyKey, properties.apiVersion());
-    }
-
-    private KiraResponse exchangeWithStatus(HttpMethod method, String path, Object body,
-                                            IdempotencyKey idempotencyKey, String apiVersion) {
         try {
-            return doExchange(method, path, body, idempotencyKey, apiVersion);
+            return doExchange(method, path, body, idempotencyKey);
         } catch (KiraApiException e) {
             if (!e.isUnauthorized()) {
                 throw e;
@@ -261,17 +242,17 @@ public class KiraApiClient {
             // El token expiro o fue revocado: no hay refresh, se reautentica y se reintenta una vez.
             log.info("Kira devolvio 401 en {} {}; reautenticando y reintentando una vez", method, path);
             credentialManager.invalidate();
-            return doExchange(method, path, body, idempotencyKey, apiVersion);
+            return doExchange(method, path, body, idempotencyKey);
         }
     }
 
     private KiraResponse doExchange(HttpMethod method, String path, Object body,
-                                    IdempotencyKey idempotencyKey, String apiVersion) {
+                                    IdempotencyKey idempotencyKey) {
         var spec = restClient.method(method)
                 .uri(path)
                 .header("x-api-key", properties.apiKey())
                 .header("Authorization", "Bearer " + credentialManager.getAccessToken())
-                .header("X-Api-Version", apiVersion);
+                .header("X-Api-Version", properties.apiVersion());
 
         if (idempotencyKey != null) {
             spec = spec.header("Idempotency-Key", idempotencyKey.value());
