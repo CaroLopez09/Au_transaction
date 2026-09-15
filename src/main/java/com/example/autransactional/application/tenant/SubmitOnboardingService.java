@@ -306,6 +306,7 @@ public class SubmitOnboardingService {
      */
     static Map<String, Object> forUpdate(Map<String, Object> profile) {
         Map<String, Object> body = new LinkedHashMap<>(profile);
+        assertEinOnlyForUsBusinesses(body);
         body.remove("type");
         body.remove("external_id");
         if (body.remove("has_material_intermediary_ownership") != null) {
@@ -323,6 +324,17 @@ public class SubmitOnboardingService {
             putIfText(body, "address_country", address.get("country"));
         }
         return body;
+    }
+
+    /** Kira: ein "US businesses only — do NOT send for non-US businesses". */
+    static void assertEinOnlyForUsBusinesses(Map<String, Object> body) {
+        Object ein = body.get("ein");
+        Object country = body.get("formation_country");
+        if (ein != null && !ein.toString().isBlank() && country != null
+                && !"USA".equalsIgnoreCase(country.toString().trim())) {
+            throw new DomainException("El EIN solo aplica a empresas constituidas en EE. UU.; para "
+                    + country + " usa tax_id.");
+        }
     }
 
     private static void rename(Map<String, Object> body, String from, String to) {

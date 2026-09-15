@@ -384,4 +384,13 @@ class SubmitOnboardingServiceTest {
         assertFalse(body.getValue().containsKey("tos_accepted_version"));
         assertNull(service.terms(compliance).acceptedVersion());
     }
+
+    @Test
+    void elEinSoloViajaParaEmpresasDeEstadosUnidos() {
+        assertThrows(DomainException.class, () -> SubmitOnboardingService.forUpdate(
+                Map.of("formation_country", "COL", "ein", "123456789")));
+        assertEquals("123456789", SubmitOnboardingService.forUpdate(
+                Map.of("formation_country", "usa", "ein", "123456789")).get("ein"));
+        assertDoesNotThrow(() -> SubmitOnboardingService.forUpdate(Map.of("formation_country", "COL", "tax_id", "900")));
+    }
 }
