@@ -1,10 +1,16 @@
 # Desarrollo local. Contra el sandbox de Kira y con datos semilla.
 spring:
+  # Secretos locales fuera del repositorio: `.env` esta en .gitignore. Es `optional:`,
+  # asi que si no existe el arranque no falla y las variables se toman del entorno.
+  # Solo el perfil dev lo lee: en cert y prod los secretos vienen del gestor de secretos.
+  config:
+    import: optional:file:./.env[.properties]
+
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/autransactional?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
     username: ${DB_USERNAME:root}
-    # La contrasena viene del entorno. El valor por defecto NO es el de tu MySQL local:
-    # exporta DB_PASSWORD antes de arrancar el perfil dev.
+    # La contrasena viene de `.env` (o del entorno). El valor por defecto NO es el de
+    # tu MySQL local: sin DB_PASSWORD el arranque falla la conexion.
     password: ${DB_PASSWORD:Dev12345!}
   jpa:
     hibernate:

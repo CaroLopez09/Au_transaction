@@ -141,9 +141,74 @@ class SubmitOnboardingServiceTest {
 
         assertEquals("sa_de_cv", body.getValue().get("business_type"));
         // Lo enviado en el alta sigue viajando.
-        assertEquals("business", body.getValue().get("type"));
         assertEquals("sales_of_goods_and_services", body.getValue().get("source_of_funds"));
         assertTrue(empresa.isVerificationTriggered());
+    }
+
+    @Test
+    void elPutNoLlevaLasClavesQueSoloExistenEnElAlta() {
+        // Sandbox 15-sep: type y external_id en el PUT dan 400 "Unrecognized key(s)".
+        when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+        service.register(compliance, alta());
+        when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+        when(kira.getUser("usr_1")).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+
+        service.completeProfile(compliance,
+                new OnboardingCommands.CompleteProfile(Map.of("business_description", "Consultoria")));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
+        verify(kira).updateUser(eq("usr_1"), body.capture());
+        assertFalse(body.getValue().containsKey("type"));
+        assertFalse(body.getValue().containsKey("external_id"));
+    }
+
+    @Test
+    void losNombresDelAltaSeTraducenALosDelPut() {
+        // Cada par verificado contra el sandbox el 15-sep: el nombre del alta da 400, el del PUT da 200.
+        Map<String, Object> perfil = new java.util.LinkedHashMap<>();
+        perfil.put("representative_date_of_birth", "1985-04-12");
+        perfil.put("business_trade_name", "Juriscop");
+        perfil.put("has_material_intermediary_ownership", false);
+        perfil.put("registered_address", Map.of(
+                "street_line_1", "Calle 1 # 2-3", "street_line_2", "Oficina 4", "city", "Bogota",
+                "subdivision", "DC", "postal_code", "110111", "country", "COL"));
+
+        Map<String, Object> body = SubmitOnboardingService.forUpdate(perfil);
+
+        assertEquals("1985-04-12", body.get("representative_birth_date"));
+        assertEquals("Juriscop", body.get("doing_business_as"));
+        assertEquals("Calle 1 # 2-3, Oficina 4", body.get("address_street"));
+        assertEquals("Bogota", body.get("address_city"));
+        assertEquals("DC", body.get("address_state"));
+        assertEquals("110111", body.get("address_zip_code"));
+        assertEquals("COL", body.get("address_country"));
+        assertFalse(body.containsKey("representative_date_of_birth"));
+        assertFalse(body.containsKey("business_trade_name"));
+        assertFalse(body.containsKey("registered_address"));
+        assertFalse(body.containsKey("has_material_intermediary_ownership"));
+    }
+
+    @Test
+    void unaDireccionNuevaReemplazaALaGuardada() {
+        when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+        service.register(compliance, alta());
+        when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+        when(kira.getUser("usr_1")).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+
+        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(Map.of(
+                "registered_address", Map.of("street_line_1", "Calle 1", "city", "Bogota", "country", "COL"),
+                "representative_date_of_birth", "1985-04-12")));
+        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(Map.of(
+                "registered_address", Map.of("street_line_1", "Carrera 7", "city", "Medellin", "country", "COL"),
+                "representative_date_of_birth", "1990-01-01")));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
+        verify(kira, times(2)).updateUser(anyString(), body.capture());
+        assertEquals("Carrera 7", body.getValue().get("address_street"));
+        assertEquals("Medellin", body.getValue().get("address_city"));
+        assertEquals("1990-01-01", body.getValue().get("representative_birth_date"));
     }
 
     @Test
@@ -182,5 +247,91 @@ class SubmitOnboardingServiceTest {
 
         assertThrows(DomainException.class, () -> service.register(maker, alta()));
         verify(kira, never()).createUser(any(), any());
+    }
+
+    // --- Documentos KYB (identifying_information[].documents[]) ---
+
+    private KybDocumentCommands.AttachDocuments acta() {
+        var file = new KybDocumentCommands.UploadedFile("acta.pdf", "application/pdf",
+                "PDF".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new KybDocumentCommands.AttachDocuments("business_formation", "COL", "900123456", null,
+                List.of(new KybDocumentCommands.DocumentFile("file_business_formation", file)));
+    }
+
+    private void empresaDadaDeAlta() {
+        when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+        service.register(compliance, alta());
+        when(kira.getUser(anyString())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+        when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
+    }
+
+    @Test
+    void elDocumentoViajaDentroDelPutDelExpediente() {
+        empresaDadaDeAlta();
+
+        service.attachDocuments(compliance, acta());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
+        verify(kira).updateUser(anyString(), body.capture());
+
+        // Kira no tiene endpoint de subida: el archivo va anidado en el registro.
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> entries =
+                (List<Map<String, Object>>) body.getValue().get("identifying_information");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> documents = (List<Map<String, Object>>) entries.get(0).get("documents");
+        assertEquals("data:application/pdf;base64,UERG", documents.get(0).get("file"));
+    }
+
+    @Test
+    void elBase64NoSeGuardaEnElPayloadDeOnboarding() {
+        empresaDadaDeAlta();
+
+        service.attachDocuments(compliance, acta());
+
+        // Si se guardara, el siguiente PUT lo reenviaria y el cuerpo crece sin techo
+        // hasta pasarse de los 10 MB que admite Kira.
+        String guardado = empresa.getOnboardingPayload();
+        assertFalse(guardado.contains("base64"), guardado);
+        assertTrue(guardado.contains("business_formation"), guardado);
+    }
+
+    @Test
+    void elRegistroSobreviveAlSiguientePutDelPerfil() {
+        empresaDadaDeAlta();
+        service.attachDocuments(compliance, acta());
+
+        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(
+                Map.of("business_type", "ltda")));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
+        verify(kira, times(2)).updateUser(anyString(), body.capture());
+
+        // El registro se reenvia sin archivos, y eso no los borra en Kira:
+        // "a missing file works differently: sending other fields will not clear it".
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> entries =
+                (List<Map<String, Object>>) body.getValue().get("identifying_information");
+        assertEquals("business_formation", entries.get(0).get("type"));
+        assertFalse(entries.get(0).containsKey("documents"));
+    }
+
+    @Test
+    void subirDocumentosExigeAltaPrevia() {
+        var e = assertThrows(DomainException.class, () -> service.attachDocuments(compliance, acta()));
+
+        assertTrue(e.getMessage().contains("no esta dada de alta"), e.getMessage());
+        verify(kira, never()).updateUser(anyString(), any());
+    }
+
+    @Test
+    void unRolDeTesoreriaNoSubeDocumentosKyb() {
+        var maker = new AuthenticatedOperator("u-2", "treasury.maker@juriscop.test", TENANT,
+                Role.TREASURY_MAKER);
+
+        assertThrows(DomainException.class, () -> service.attachDocuments(maker, acta()));
+        verify(kira, never()).updateUser(anyString(), any());
     }
 }

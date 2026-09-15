@@ -1,0 +1,43 @@
+meta {
+  name: 07 Subir documento de un UBO
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/ubos/{{uboId}}/documents?informationType=passport&issuingCountry=COL&number=AB1234567&types=front
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+params:query {
+  informationType: passport
+  issuingCountry: COL
+  number: AB1234567
+  types: front
+}
+
+body:multipart-form {
+  files: @file(muestras/documento.pdf)
+}
+
+tests {
+  test("sin email o sin alta en Kira responde 422", function () {
+    expect([200, 422]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  El documento va anidado en la entrada de ESA persona dentro de associated_persons[],
+  que Kira empareja por email: el UBO necesita uno registrado o responde 422.
+
+  Mandar la selfie junto al documento (types: front, selfie) le basta a Kira para el face
+  match, sin sesion interactiva. No sustituye al enlace de liveness, pero adelanta esa parte.
+
+  `types` va en la query porque Bruno no manda los campos de texto de un multipart como
+  campos de formulario; desde el navegador puede ir en el cuerpo.
+}

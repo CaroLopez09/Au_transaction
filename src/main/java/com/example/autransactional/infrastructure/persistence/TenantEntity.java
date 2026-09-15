@@ -71,6 +71,14 @@ public class TenantEntity {
     @Column(name = "onboarding_payload")
     private String onboardingPayload;
 
+    /** Borrador del formulario de vinculacion (sin archivos). Nunca se envia a Kira por si solo. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "onboarding_draft")
+    private String onboardingDraft;
+
+    @Column(name = "onboarding_draft_updated_at")
+    private Instant onboardingDraftUpdatedAt;
+
     /** Se persiste ANTES del primer POST /v1/users: un reintento no debe crear dos empresas. */
     @Column(name = "onboarding_idempotency_key", length = 255)
     private String onboardingIdempotencyKey;

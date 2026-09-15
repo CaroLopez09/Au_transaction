@@ -19,15 +19,29 @@ body:json {
     "id": "{{uboId}}",
     "firstName": "María",
     "lastName": "Pérez",
-    "documentType": "national_id",
-    "documentNumber": "1020304050",
+    "email": "maria.perez@juriscop.co",
+    "documentType": "passport",
+    "documentNumber": "AB123456",
+    "documentCountry": "COL",
     "hasOwnership": true,
     "ownershipPercentage": 55.00,
     "hasControl": true,
     "isSigner": true,
     "politicallyExposed": false,
     "countryOfBirth": "COL",
-    "roleInCompany": "Socia"
+    "roleInCompany": "Representante legal",
+    "birthDate": "1985-04-12",
+    "nationality": "COL",
+    "occupation": "Abogada",
+    "gender": "female",
+    "phoneNumber": "+573001234567",
+    "address": {
+      "streetName": "Calle 1 # 2-3",
+      "city": "Bogota",
+      "state": "DC",
+      "postalCode": "110111",
+      "country": "COL"
+    }
   }
 }
 
@@ -35,4 +49,19 @@ tests {
   test("responde 200", function () {
     expect([200]).to.include(res.getStatus());
   });
+  test("aplica nombre y datos de identidad", function () {
+    const body = res.getBody();
+    expect(body.firstName).to.equal("María");
+    expect(body.birthDate).to.equal("1985-04-12");
+    expect(body.nationality).to.equal("COL");
+    expect(body.address.country).to.equal("COL");
+  });
+}
+
+docs {
+  Desde el 15-sep la edicion aplica tambien nombre, apellido y cargo, y acepta los datos que
+  Kira pide por persona segun el banco: birthDate, nationality, occupation, gender, phoneNumber
+  (E.164), documentCountry y address (pais ISO-3). Todos opcionales. Verificado en sandbox:
+  con birthDate y nationality desaparecen associated_persons:birth_date y :nationality de los
+  faltantes.
 }

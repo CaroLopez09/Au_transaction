@@ -42,6 +42,14 @@ public class Tenant {
     private String onboardingIdempotencyKey;
     private String rejectionReason;
 
+    /**
+     * Borrador del formulario de vinculacion: lo que el portal va rellenando antes de enviarlo
+     * a Kira. Kira no tiene borradores (la verificacion arranca sola con el expediente completo),
+     * asi que se guarda aqui y nunca viaja a Kira por si solo. No contiene archivos.
+     */
+    private String onboardingDraft;
+    private Instant onboardingDraftUpdatedAt;
+
     public Tenant(TenantId id, String name, String taxId, String jurisdiction) {
         if (name == null || name.isBlank()) {
             throw new DomainException("La empresa cliente necesita un nombre.");
@@ -79,6 +87,26 @@ public class Tenant {
     }
 
     // ── Onboarding ──────────────────────────────────────────────────────
+
+    /** Tope del borrador serializado: datos de formulario, nunca documentos. */
+    public static final int MAX_DRAFT_CHARS = 64 * 1024;
+
+    /** Reemplaza el borrador completo. El portal es dueno del objeto entero. */
+    public void saveOnboardingDraft(String draftJson, Instant now) {
+        if (draftJson != null && draftJson.length() > MAX_DRAFT_CHARS) {
+            throw new DomainException("El borrador supera el tamano permitido. Los documentos no se guardan "
+                    + "en el borrador: se suben al proveedor en su paso.");
+        }
+        this.onboardingDraft = draftJson;
+        this.onboardingDraftUpdatedAt = now;
+        touch();
+    }
+
+    /** Solo para rehidratar desde la base: no modifica la fecha de actualizacion del agregado. */
+    public void restoreOnboardingDraft(String draftJson, Instant updatedAt) {
+        this.onboardingDraft = draftJson;
+        this.onboardingDraftUpdatedAt = updatedAt;
+    }
 
     /**
      * Reserva la clave de idempotencia del alta en Kira.

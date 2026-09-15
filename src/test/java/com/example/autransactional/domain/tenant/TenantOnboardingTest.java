@@ -47,17 +47,30 @@ class TenantOnboardingTest {
     }
 
     @Test
-    void losCamposPendientesSonLosGeneralesMasLosDelProducto() {
+    void losCamposPendientesSonLosDelProductoNoLaUnionGeneral() {
+        Tenant t = empresa();
+
+        // Forma real del sandbox (15-sep): "general" reune los faltantes de todos los productos.
+        t.applyRemoteState(TenantStatus.CREATED, new MissingFields(Map.of(
+                        MissingFields.GENERAL, List.of("expected_monthly_volume", "file_fatca"),
+                        EligibleProduct.USA_VIRTUAL_ACCOUNTS, List.of("expected_monthly_volume"),
+                        "usa-virtual-accounts-zenus", List.of("file_fatca"))),
+                List.of(), null);
+
+        assertEquals(List.of("expected_monthly_volume"),
+                t.getMissingFields().forProduct(EligibleProduct.USA_VIRTUAL_ACCOUNTS));
+        assertFalse(t.isReadyFor(EligibleProduct.USA_VIRTUAL_ACCOUNTS));
+    }
+
+    @Test
+    void siElProductoNoApareceSeUsaLaListaGeneral() {
         Tenant t = empresa();
 
         t.applyRemoteState(TenantStatus.CREATED, new MissingFields(Map.of(
-                        MissingFields.GENERAL, List.of("business_type"),
-                        EligibleProduct.USA_VIRTUAL_ACCOUNTS, List.of("expected_monthly_volume"))),
-                List.of(), null);
+                MissingFields.GENERAL, List.of("business_type"))), List.of(), null);
 
-        assertEquals(List.of("business_type", "expected_monthly_volume"),
+        assertEquals(List.of("business_type"),
                 t.getMissingFields().forProduct(EligibleProduct.USA_VIRTUAL_ACCOUNTS));
-        assertFalse(t.isReadyFor(EligibleProduct.USA_VIRTUAL_ACCOUNTS));
     }
 
     @Test

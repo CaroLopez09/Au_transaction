@@ -1,5 +1,6 @@
 package com.example.autransactional.infrastructure.persistence;
 
+import com.example.autransactional.domain.shared.PostalAddress;
 import com.example.autransactional.domain.shared.TenantId;
 import com.example.autransactional.domain.tenant.LivenessStatus;
 import com.example.autransactional.domain.tenant.Ubo;
@@ -28,6 +29,7 @@ public class JpaUboRepository implements UboRepository {
         e.setPersonReferenceId(ubo.getPersonReferenceId());
         e.setFirstName(ubo.getFirstName());
         e.setLastName(ubo.getLastName());
+        e.setEmail(ubo.getEmail());
         e.setDocumentType(ubo.getDocumentType());
         e.setDocumentNumber(ubo.getDocumentNumber());
         e.setOwnershipPercentage(ubo.getOwnershipPercentage());
@@ -37,6 +39,19 @@ public class JpaUboRepository implements UboRepository {
         e.setSigner(ubo.isSigner());
         e.setPoliticallyExposed(ubo.isPoliticallyExposed());
         e.setCountryOfBirth(ubo.getCountryOfBirth());
+        e.setBirthDate(ubo.getBirthDate());
+        e.setNationality(ubo.getNationality());
+        e.setOccupation(ubo.getOccupation());
+        e.setGender(ubo.getGender());
+        e.setPhoneNumber(ubo.getPhoneNumber());
+        e.setDocumentCountry(ubo.getDocumentCountry());
+        PostalAddress address = ubo.getResidentialAddress();
+        e.setAddressStreet(address == null ? null : address.streetName());
+        e.setAddressCity(address == null ? null : address.city());
+        e.setAddressState(address == null ? null : address.state());
+        e.setAddressZipCode(address == null ? null : address.postalCode());
+        e.setAddressCountry(address == null ? null : address.country());
+        e.setSyncedToKira(ubo.isSyncedToKira());
         e.setLivenessStatus(ubo.getLivenessStatus());
         e.setLivenessLink(ubo.getLivenessLink());
         e.setLivenessExpiresAt(ubo.getLivenessExpiresAt());
@@ -73,11 +88,24 @@ public class JpaUboRepository implements UboRepository {
                 .toList();
     }
 
+    @Override
+    public void delete(Ubo ubo) {
+        jpa.deleteById(ubo.getId());
+    }
+
+    private static PostalAddress addressOf(UboEntity e) {
+        PostalAddress address = new PostalAddress(e.getAddressStreet(), e.getAddressCity(), e.getAddressState(),
+                e.getAddressZipCode(), e.getAddressCountry());
+        return address.isBlank() && e.getAddressCountry() == null ? null : address;
+    }
+
     private static Ubo toDomain(UboEntity e) {
         return Ubo.rehydrate(e.getId(), TenantId.of(e.getTenantId()), e.getPersonReferenceId(),
-                e.getFirstName(), e.getLastName(), e.getDocumentType(), e.getDocumentNumber(),
+                e.getFirstName(), e.getLastName(), e.getEmail(), e.getDocumentType(), e.getDocumentNumber(),
                 e.getOwnershipPercentage(), e.getRoleInCompany(), e.isHasOwnership(), e.isHasControl(),
-                e.isSigner(), e.isPoliticallyExposed(), e.getCountryOfBirth(), e.getLivenessStatus(),
+                e.isSigner(), e.isPoliticallyExposed(), e.getCountryOfBirth(),
+                e.getBirthDate(), e.getNationality(), e.getOccupation(), e.getGender(), e.getPhoneNumber(),
+                e.getDocumentCountry(), addressOf(e), e.isSyncedToKira(), e.getLivenessStatus(),
                 e.getLivenessLink(), e.getLivenessExpiresAt(), e.getCreatedAt(), e.getUpdatedAt());
     }
 }

@@ -1,0 +1,29 @@
+meta {
+  name: 09 Quitar UBO temporal
+  type: http
+  seq: 9
+}
+
+delete {
+  url: {{baseUrl}}/api/ubos/{{uboTemporalId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+tests {
+  test("responde 200 con el grupo sin la persona", function () {
+    expect(res.getStatus()).to.equal(200);
+    const ids = (res.getBody().members || []).map(m => m.id);
+    expect(ids).to.not.include(bru.getVar("uboTemporalId"));
+  });
+}
+
+docs {
+  Solo se puede quitar a quien Kira aun no conoce. Un beneficiario ya sincronizado, con
+  documentos subidos o con enlace de liveness responde 422: Kira fusiona las personas por
+  email y quitarla del array no la borra alli.
+}

@@ -9,6 +9,8 @@ public interface UboRepository {
 
     Ubo save(Ubo ubo);
 
+    void delete(Ubo ubo);
+
     Optional<Ubo> findByIdAndTenant(String id, TenantId tenantId);
 
     /** Los webhooks de liveness identifican a la persona por esta referencia de Kira. */

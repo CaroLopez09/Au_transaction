@@ -1,0 +1,46 @@
+meta {
+  name: 07 Subir documento de la empresa
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/onboarding/documents?informationType=business_formation&issuingCountry=COL&types=file_business_formation
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+params:query {
+  informationType: business_formation
+  issuingCountry: COL
+  types: file_business_formation
+}
+
+body:multipart-form {
+  files: @file(muestras/documento.pdf)
+}
+
+tests {
+  test("sin alta previa en Kira responde 422", function () {
+    expect([200, 422]).to.include(res.getStatus());
+  });
+}
+
+docs {
+  Kira NO tiene endpoint de subida: el archivo viaja en base64 dentro del PUT /v1/users,
+  anidado en identifying_information[].documents[].
+
+  `files` y `types` se emparejan por indice: el archivo i cumple el papel i (front, back,
+  selfie o uno de los file_*). Maximo 10 archivos y 7 MB en total por peticion, porque el
+  cuerpo entero de Kira no puede pasar de 10 MB y el base64 anade un tercio.
+
+  El base64 NO se guarda en el BFF: Kira custodia el documento.
+
+  `types` va aqui en la query y no en el cuerpo porque Bruno no manda los campos de texto
+  de un multipart como campos de formulario. Un FormData del navegador si, y entonces
+  `types` puede ir en el cuerpo: el endpoint lo acepta de las dos formas.
+}

@@ -14,6 +14,14 @@ auth:bearer {
   token: {{tokenReadOnly}}
 }
 
+script:post-response {
+  // Si ya hay beneficiarios, 03 Editar UBO trabaja sobre el primero aunque 02 no cree uno nuevo.
+  const members = res.getBody().members || [];
+  if (res.getStatus() === 200 && members.length && !bru.getVar("uboId")) {
+    bru.setVar("uboId", members[0].id);
+  }
+}
+
 tests {
   test("responde 200", function () {
     expect([200]).to.include(res.getStatus());

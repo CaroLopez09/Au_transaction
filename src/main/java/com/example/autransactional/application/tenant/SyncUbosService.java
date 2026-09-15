@@ -1,6 +1,7 @@
 package com.example.autransactional.application.tenant;
 
 import com.example.autransactional.domain.shared.DomainException;
+import com.example.autransactional.domain.shared.PostalAddress;
 import com.example.autransactional.domain.shared.TenantId;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
@@ -27,9 +28,9 @@ import java.util.UUID;
 /**
  * Beneficiarios finales: registro local, sincronizacion con Kira y enlaces de prueba de vida.
  *
- * El registro local no es una copia por comodidad. Kira exige que 'associated_persons'
- * viaje COMPLETO en cada PUT —lo que no va, se borra en silencio— asi que la unica forma
- * de reconstruir el array es tenerlo entero de este lado.
+ * El registro local no es una copia por comodidad: Kira no devuelve todos los datos de
+ * cada persona, y fusiona associated_persons[] por email, asi que este lado es la unica
+ * fuente completa de quienes son y de lo que ya se le envio.
  */
 @Service
 public class SyncUbosService {
@@ -68,14 +69,40 @@ public class SyncUbosService {
                 : ubos.findByIdAndTenant(command.id(), operator.tenantId())
                 .orElseThrow(() -> new DomainException("El beneficiario final no existe."));
 
+        assertEmailNotTaken(operator.tenantId(), ubo.getId(), command.email());
+        ubo.rename(command.firstName(), command.lastName(), command.roleInCompany());
+        ubo.describeEmail(command.email());
         ubo.describeDocument(command.documentType(), command.documentNumber());
         ubo.describeRole(command.hasOwnership(), command.ownershipPercentage(), command.hasControl(),
                 command.isSigner(), command.politicallyExposed(), command.countryOfBirth());
+        ubo.describeIdentity(command.birthDate(), command.nationality(), command.occupation(), command.gender(),
+                command.phoneNumber(), command.documentCountry(),
+                command.address() == null ? null : command.address().toDomain());
         ubos.save(ubo);
 
         audit.record(operator, "tenant.ubo_saved", "ubo", ubo.getId(), null, "OK",
                 "propiedad=" + ubo.getOwnershipPercentage() + "%");
         return UboView.from(ubo);
+    }
+
+    /**
+     * Quita un beneficiario cargado por error.
+     *
+     * Solo antes de que Kira lo conozca: alli las personas se fusionan por email y quitar una
+     * del array no la borra, asi que borrarla aqui dejaria las dos listas descuadradas.
+     */
+    @Transactional
+    public UboView.Roster delete(AuthenticatedOperator operator, String uboId) {
+        assertCanManage(operator);
+        Ubo ubo = ubos.findByIdAndTenant(uboId, operator.tenantId())
+                .orElseThrow(() -> new DomainException("El beneficiario final no existe."));
+        if (ubo.isKnownToKira()) {
+            throw new DomainException("Este beneficiario ya esta registrado en Kira y no se puede quitar desde "
+                    + "el portal. Corrige sus datos o contacta a soporte.");
+        }
+        ubos.delete(ubo);
+        audit.record(operator, "tenant.ubo_deleted", "ubo", ubo.getId(), null, "OK", ubo.fullName());
+        return UboView.Roster.from(ubos.rosterOf(operator.tenantId()));
     }
 
     /**
@@ -99,10 +126,57 @@ public class SyncUbosService {
 
         OnboardingView view = onboarding.completeProfile(operator,
                 new OnboardingCommands.CompleteProfile(Map.of("associated_persons", associatedPersons)));
+        for (Ubo ubo : roster.members()) {
+            ubo.markSyncedToKira();
+            ubos.save(ubo);
+        }
 
         audit.record(operator, "tenant.ubos_synced", "tenant", operator.tenantId().value(), null, "OK",
                 "beneficiarios=" + roster.members().size());
         return view;
+    }
+
+    /**
+     * Adjunta un documento de identidad a UNA persona.
+     *
+     * El documento va anidado en la entrada de esa persona dentro de associated_persons[],
+     * que Kira empareja por email: de ahi que el beneficiario necesite uno antes de subir
+     * nada. La persona viaja con sus datos conocidos para que la fusion no la deje a medias.
+     *
+     * Mandar la selfie junto al documento le basta a Kira para el face match, sin sesion
+     * interactiva: no sustituye al enlace de liveness, pero adelanta esa parte.
+     */
+    @Transactional
+    public UboView attachDocuments(AuthenticatedOperator operator, String uboId,
+                                   KybDocumentCommands.AttachDocuments command) {
+        assertCanManage(operator);
+        Tenant tenant = load(operator.tenantId());
+        tenant.assertRegisteredInKira();
+
+        Ubo ubo = ubos.findByIdAndTenant(uboId, operator.tenantId())
+                .orElseThrow(() -> new DomainException("El beneficiario final no existe."));
+        ubo.assertIdentifiableInKira();
+
+        Map<String, Object> entry = KybDocuments.toIdentifyingInformation(command);
+        Map<String, Object> person = toAssociatedPerson(ubo);
+        person.put("identifying_information", List.of(entry));
+
+        try {
+            kira.updateUser(tenant.getKiraUserId(), Map.of("associated_persons", List.of(person)));
+        } catch (RuntimeException e) {
+            audit.record(operator, "tenant.ubo_documents_attached", "ubo", ubo.getId(), null,
+                    "ERROR", e.getMessage());
+            throw e;
+        }
+
+        // Al subir su documento la persona viaja entera: desde aqui Kira ya la conoce.
+        ubo.markSyncedToKira();
+        ubos.save(ubo);
+
+        // El archivo no se guarda en ningun sitio: lo custodia Kira.
+        audit.record(operator, "tenant.ubo_documents_attached", "ubo", ubo.getId(), null, "OK",
+                "registro=" + entry.get("type") + " archivos=" + command.documents().size());
+        return UboView.from(ubo);
     }
 
     /**
@@ -176,6 +250,10 @@ public class SyncUbosService {
         Map<String, Object> person = new LinkedHashMap<>();
         person.put("first_name", ubo.getFirstName());
         person.put("last_name", ubo.getLastName());
+        // Kira empareja por email: sin el, cada PUT le crea una persona nueva.
+        if (ubo.getEmail() != null) {
+            person.put("email", ubo.getEmail());
+        }
         person.put("has_ownership", ubo.isHasOwnership());
         person.put("ownership_percentage", ubo.getOwnershipPercentage());
         person.put("has_control", ubo.isHasControl());
@@ -183,19 +261,51 @@ public class SyncUbosService {
         person.put("pep_status", ubo.isPoliticallyExposed());
         person.put("country_of_birth", ubo.getCountryOfBirth());
         person.put("title", ubo.getRoleInCompany());
-        if (ubo.getDocumentType() != null) {
-            person.put("document_type", ubo.getDocumentType());
+        putIfPresent(person, "document_type", ubo.getDocumentType());
+        putIfPresent(person, "document_number", ubo.getDocumentNumber());
+        putIfPresent(person, "document_country", ubo.getDocumentCountry());
+        putIfPresent(person, "birth_date", ubo.getBirthDate() == null ? null : ubo.getBirthDate().toString());
+        putIfPresent(person, "nationality", ubo.getNationality());
+        putIfPresent(person, "occupation", ubo.getOccupation());
+        putIfPresent(person, "gender", ubo.getGender());
+        // En associated_persons el telefono se llama phone_number, no phone.
+        putIfPresent(person, "phone_number", ubo.getPhoneNumber());
+        PostalAddress address = ubo.getResidentialAddress();
+        if (address != null) {
+            // El PUT solo acepta la direccion plana; residential_address {} es del alta.
+            putIfPresent(person, "address_street", address.streetName());
+            putIfPresent(person, "address_city", address.city());
+            putIfPresent(person, "address_state", address.state());
+            putIfPresent(person, "address_zip_code", address.postalCode());
+            putIfPresent(person, "address_country", address.country());
         }
-        if (ubo.getDocumentNumber() != null) {
-            person.put("document_number", ubo.getDocumentNumber());
-        }
-        if (ubo.getPersonReferenceId() != null) {
-            person.put("person_reference_id", ubo.getPersonReferenceId());
-        }
+        // person_reference_id no es un campo de entrada (solo sale en enlaces y webhooks).
         return person;
     }
 
     /** Empareja el enlace con su beneficiario: por referencia de Kira, o por nombre. */
+    /**
+     * Kira empareja a las personas por email: dos beneficiarios con el mismo correo son, para
+     * Kira, la misma persona, y localmente suman su participacion dos veces.
+     */
+    private void assertEmailNotTaken(TenantId tenantId, String uboId, String email) {
+        if (email == null || email.isBlank()) {
+            return;
+        }
+        boolean taken = ubos.findByTenant(tenantId).stream()
+                .anyMatch(other -> !other.getId().equals(uboId) && email.trim().equalsIgnoreCase(other.getEmail()));
+        if (taken) {
+            throw new DomainException("Ya hay un beneficiario con ese correo. El proveedor identifica a cada persona "
+                    + "por su correo: edita el existente en lugar de crear otro.");
+        }
+    }
+
+    private static void putIfPresent(Map<String, Object> target, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            target.put(key, value);
+        }
+    }
+
     private boolean applyLink(TenantId tenantId, JsonNode link) {
         String reference = text(link, "person_reference_id");
         String name = text(link, "name");

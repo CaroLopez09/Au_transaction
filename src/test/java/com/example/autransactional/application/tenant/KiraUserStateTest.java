@@ -25,8 +25,9 @@ class KiraUserStateTest {
                   "status": "CREATED",
                   "verification_triggered": false,
                   "missing_fields": {
-                    "general": ["business_type", "formation_date"],
-                    "usa-virtual-accounts": ["expected_monthly_volume"]
+                    "general": ["expected_monthly_volume", "tos_accepted_version"],
+                    "usa-virtual-accounts": ["expected_monthly_volume"],
+                    "usa-virtual-accounts-zenus": ["tos_accepted_version"]
                   },
                   "eligible_products": [
                     { "product_code": "usa-virtual-accounts", "eligible": false,
@@ -38,7 +39,8 @@ class KiraUserStateTest {
         assertEquals("usr_9c1f", state.kiraUserId());
         assertEquals(TenantStatus.CREATED, state.status());
         assertEquals(Boolean.FALSE, state.verificationTriggered());
-        assertEquals(List.of("business_type", "formation_date", "expected_monthly_volume"),
+        // "general" es la union de todos los productos: lo de otro banco no se pide.
+        assertEquals(List.of("expected_monthly_volume"),
                 state.missingFields().forProduct(EligibleProduct.USA_VIRTUAL_ACCOUNTS));
         assertFalse(state.eligibleProducts().getFirst().eligible());
     }

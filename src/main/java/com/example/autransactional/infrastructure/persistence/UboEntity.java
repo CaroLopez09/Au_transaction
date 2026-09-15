@@ -10,6 +10,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 
 /** Beneficiarios finales, directores y liveness por empresa. Tabla `ubos`. */
 @Entity
@@ -35,6 +36,10 @@ public class UboEntity {
 
     @Column(name = "last_name", nullable = false, length = 100)
     private String lastName;
+
+    /** Clave de emparejamiento en associated_persons[]. Nullable: los UBO ya registrados no lo tienen. */
+    @Column(name = "email", length = 255)
+    private String email;
 
     @Column(name = "document_type", length = 50)
     private String documentType;
@@ -68,6 +73,42 @@ public class UboEntity {
     /** ISO-3. Kira no admite vacio. */
     @Column(name = "country_of_birth", length = 3)
     private String countryOfBirth;
+
+    @Column(name = "birth_date")
+    private LocalDate birthDate;
+
+    @Column(name = "nationality", length = 3)
+    private String nationality;
+
+    @Column(name = "occupation", length = 100)
+    private String occupation;
+
+    @Column(name = "gender", length = 10)
+    private String gender;
+
+    @Column(name = "phone_number", length = 20)
+    private String phoneNumber;
+
+    @Column(name = "document_country", length = 3)
+    private String documentCountry;
+
+    @Column(name = "address_street", length = 255)
+    private String addressStreet;
+
+    @Column(name = "address_city", length = 100)
+    private String addressCity;
+
+    @Column(name = "address_state", length = 100)
+    private String addressState;
+
+    @Column(name = "address_zip_code", length = 20)
+    private String addressZipCode;
+
+    @Column(name = "address_country", length = 3)
+    private String addressCountry;
+
+    @Column(name = "synced_to_kira", nullable = false)
+    private boolean syncedToKira = false;
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.VARCHAR)

@@ -44,6 +44,8 @@ public class JpaTenantRepository implements TenantRepository {
                 ? null : tenant.getMissingFields().byProduct()));
         e.setVerificationTriggered(tenant.isVerificationTriggered());
         e.setOnboardingPayload(tenant.getOnboardingPayload());
+        e.setOnboardingDraft(tenant.getOnboardingDraft());
+        e.setOnboardingDraftUpdatedAt(tenant.getOnboardingDraftUpdatedAt());
         e.setOnboardingIdempotencyKey(tenant.getOnboardingIdempotencyKey());
         e.setRejectionReason(tenant.getRejectionReason());
         e.setCreatedAt(tenant.getCreatedAt());
@@ -68,12 +70,14 @@ public class JpaTenantRepository implements TenantRepository {
     }
 
     private Tenant toDomain(TenantEntity e) {
-        return Tenant.rehydrate(TenantId.of(e.getId()), e.getName(), e.getTaxId(), e.getJurisdiction(),
+        Tenant tenant = Tenant.rehydrate(TenantId.of(e.getId()), e.getName(), e.getTaxId(), e.getJurisdiction(),
                 e.getKiraUserId(), e.getStatus(),
                 read(e.getEligibleProducts(), PRODUCTS, List.of()),
                 new MissingFields(read(e.getMissingFields(), FIELDS, Map.of())),
                 e.isVerificationTriggered(), e.getOnboardingPayload(), e.getOnboardingIdempotencyKey(),
                 e.getRejectionReason(), e.getCreatedAt(), e.getUpdatedAt());
+        tenant.restoreOnboardingDraft(e.getOnboardingDraft(), e.getOnboardingDraftUpdatedAt());
+        return tenant;
     }
 
     private String write(Object value) {

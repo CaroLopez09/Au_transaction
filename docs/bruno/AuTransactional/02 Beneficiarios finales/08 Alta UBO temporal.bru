@@ -1,0 +1,45 @@
+meta {
+  name: 08 Alta UBO temporal
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/ubos
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+body:json {
+  {
+    "firstName": "Persona",
+    "lastName": "Temporal",
+    "hasOwnership": false,
+    "ownershipPercentage": 0,
+    "hasControl": false,
+    "isSigner": false,
+    "politicallyExposed": false,
+    "countryOfBirth": "COL"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setVar("uboTemporalId", res.getBody().id);
+  }
+}
+
+tests {
+  test("responde 200 y todavia no esta en Kira", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().knownToKira).to.equal(false);
+  });
+}
+
+docs {
+  Crea un beneficiario sin correo que nunca se envia a Kira, para poder quitarlo en 09.
+}

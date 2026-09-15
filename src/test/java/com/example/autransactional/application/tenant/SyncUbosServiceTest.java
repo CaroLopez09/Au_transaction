@@ -60,6 +60,9 @@ class SyncUbosServiceTest {
         when(ubos.rosterOf(TENANT)).thenAnswer(i -> new UboRoster(registro));
         when(ubos.findByTenant(TENANT)).thenAnswer(i -> registro);
         when(ubos.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(ubos.findByIdAndTenant(anyString(), eq(TENANT))).thenAnswer(i -> registro.stream()
+                .filter(u -> i.getArgument(0).equals(u.getId()))
+                .findFirst());
         when(ubos.findByPersonReferenceId(anyString())).thenAnswer(i -> registro.stream()
                 .filter(u -> i.getArgument(0).equals(u.getPersonReferenceId()))
                 .findFirst());
@@ -105,6 +108,97 @@ class SyncUbosServiceTest {
         assertEquals(false, ana.get("pep_status"));
         assertEquals("COL", ana.get("country_of_birth"));
         assertEquals(true, ana.get("is_signer"));
+    }
+
+    // --- Datos de identidad por persona (missing_fields reales del sandbox, 15-sep) ---
+
+    private UboCommands.SaveUbo edicion(String id, String nombre) {
+        return new UboCommands.SaveUbo(id, nombre, "Gomez", "ana@juriscop.co", "passport", "AB123",
+                true, new BigDecimal("60"), false, true, false, "COL", "Gerente",
+                java.time.LocalDate.of(1985, 4, 12), "col", "Abogada", "female", "+573001234567", "COL",
+                new UboCommands.ResidentialAddress("Calle 1 # 2-3", "Bogota", "DC", "110111", "COL"));
+    }
+
+    @Test
+    void laPersonaViajaConLosDatosQueKiraPideYSinPersonReferenceId() {
+        Ubo ana = registrar("Ana", true, "60");
+        ana.linkKiraPerson("per_ana");
+        service.save(compliance, edicion("Ana", "Ana"));
+        when(onboarding.completeProfile(any(), any())).thenReturn(null);
+
+        service.syncToKira(compliance);
+
+        ArgumentCaptor<OnboardingCommands.CompleteProfile> captor =
+                ArgumentCaptor.forClass(OnboardingCommands.CompleteProfile.class);
+        verify(onboarding).completeProfile(eq(compliance), captor.capture());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> persona = ((List<Map<String, Object>>) captor.getValue().profile()
+                .get("associated_persons")).getFirst();
+
+        assertEquals("1985-04-12", persona.get("birth_date"));
+        assertEquals("COL", persona.get("nationality"));
+        assertEquals("Abogada", persona.get("occupation"));
+        assertEquals("female", persona.get("gender"));
+        assertEquals("+573001234567", persona.get("phone_number"));
+        assertEquals("COL", persona.get("document_country"));
+        assertEquals("Calle 1 # 2-3", persona.get("address_street"));
+        assertEquals("COL", persona.get("address_country"));
+        assertFalse(persona.containsKey("person_reference_id"));
+    }
+
+    @Test
+    void editarCorrigeNombreApellidoYCargo() {
+        registrar("Ana", true, "60");
+
+        UboView vista = service.save(compliance, edicion("Ana", "Anna"));
+
+        assertEquals("Anna", vista.firstName());
+        assertEquals("Gomez", vista.lastName());
+        assertEquals("Gerente", vista.roleInCompany());
+        assertEquals("Anna Gomez", vista.fullName());
+    }
+
+    @Test
+    void seBorraUnBeneficiarioQueKiraAunNoConoce() {
+        registrar("Ana", true, "60");
+        doAnswer(i -> registro.remove((Ubo) i.getArgument(0))).when(ubos).delete(any());
+
+        UboView.Roster grupo = service.delete(compliance, "Ana");
+
+        assertTrue(grupo.members().isEmpty());
+        verify(audit).record(eq(compliance), eq("tenant.ubo_deleted"), anyString(), eq("Ana"), any(), eq("OK"), anyString());
+    }
+
+    @Test
+    void noSeRegistraUnSegundoBeneficiarioConElMismoCorreo() {
+        Ubo ana = registrar("Ana", true, "60");
+        ana.describeEmail("ana@juriscop.co");
+
+        var otra = new UboCommands.SaveUbo(null, "Ana", "Duplicada", "ANA@juriscop.co", null, null,
+                true, new BigDecimal("40"), false, false, false, "COL", null,
+                null, null, null, null, null, null, null);
+
+        assertThrows(DomainException.class, () -> service.save(compliance, otra));
+        verify(ubos, never()).save(any());
+    }
+
+    @Test
+    void trasSincronizarElBeneficiarioYaNoSePuedeBorrar() {
+        Ubo ana = registrar("Ana", true, "60");
+        when(onboarding.completeProfile(any(), any())).thenReturn(null);
+
+        service.syncToKira(compliance);
+
+        assertTrue(ana.isKnownToKira());
+        assertThrows(DomainException.class, () -> service.delete(compliance, "Ana"));
+    }
+
+    @Test
+    void noSeBorraUnBeneficiarioQueKiraYaConoce() {
+        registrar("Ana", true, "60").linkKiraPerson("per_ana");
+
+        assertThrows(DomainException.class, () -> service.delete(compliance, "Ana"));
+        verify(ubos, never()).delete(any());
     }
 
     @Test
@@ -223,5 +317,85 @@ class SyncUbosServiceTest {
                 Role.TREASURY_MAKER);
 
         assertThrows(DomainException.class, () -> service.syncToKira(maker));
+    }
+
+    // --- Documentos de identidad de una persona ---
+
+    private KybDocumentCommands.AttachDocuments pasaporte() {
+        var file = new KybDocumentCommands.UploadedFile("pasaporte.png", "image/png",
+                "PNG".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new KybDocumentCommands.AttachDocuments("passport", "COL", "AB1234567", "2030-01-01",
+                List.of(new KybDocumentCommands.DocumentFile("front", file),
+                        new KybDocumentCommands.DocumentFile("selfie", file)));
+    }
+
+    @Test
+    void elDocumentoDeUnaPersonaViajaAnidadoEnSuEntradaYSeEmparejaPorEmail() {
+        kybEnCurso();
+        Ubo ana = registrar("ana", true, "60");
+        ana.describeEmail("ana@juriscop.co");
+        when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\" }"));
+
+        service.attachDocuments(compliance, "ana", pasaporte());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
+        verify(kira).updateUser(eq("usr_1"), body.capture());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> personas =
+                (List<Map<String, Object>>) body.getValue().get("associated_persons");
+        assertEquals(1, personas.size());
+        // Sin email, Kira no actualiza a Ana: le crea otra persona.
+        assertEquals("ana@juriscop.co", personas.get(0).get("email"));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> registros =
+                (List<Map<String, Object>>) personas.get(0).get("identifying_information");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> documentos = (List<Map<String, Object>>) registros.get(0).get("documents");
+        assertEquals("passport", registros.get(0).get("type"));
+        // La selfie junto al documento le basta a Kira para el face match.
+        assertEquals("selfie", documentos.get(1).get("type"));
+        assertTrue(((String) documentos.get(0).get("file")).startsWith("data:image/png;base64,"));
+    }
+
+    @Test
+    void sinEmailNoSePuedenSubirSusDocumentos() {
+        kybEnCurso();
+        registrar("ana", true, "60");
+
+        var e = assertThrows(DomainException.class,
+                () -> service.attachDocuments(compliance, "ana", pasaporte()));
+
+        assertTrue(e.getMessage().contains("email"), e.getMessage());
+        verify(kira, never()).updateUser(anyString(), any());
+    }
+
+    @Test
+    void noSePuedenSubirDocumentosDeUnBeneficiarioDeOtraEmpresa() {
+        kybEnCurso();
+
+        assertThrows(DomainException.class,
+                () -> service.attachDocuments(compliance, "de-otra-empresa", pasaporte()));
+        verify(kira, never()).updateUser(anyString(), any());
+    }
+
+    @Test
+    void elEmailViajaEnLaSincronizacionDelGrupo() {
+        kybEnCurso();
+        Ubo ana = registrar("ana", true, "60");
+        ana.describeEmail("ana@juriscop.co");
+
+        service.syncToKira(compliance);
+
+        ArgumentCaptor<OnboardingCommands.CompleteProfile> perfil =
+                ArgumentCaptor.forClass(OnboardingCommands.CompleteProfile.class);
+        verify(onboarding).completeProfile(any(), perfil.capture());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> personas =
+                (List<Map<String, Object>>) perfil.getValue().profile().get("associated_persons");
+        assertEquals("ana@juriscop.co", personas.get(0).get("email"));
     }
 }

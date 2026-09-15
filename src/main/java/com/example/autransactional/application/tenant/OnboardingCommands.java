@@ -32,4 +32,11 @@ public final class OnboardingCommands {
      */
     public record CompleteProfile(@NotEmpty Map<String, Object> profile) {
     }
+
+    /**
+     * Borrador completo del formulario de vinculacion, con los nombres de campo de Kira.
+     * Reemplaza el anterior; un objeto vacio borra el borrador. Nunca se envia a Kira.
+     */
+    public record SaveDraft(Map<String, Object> draft) {
+    }
 }

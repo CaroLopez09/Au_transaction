@@ -16,6 +16,8 @@ public record OnboardingView(
         String name,
         String kiraUserId,
         String status,
+        /** Motivos de user.verification.failed. Solo llegan por webhook: ningun GET los devuelve. */
+        String rejectionReason,
         boolean verificationTriggered,
         List<String> pendingFields,
         List<EligibleProduct> eligibleProducts,
@@ -29,6 +31,7 @@ public record OnboardingView(
                 tenant.getName(),
                 tenant.getKiraUserId(),
                 tenant.getStatus().name(),
+                tenant.getRejectionReason(),
                 tenant.isVerificationTriggered(),
                 tenant.getMissingFields().forProduct(product),
                 tenant.getEligibleProducts(),
