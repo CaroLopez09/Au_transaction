@@ -18,6 +18,9 @@ public class JwtService {
     private static final String CLAIM_TENANT = "tenant_id";
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_USER_ID = "uid";
+    /** Marca un token que no da acceso: solo sirve para completar el segundo factor. */
+    private static final String CLAIM_PURPOSE = "purpose";
+    private static final String PURPOSE_MFA = "mfa";
 
     private final Algorithm algorithm;
     private final JWTVerifier verifier;
@@ -42,6 +45,36 @@ public class JwtService {
                 .sign(algorithm);
     }
 
+    /** Reto entre la contrasena y el codigo TOTP. No autentica ninguna ruta de negocio. */
+    public String issueMfaChallenge(OperatorUser user) {
+        Instant now = Instant.now();
+        return JWT.create()
+                .withIssuer(properties.jwtIssuer())
+                .withSubject(user.email())
+                .withJWTId(java.util.UUID.randomUUID().toString())
+                .withClaim(CLAIM_USER_ID, user.id())
+                .withClaim(CLAIM_PURPOSE, PURPOSE_MFA)
+                .withIssuedAt(now)
+                .withExpiresAt(now.plusMillis(properties.mfaChallengeTtlMs()))
+                .sign(algorithm);
+    }
+
+    public long mfaChallengeExpiresInSeconds() {
+        return properties.mfaChallengeTtlMs() / 1000;
+    }
+
+    /** Devuelve el id del usuario y el identificador del reto. Lanza si no es un reto valido. */
+    public MfaChallenge verifyMfaChallenge(String token) {
+        DecodedJWT decoded = verifier.verify(token);
+        if (!PURPOSE_MFA.equals(decoded.getClaim(CLAIM_PURPOSE).asString())) {
+            throw new IllegalArgumentException("No es un reto de segundo factor.");
+        }
+        return new MfaChallenge(decoded.getClaim(CLAIM_USER_ID).asString(), decoded.getId());
+    }
+
+    public record MfaChallenge(String userId, String challengeId) {
+    }
+
     public long expiresInSeconds() {
         return properties.tokenExpirationMs() / 1000;
     }
@@ -49,6 +82,10 @@ public class JwtService {
     /** Lanza JWTVerificationException si la firma, el emisor o la vigencia no cuadran. */
     public AuthenticatedOperator verify(String token) {
         DecodedJWT decoded = verifier.verify(token);
+        if (!decoded.getClaim(CLAIM_PURPOSE).isMissing()) {
+            // Un reto de MFA no es una sesion: sin esto, la contrasena sola daria acceso.
+            throw new IllegalArgumentException("Token de proposito restringido.");
+        }
         String tenant = decoded.getClaim(CLAIM_TENANT).asString();
         String role = decoded.getClaim(CLAIM_ROLE).asString();
         String userId = decoded.getClaim(CLAIM_USER_ID).asString();

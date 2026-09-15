@@ -12,4 +12,7 @@ public interface OperatorUserRepository {
     Optional<OperatorUser> findById(String id);
 
     List<OperatorUser> findByTenant(TenantId tenantId);
+
+    /** Guarda el secreto TOTP ya cifrado y si esta activo. Un secreto nulo quita el segundo factor. */
+    void updateMfa(String userId, String encryptedSecret, boolean enabled);
 }

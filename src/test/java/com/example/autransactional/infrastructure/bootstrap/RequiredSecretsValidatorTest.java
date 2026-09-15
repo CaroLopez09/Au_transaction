@@ -16,8 +16,13 @@ class RequiredSecretsValidatorTest {
     }
 
     private RequiredSecretsValidator validator(KiraProperties kira, String jwtSecret) {
+        return validator(kira, jwtSecret, "clave-de-cifrado-mfa-de-pruebas-32-caracteres");
+    }
+
+    private RequiredSecretsValidator validator(KiraProperties kira, String jwtSecret, String mfaKey) {
         return new RequiredSecretsValidator(kira,
-                new BffSecurityProperties(jwtSecret, "autransactional-bff", 28800000L));
+                new BffSecurityProperties(jwtSecret, "autransactional-bff", 28800000L, mfaKey, true, 300000L,
+                        "AU Transactional"));
     }
 
     @Test
@@ -29,7 +34,7 @@ class RequiredSecretsValidatorTest {
 
     @Test
     void falloAlArrancarNombraTodoLoQueFalta() {
-        var v = validator(kira("", null, "  ", null), "");
+        var v = validator(kira("", null, "  ", null), "", null);
 
         var e = assertThrows(IllegalStateException.class, v::afterPropertiesSet);
 
@@ -38,6 +43,7 @@ class RequiredSecretsValidatorTest {
         assertTrue(e.getMessage().contains("KIRA_PASSWORD"));
         assertTrue(e.getMessage().contains("KIRA_WEBHOOK_SECRET"));
         assertTrue(e.getMessage().contains("BFF_JWT_SECRET"));
+        assertTrue(e.getMessage().contains("BFF_MFA_ENCRYPTION_KEY"));
     }
 
     @Test

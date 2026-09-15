@@ -23,7 +23,9 @@ public enum Role {
     COMPLIANCE_INTERNAL("compliance_internal", RoleScope.TENANT,
             "Oficial de Cumplimiento: Revisa Ficha 360, UBOs, Liveness y responde RFIs"),
     READ_ONLY("read_only", RoleScope.TENANT,
-            "Solo lectura de saldos, cuentas y movimientos");
+            "Solo lectura de saldos, cuentas y movimientos"),
+    PLATFORM_OPERATOR("platform_operator", RoleScope.SYSTEM,
+            "Operaciones y cumplimiento AU: consola multiempresa de solo lectura");
 
     private final String dbName;
     private final RoleScope scope;
@@ -65,6 +67,10 @@ public enum Role {
 
     public boolean canApprovePayout() {
         return this == TREASURY_APPROVER || this == ADMIN;
+    }
+
+    public boolean isPlatform() {
+        return scope == RoleScope.SYSTEM;
     }
 
     /** Ficha 360, UBOs, liveness y RFIs. */

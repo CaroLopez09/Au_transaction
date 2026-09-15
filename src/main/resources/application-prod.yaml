@@ -17,6 +17,9 @@ kira:
 bff:
   dev:
     seed: false
+  security:
+    # Arquitectura §7: fuera de desarrollo nadie entra sin segundo factor.
+    mfa-enforced: ${BFF_MFA_ENFORCED:true}
 
 logging:
   level:

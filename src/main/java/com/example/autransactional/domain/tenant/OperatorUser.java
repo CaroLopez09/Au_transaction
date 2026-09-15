@@ -9,7 +9,7 @@ import com.example.autransactional.domain.shared.TenantId;
  */
 public record OperatorUser(String id, TenantId tenantId, String email, String passwordHash,
                            String firstName, String lastName, Role role, UserStatus status,
-                           String mfaSecret) {
+                           String mfaSecret, boolean mfaEnabled) {
 
     public void assertCanLogin() {
         if (!status.canLogin()) {

@@ -25,6 +25,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login").permitAll()
+                        // Validan el reto del login (o la sesion) dentro del servicio.
+                        .requestMatchers("/api/auth/mfa/verify", "/api/auth/mfa/setup", "/api/auth/mfa/enable")
+                        .permitAll()
                         .requestMatchers("/api/webhooks/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         // Swagger UI. Se apaga por configuracion en prod, no por esta regla.

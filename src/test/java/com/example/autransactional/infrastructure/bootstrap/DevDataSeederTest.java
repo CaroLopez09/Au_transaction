@@ -39,10 +39,15 @@ class DevDataSeederTest {
     private DevDataSeeder seeder;
 
     @Test
-    void creaLasTresOrganizacionesConUnOperadorPorRol() {
+    void creaLasTresOrganizacionesConUnOperadorPorRolYUnOperadorDePlataforma() {
         assertEquals(3, tenants.count());
         assertTrue(tenants.findById("juriscop").isPresent());
-        assertEquals(3L * Role.values().length, operators.count());
+        long rolesDeEmpresa = java.util.Arrays.stream(Role.values()).filter(r -> !r.isPlatform()).count();
+        assertEquals(3L * rolesDeEmpresa + 1, operators.count());
+
+        var plataforma = operators.findByEmailIgnoreCase("operaciones@au.test").orElseThrow();
+        assertNull(plataforma.getTenantId());
+        assertEquals(Role.PLATFORM_OPERATOR, Role.fromDbName(plataforma.getRole().getName()));
     }
 
     @Test

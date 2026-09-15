@@ -43,7 +43,8 @@ class CertProfileStartupTest {
         try (var context = arrancarCert(
                 "kira.api-key=k", "kira.client-id=c", "kira.password=p",
                 "kira.webhook-secret=w",
-                "bff.security.jwt-secret=un-secreto-de-al-menos-32-caracteres-largo")) {
+                "bff.security.jwt-secret=un-secreto-de-al-menos-32-caracteres-largo",
+                "bff.security.mfa-encryption-key=clave-de-cifrado-mfa-de-pruebas")) {
 
             assertTrue(context.isRunning());
             // El sembrador de desarrollo no debe existir fuera del perfil dev.

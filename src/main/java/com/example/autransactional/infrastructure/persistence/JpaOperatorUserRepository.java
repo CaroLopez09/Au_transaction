@@ -35,9 +35,22 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
                 .toList();
     }
 
+    @Override
+    @org.springframework.transaction.annotation.Transactional
+    public void updateMfa(String userId, String encryptedSecret, boolean enabled) {
+        OperatorUserEntity entity = jpa.findById(userId)
+                .orElseThrow(() -> new IllegalStateException("Usuario inexistente: " + userId));
+        entity.setMfaSecret(encryptedSecret);
+        entity.setMfaEnabled(enabled && encryptedSecret != null);
+        entity.setUpdatedAt(java.time.Instant.now());
+        jpa.save(entity);
+    }
+
     private static OperatorUser toDomain(OperatorUserEntity e) {
-        return new OperatorUser(e.getId(), TenantId.of(e.getTenantId()), e.getEmail(), e.getPasswordHash(),
+        // Los operadores de la plataforma no tienen empresa: tenant_id nulo en la tabla.
+        TenantId tenant = e.getTenantId() == null ? TenantId.PLATFORM : TenantId.of(e.getTenantId());
+        return new OperatorUser(e.getId(), tenant, e.getEmail(), e.getPasswordHash(),
                 e.getFirstName(), e.getLastName(), Role.fromDbName(e.getRole().getName()),
-                e.getStatus(), e.getMfaSecret());
+                e.getStatus(), e.getMfaSecret(), e.isMfaEnabled());
     }
 }

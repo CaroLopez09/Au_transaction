@@ -35,6 +35,7 @@ public class RequiredSecretsValidator implements InitializingBean {
         require(missing, kira.password(), "KIRA_PASSWORD");
         require(missing, kira.webhookSecret(), "KIRA_WEBHOOK_SECRET");
         require(missing, security.jwtSecret(), "BFF_JWT_SECRET");
+        require(missing, security.mfaEncryptionKey(), "BFF_MFA_ENCRYPTION_KEY");
 
         if (!missing.isEmpty()) {
             throw new IllegalStateException(

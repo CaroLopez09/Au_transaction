@@ -90,6 +90,9 @@ public class DevDataSeeder implements ApplicationRunner {
             }
 
             for (Role role : Role.values()) {
+                if (role.isPlatform()) {
+                    continue;
+                }
                 String email = role.name().toLowerCase().replace('_', '.') + "@" + seed.id() + ".test";
                 if (operators.findByEmailIgnoreCase(email).isPresent()) {
                     continue;
@@ -108,6 +111,21 @@ public class DevDataSeeder implements ApplicationRunner {
             }
         }
 
+        // Un operador de la plataforma, sin empresa, para la consola de operaciones.
+        if (operators.findByEmailIgnoreCase(PLATFORM_EMAIL).isEmpty()) {
+            OperatorUserEntity user = new OperatorUserEntity();
+            user.setId("platform:operator");
+            user.setTenantId(null);
+            user.setEmail(PLATFORM_EMAIL);
+            user.setPasswordHash(passwordHash);
+            user.setFirstName("Operaciones");
+            user.setLastName("AU");
+            user.setRole(ensureRole(Role.PLATFORM_OPERATOR));
+            user.setStatus(UserStatus.ACTIVE);
+            operators.save(user);
+            nuevosOperadores++;
+        }
+
         if (nuevosTenants > 0 || nuevosOperadores > 0) {
             log.warn("Semilla de desarrollo aplicada: {} organizaciones y {} operadores nuevos. "
                             + "Todos con la contrasena '{}'. Nunca actives bff.dev.seed fuera de local.",
@@ -117,6 +135,8 @@ public class DevDataSeeder implements ApplicationRunner {
             log.info("Semilla de desarrollo: sin cambios, los datos ya existian.");
         }
     }
+
+    static final String PLATFORM_EMAIL = "operaciones@au.test";
 
     /** El catalogo `roles` es la FK de `users`: sin fila no hay usuario que insertar. */
     private RoleEntity ensureRole(Role role) {
@@ -137,6 +157,7 @@ public class DevDataSeeder implements ApplicationRunner {
             case TREASURY_APPROVER -> "Tesorero";
             case COMPLIANCE_INTERNAL -> "Cumplimiento";
             case READ_ONLY -> "Consulta";
+            case PLATFORM_OPERATOR -> "Operaciones";
         };
     }
 }
