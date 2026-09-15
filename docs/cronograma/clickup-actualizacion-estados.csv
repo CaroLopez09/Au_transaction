@@ -1,0 +1,21 @@
+Task ID,Task Name,Estado en CSV,Estado nuevo,Comentario
+AUT-015,Excluir type y external_id del PUT de onboarding,to do,Complete,forUpdate quita type y external_id; PUT 200 contra el sandbox (ESTADO §3.11).
+AUT-016,Prueba de regresion del contrato del PUT,to do,Complete,Prueba elPutNoLlevaLasClavesQueSoloExistenEnElAlta.
+AUT-017,Verificar el PUT contra el sandbox,to do,Complete,PUT /api/onboarding 200 con juriscop; faltan solo 2 documentos para usa-virtual-accounts.
+AUT-018,Exponer el enum cerrado de business_type,to do,Complete,Selector de tipo de sociedad (BUSINESS_TYPES) en el asistente.
+AUT-019,Commitear la rama depuracion-bff,to do,Complete,"Commits por tema en develop; ramas main, certificacion y produccion creadas."
+AUT-020,Bruno modo B: Sesion y Onboarding KYB,to do,Complete,"Bruno 00 y 01 contra el sandbox: 104/104 peticiones, 67/67 tests (15-sep)."
+AUT-021,Bruno modo B: Beneficiarios finales,to do,Complete,Bruno 02 contra el sandbox; sync de beneficiarios 200.
+AUT-022,Corregir defectos de onboarding y UBOs,to do,Complete,B1-B6 y W1-W6 corregidos (ESTADO §3.11).
+AUT-023,Bruno 04 Cuentas virtuales,to do,In Progress,Bruno 04 ejecutado pero responde 422: ningun user del sandbox esta VERIFIED. Banco jp_morgan y version 2026-06-01 ya aplicados.
+AUT-024,Bruno 05 Depositos,to do,In Progress,Bruno 05 ejecutado; sin cuenta real no hay depositos que sincronizar. Estados KYT y retenidos ya soportados.
+AUT-026,Bruno 06 Destinatarios,to do,In Progress,Bruno 06 pendiente de un user VERIFIED.
+AUT-027,Bruno 07 Cotizaciones,to do,In Progress,Bruno 07 responde 422 sin cuenta operativa.
+AUT-028,Subir CreateQuoteService a 2026-06-01,to do,Complete,Version unica 2026-06-01 en todas las peticiones; KiraProperties rechaza otra.
+AUT-029,Corregir defectos de tesoreria,to do,In Progress,"KYT_PENDING/KYT_REJECTED, CANCELLED, FROZEN, idempotencia, doble firma y recotizacion hechos; falta recorrido real."
+AUT-031,"Pagos: eventos, comprobante y maker-checker",to do,In Progress,Maker-checker con doble firma por limite y segregacion destinatario/aprobador (15-sep); falta probar contra Kira.
+AUT-033,Bruno 03 RFIs en sandbox,to do,In Progress,Sync de RFIs 200 contra el sandbox; no hay RFIs abiertos para responder.
+AUT-034,Guardar resolution_reason de RFIs cerrados,to do,Complete,rfis.resolution_reason guardado; RFIs retirados pasan a WITHDRAWN.
+AUT-035,Corregir defectos de pagos y webhooks,to do,In Progress,"Webhooks: guardado antes del 2xx, segundo secreto, payloads nuevos corregidos; faltan entregas reales (AUT-032/051)."
+AUT-042,Documentacion final al dia,to do,In Progress,"ARQUITECTURA, API-GUIA, ESTADO, front al dia (15-sep); anexos de DOCUMENTACION-CODIGO pendientes."
+AUT-044,Aplicar el DDL a mano en cert,to do,In Progress,SQL completo en ESTADO §7 (incluye payouts.first_approver_user_id y recipients.created_by_user_id); falta aplicarlo en cert.

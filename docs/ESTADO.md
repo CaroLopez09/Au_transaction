@@ -382,6 +382,13 @@ Plan de 7 días priorizado en su §5.
 
 ### 4.6 *(pendiente 16-sep)* Completar el cronograma en ClickUp
 
+**Estados por actualizar (15-sep, noche):** el cupo diario de ClickUp volvió a agotarse antes de
+poder cambiarlos. [`cronograma/clickup-actualizacion-estados.csv`](cronograma/clickup-actualizacion-estados.csv)
+trae las 20 tareas con su estado nuevo y el comentario de evidencia: 11 a completada y 9 en curso
+(las de Bruno de tesorería esperan un user `VERIFIED` en el sandbox). En ClickUp la lista usa
+estados en español (`pendiente`…): mapear `Complete` y `In Progress` a los de la lista al aplicar.
+Faltan además tareas para el trabajo nuevo del 15-sep (P0/P1 de `REVISION-REQUISITOS-VS-CODIGO.md`).
+
 El 15-sep se agotó el cupo diario de la integración (100 llamadas) con 43 de 51 tareas creadas;
 el calendario llega sólo al 9-oct. **Al retomar:** crear las 8 de
 [`cronograma/clickup-pendientes.csv`](cronograma/clickup-pendientes.csv) (AUT-044 a AUT-051), las
