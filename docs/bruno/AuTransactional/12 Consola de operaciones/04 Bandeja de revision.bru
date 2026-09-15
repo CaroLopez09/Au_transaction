@@ -1,0 +1,21 @@
+meta {
+  name: 04 Bandeja de revision
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/platform/review-queue
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenPlataforma}}
+}
+
+tests {
+  test("responde 200", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

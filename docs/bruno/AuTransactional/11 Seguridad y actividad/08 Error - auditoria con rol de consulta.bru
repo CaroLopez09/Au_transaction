@@ -1,0 +1,21 @@
+meta {
+  name: 08 Error - auditoria con rol de consulta
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/api/audit
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenReadOnly}}
+}
+
+tests {
+  test("responde 403", function () {
+    expect(res.getStatus()).to.equal(403);
+  });
+}

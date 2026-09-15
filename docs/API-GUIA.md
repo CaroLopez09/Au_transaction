@@ -29,12 +29,44 @@ devuelve o no ofrece: maker-checker, cuestionario KYB, espejo de depósitos y bi
 Sin las tres credenciales de Kira, todo lo que llama a Kira responde `503 kira_not_configured`.
 Las entrega Kira por canal seguro (support@kirafin.ai); no hay panel para generarlas.
 
+**En local** viven en `.env` en la raiz del repositorio, que **esta en `.gitignore` y nunca se
+commitea**. Se crea copiando la plantilla:
+
 ```bash
-export KIRA_WEBHOOK_SECRET='secreto-webhook-local'   # el mismo que webhookSecret en Bruno
-export KIRA_API_KEY='...'      # cabecera x-api-key de toda peticion, incluida /auth
-export KIRA_CLIENT_ID='...'    # UUID del cliente integrador
-export KIRA_PASSWORD='...'
+cp .env.example .env     # y rellenar los valores
+chmod 600 .env
 ```
+
+```properties
+KIRA_API_KEY=...         # cabecera x-api-key de toda peticion, incluida /auth
+KIRA_CLIENT_ID=...       # UUID del cliente integrador
+KIRA_PASSWORD=...        # el secreto de Cognito
+KIRA_WEBHOOK_SECRET=...  # el mismo que webhookSecret en Bruno
+DB_PASSWORD=...
+BFF_JWT_SECRET=...       # minimo 32 bytes
+```
+
+Lo lee Spring por `spring.config.import: optional:file:./.env[.properties]`, declarado **solo en
+`application-dev.yaml`**: en `cert` y `prod` el fichero no se lee nunca y las variables las inyecta
+el gestor de secretos del entorno (§1.2.1). Al ser `optional:`, si el fichero no existe el arranque
+no falla y las variables se toman del entorno como antes.
+
+#### 1.2.1 Despliegue: donde van los secretos
+
+| Entorno | Origen de los secretos |
+|---|---|
+| `dev` (local) | `.env` en la raiz, permisos `600`, fuera de git |
+| `cert` / `prod` | Gestor de secretos del entorno inyectado como variables de entorno del proceso |
+
+Reglas que no se negocian al desplegar:
+
+- **Nunca** en `application*.yaml`, en la imagen de contenedor, en un `ENV` del `Dockerfile` ni en
+  el historial de git: la imagen y el repositorio se copian, el gestor de secretos no.
+- **Nunca** en el navegador. Es el requisito central del BFF: el front habla con el BFF, y solo el
+  BFF conoce las credenciales de Kira.
+- En cert y prod, `RequiredSecretsValidator` aborta el arranque si falta cualquiera de las tres.
+- Los secretos no se escriben en logs: `KiraCredentialManager` registra que pide un token, no el
+  token ni la clave.
 
 El banco de las cuentas virtuales depende del entorno y **no es intercambiable**: usar el
 de producción contra el sandbox devuelve `400 "Invalid bank"`.
@@ -231,6 +263,50 @@ cuenta. Si `enhancedDueDiligenceRequired` es `true`, Kira pide diligencia reforz
 (`file_proof_of_address`): pasa con ~51 países y con empresas constituidas hace menos de
 180 días.
 
+#### `POST /api/onboarding/documents` — adjuntar documentos corporativos
+
+`multipart/form-data`. **Kira no tiene endpoint de subida**: el archivo viaja en base64
+dentro del `PUT /v1/users`, anidado en `identifying_information[].documents[]`.
+
+| Parte | Obligatoria | Qué es |
+|---|---|---|
+| `files` | sí, repetible | Los archivos. JPEG, PNG o PDF |
+| `types` | sí, repetible | El papel de cada archivo, **en el mismo orden que `files`** |
+| `informationType` | sí | Qué registro es: `business_formation`, `ein`, `passport`… |
+| `issuingCountry` | sí | País emisor, **ISO alpha-3** (`COL`, `USA`) |
+| `number` | no | Número del identificador o del documento |
+| `expiration` | no | Vencimiento, `YYYY-MM-DD` |
+
+`types` admite `front`, `back` (obligatorio en todo ID con foto salvo `passport` y `visa`),
+`selfie`, y los `file_*`: `file_proof_of_address`, `file_business_formation`,
+`file_source_of_wealth`, `file_ein_letter`, `file_bylaws`, `file_corporate_resolution`,
+`file_certificate_of_registration`, `file_certificate_of_good_standing`,
+`file_board_minutes`, `file_portfolio_statement`, `file_fatca`,
+`file_company_fiscal_registration`.
+
+**Límites.** Máximo 10 archivos y **7 MB en total por petición**. No es un capricho: Kira
+limita el cuerpo entero a 10 MB y el base64 infla ~⅓, así que 7 MB de archivos son ~9,4 MB
+de cuerpo. Para lotes grandes, varias peticiones.
+
+`types` se lee de la query **o** del cuerpo del multipart: un `FormData` del navegador lo
+manda en el cuerpo, pero Bruno no envía los campos de texto de un multipart como campos de
+formulario y allí hay que ponerlo en la query.
+
+```bash
+curl -X POST "$BFF/api/onboarding/documents" -H "Authorization: Bearer $JWT" \
+  -F "files=@acta.pdf;type=application/pdf" -F "types=file_business_formation" \
+  -F "informationType=business_formation" -F "issuingCountry=COL"
+```
+
+Devuelve el `OnboardingView` refrescado, con `pendingFields` ya actualizado.
+
+**El archivo no se guarda en el BFF**: lo custodia Kira. Del payload de onboarding se
+limpian los `documents` antes de persistirlo, porque guardarlos significaría reenviarlos en
+cada `PUT` posterior hasta reventar el tope de 10 MB. Reenviar el registro sin archivos no
+los borra: *"a missing file works differently: sending other fields will not clear it"*.
+
+---
+
 #### Estados
 
 `CREATED` → `VERIFYING` → (`REVIEW`) → `VERIFIED` | `REJECTED`. La revisión manual puede
@@ -242,15 +318,16 @@ tardar **hasta 24 h** en producción. El **motivo de un rechazo llega solo por e
 
 ### 4.3 Beneficiarios finales — `/api/ubos` *(JWT)*
 
-Los UBOs se registran **primero en local** y se sincronizan en bloque. No hay un "alta de
-un UBO" contra Kira: su API sólo acepta el array `associated_persons` completo, y lo que
-no viaje en el envío **se borra en silencio**. Esa es la razón de que exista la tabla
-`ubos` y no sea una copia por comodidad.
+Los UBOs se registran **primero en local** y se sincronizan en bloque. Kira fusiona
+`associated_persons` **por email** y no devuelve todos los datos de cada persona, así que la
+tabla `ubos` es la única copia completa. **Dos beneficiarios con el mismo correo no se
+admiten** (`422`): para Kira serían la misma persona y aquí sumarían dos veces su participación.
 
 | Método | Ruta | Rol requerido |
 |---|---|---|
 | `GET` | `/api/ubos` | cualquiera autenticado |
 | `POST` | `/api/ubos` | `ADMIN` o `COMPLIANCE_INTERNAL` |
+| `DELETE` | `/api/ubos/{id}` | `ADMIN` o `COMPLIANCE_INTERNAL` |
 | `POST` | `/api/ubos/sync` | `ADMIN` o `COMPLIANCE_INTERNAL` |
 | `POST` | `/api/ubos/liveness-links` | `ADMIN` o `COMPLIANCE_INTERNAL` |
 
@@ -264,11 +341,28 @@ no viaje en el envío **se borra en silencio**. Esa es la razón de que exista l
   "hasControl": true, "isSigner": true,
   "politicallyExposed": false,
   "countryOfBirth": "COL",
-  "roleInCompany": "Socia fundadora"
+  "roleInCompany": "Socia fundadora",
+  "birthDate": "1985-04-12", "nationality": "COL", "documentCountry": "COL",
+  "occupation": "Abogada", "gender": "female", "phoneNumber": "+573001234567",
+  "address": { "streetName": "Calle 1 # 2-3", "city": "Bogota", "state": "DC",
+               "postalCode": "110111", "country": "COL" }
 }
 ```
 
-Sin `id` crea; con `id` actualiza. Los cuatro booleanos y `countryOfBirth` son
+Sin `id` crea; con `id` actualiza **todo**, incluidos nombre, apellido y cargo (hasta el
+15-sep la edición los exigía pero no los aplicaba).
+
+**Datos de identidad (opcionales):** `birthDate` (pasada), `nationality` y `documentCountry`
+(ISO-3), `occupation`, `gender` (`male`/`female`/`other`), `phoneNumber` (E.164) y `address`
+(país ISO-3). Kira los pide **según el banco** en `missing_fields`
+(`associated_persons:birth_date`, `:nationality`, `:occupation`, `:gender`, `:phone_number`),
+así que el BFF no los hace obligatorios. Viajan a Kira como `birth_date`, `nationality`,
+`document_country`, `occupation`, `gender`, `phone_number` y la dirección **plana**
+`address_street`/`address_city`/`address_state`/`address_zip_code`/`address_country`, que es
+como Kira la guarda y la devuelve (verificado en sandbox el 15-sep).
+
+La vista añade `firstName`, `lastName`, esos campos y **`knownToKira`**: `true` desde que la
+persona se sincronizó, subió un documento o tiene enlace de liveness. Los cuatro booleanos y `countryOfBirth` son
 **obligatorios**, no opcionales de cortesía:
 
 - **`hasOwnership`** es un booleano explícito. `roleInCompany` es una etiqueta legible y
@@ -279,6 +373,12 @@ Sin `id` crea; con `id` actualiza. Los cuatro booleanos y `countryOfBirth` son
 - **`countryOfBirth`** es ISO-3 y no admite vacío.
 - Si `documentType` se omite, Kira asume `national_id` y a partir de ahí **exige el
   reverso** del documento.
+
+#### `DELETE /api/ubos/{id}` — quitar a quien Kira aún no conoce
+
+Devuelve el grupo actualizado. Si `knownToKira` es `true` responde `422`: Kira fusiona por
+email y quitar a la persona del array **no la borra allí**, así que borrarla aquí dejaría las
+dos listas descuadradas.
 
 #### `GET /api/ubos` — el grupo, no sólo la lista
 
@@ -318,6 +418,28 @@ Requiere que la verificación ya esté disparada: si no, Kira responde
 > ⚠️ **La landing de redirección no es fuente de verdad.** El resultado real de la prueba
 > llega por el webhook `user.liveness_completed`. Que la persona vuelva a `successUrl` no
 > significa que haya aprobado.
+
+#### `POST /api/ubos/{id}/documents` — documento de identidad de una persona
+
+Mismo multipart que el de la empresa (`files` + `types` emparejados por índice), pero el
+registro se anida **dentro de la entrada de esa persona** en `associated_persons[]`.
+
+> ⚠️ **El UBO necesita `email`.** Kira empareja las personas de `associated_persons[]` por
+> email: sin él no hay forma de decirle a qué persona pertenece el documento, y le crearía
+> una persona nueva en vez de actualizar la que ya tiene. El BFF corta con `422` antes de
+> llamar. `email` es opcional en `POST /api/ubos` para no romper los UBO ya registrados,
+> pero es obligatorio para esto.
+
+**Mandar la selfie junto al documento** (`types=front&types=selfie`) le basta a Kira para
+hacer el face match **sin sesión interactiva**: el informe biométrico se adjunta al usuario.
+No sustituye al enlace de liveness, pero adelanta esa parte.
+
+```bash
+curl -X POST "$BFF/api/ubos/$UBO/documents?informationType=passport&issuingCountry=COL" \
+  -H "Authorization: Bearer $JWT" \
+  -F "files=@frente.png;type=image/png" -F "types=front" \
+  -F "files=@selfie.png;type=image/png" -F "types=selfie"
+```
 
 ---
 
@@ -438,10 +560,11 @@ como `FAILED`.
   "id": "9c1f...", "kiraDepositId": "dep_1", "virtualAccountId": "va_demo_001",
   "grossAmount": 5000.0000, "feeAmount": 25.0000, "netAmount": 4975.0000,
   "currency": "USD",
-  "senderName": "Acme Corp", "senderAccount": "999", "rail": "WIRE",
+  "senderName": "Acme Corp", "senderAccount": "****7890", "rail": "WIRE",
   "status": "COMPLETED",
   "microdeposit": false,
   "creditsBalance": true,
+  "held": false,
   "createdAt": "2026-09-10T18:00:00Z", "updatedAt": "2026-09-10T18:00:00Z"
 }
 ```
@@ -452,10 +575,15 @@ ordenante (`grossAmount`), lo que cobró el banco (`feeAmount`) y lo que quedó 
 
 | Estado | Cuándo |
 |---|---|
-| `PENDING` | `deposit_funds_in_transit` |
-| `COMPLETED` | `deposit_funds_received`, `deposit_funds_in_destination`, `microdeposit_funds_received` |
+| `PENDING` | `deposit_scheduled`, `deposit_funds_in_transit`, `deposit_in_review`, o un estado desconocido (nunca acredita) |
+| `COMPLETED` | `deposit_funds_received`, `deposit_funds_in_destination`, `microdeposit_funds_received` — **no es final**: puede retenerse o devolverse |
+| `KYT_PENDING` | retenido por un control de cumplimiento (`held: true`) |
+| `KYT_REJECTED` | congelado tras el control (`held: true`); una decisión de cumplimiento lo pasa a `REFUNDED` o lo libera a `COMPLETED` |
 | `FAILED` | `deposit_funds_failed` |
-| `REFUNDED` | `deposit_returned` — un depósito completado **puede revertirse después** |
+| `REFUNDED` | `deposit_funds_refunded` |
+
+**`held: true` bloquea todos los pagos de esa cuenta** mientras dure (`compliance/holds`).
+`senderAccount` sale enmascarada: el número completo no llega al navegador.
 
 `microdeposit: true` es un depósito de verificación de cuenta, no un ingreso: no cuenta
 como saldo (`creditsBalance: false`).
@@ -510,6 +638,10 @@ cotización ni el pago lo determinan. Es el punto de decisión más importante d
 uno se da de alta el reemplazo y se archiva el anterior apuntando al nuevo.
 
 #### `POST /api/recipients`
+
+**Cabecera opcional `Idempotency-Key` (UUID)**, una por alta que se intenta: repetir la petición
+con la misma clave (doble clic, reintento de red) devuelve el destinatario ya registrado en vez de
+guardar otro. Una clave que no sea UUID responde `422`. Sin cabecera, el BFF genera una.
 
 El bloque de campos cambia según el riel. Enviar los de dos rieles a la vez se rechaza.
 
@@ -703,6 +835,10 @@ de la propia query: un `id` de otra organización devuelve "Pago no encontrado",
 
 #### `POST /api/payouts`
 
+**Cabecera opcional `Idempotency-Key` (UUID)**, una por pago que se intenta crear: con la misma
+clave el BFF devuelve el pago ya creado. Es también la clave que viaja a Kira al aprobar. Una clave
+usada por otra organización responde `422`.
+
 ```json
 {
   "virtualAccountId": "9c1f…",
@@ -861,18 +997,23 @@ Terminales: `COMPLETED`, `FAILED`, `EXPIRED`. `returned` y `cancelled` se normal
 
 ### 4.9 Webhooks de Kira — `POST /api/webhooks/kira` *(HMAC)*
 
-Kira entrega **una sola vez, sin reintentos**, y aborta a los 30 s. El controlador sólo
-verifica la firma y encola; todo lo demás ocurre después de responder. Por eso responde
-`200` incluso ante un evento desconocido: un `4xx` no provoca reintento, sólo pierde el
-evento.
+Kira corta a los 30 s y **reintenta 4 veces** (1, 5, 15 y 60 min) ante `408`, `429`, `5xx` o
+falta de respuesta; después el evento sólo se recupera reenviándolo desde el dashboard. El
+controlador verifica la firma y **guarda el evento antes de responder**: si la base falla sale un
+`5xx` y Kira reintenta. La proyección ocurre después. Responde `200` incluso ante un evento
+desconocido: un `4xx` es lo único que Kira no reintenta.
 
 Cabecera `x-signature-sha256`: HMAC-SHA256 en hexadecimal sobre los **bytes crudos** del
-cuerpo, con `KIRA_WEBHOOK_SECRET`. No re-serialices el JSON antes de firmar: cambian los
+cuerpo, con `KIRA_WEBHOOK_SECRET`. **Al rotar el secreto** en el dashboard, Kira sigue firmando con
+el anterior cerca de un minuto: pon el viejo en `KIRA_WEBHOOK_SECRET_PREVIOUS` durante la rotación
+y bórralo después. No re-serialices el JSON antes de firmar: cambian los
 espacios y el orden de las claves y la firma deja de cuadrar.
 
 | Respuesta | Cuándo |
 |---|---|
-| `200 {"status":"received"}` | firma válida |
+| `200 {"status":"received"}` | firma válida, evento guardado |
+| `200 {"status":"duplicate"}` | ese `data.event_id` ya estaba guardado |
+| `400 {"error":"invalid_json"}` | firma válida pero cuerpo ilegible (reintentar daría lo mismo) |
 | `401 {"error":"invalid_signature"}` | firma incorrecta |
 | `503 {"error":"webhook_secret_not_configured"}` | falta `KIRA_WEBHOOK_SECRET` |
 
@@ -1068,6 +1209,25 @@ ya respondido: `422` con `details["<itemId>"]: "The last file cannot be removed"
 La URL es una **credencial al portador que caduca en minutos**: ábrela al momento, no la guardes
 ni la registres; si caduca, pide otra. El BFF tampoco la guarda ni la escribe en logs.
 
+#### `POST /api/rfis/{id}/items/{itemId}/ubo-link` — verificación de un beneficiario
+
+Para ítems `ubo_link`. Si el `answer_spec` ya trae `url`, se devuelve esa; si trae
+`applicant_id` y `person_id`, se acuña con `POST /v1/rfis/{rfi}/items/{item}/ubo-link`.
+
+```json
+{ "url": "https://…", "expiresAt": "2026-09-15T20:00:00Z" }
+```
+
+Caduca en torno a una hora: pídelo cuando la persona pulsa, no al pintar la página. No se guarda.
+`422` si el ítem no es `ubo_link`; si Kira responde `409` (RFI cerrado) o `404` (retirado), el BFF
+asienta el cierre y responde `422`.
+
+#### Estados y cierre
+
+`status` añade **`WITHDRAWN`**: un RFI retirado responde `404` en todas las rutas de Kira y
+desaparece del listado; el BFF lo cierra al refrescarlo, al sincronizar o al recibir su webhook.
+`resolutionReason` trae `expired` o `rejected` en un `NOT_RESOLVED`, y `withdrawn` en un retirado.
+
 #### Webhook `rfi.*`
 
 Se proyecta releyendo el RFI en Kira (el evento no trae items, plazo ni bloqueo). Exige
@@ -1186,3 +1346,57 @@ curl -sS $BASE/api/payouts/$P/events -H "Authorization: Bearer $APPROVER" | jq
 | `401 invalid_signature` | el cuerpo enviado no es la cadena firmada, o el secreto no coincide |
 | `502 kira_*` al aprobar | Kira rechazó la llamada; la aprobación se revierte |
 | `413 file_too_large` | un archivo de RFI supera 30 MB |
+
+---
+
+## 5. Seguridad, actividad y consola *(15-sep)*
+
+### 5.1 Verificación en dos pasos (TOTP) — `/api/auth/mfa/*`
+
+| Método | Ruta | Autenticación |
+|---|---|---|
+| `POST` | `/api/auth/login` | pública — puede devolver un reto en vez de sesión |
+| `POST` | `/api/auth/mfa/verify` | reto del login |
+| `POST` | `/api/auth/mfa/setup` | sesión, o reto con `mfaSetupRequired` |
+| `POST` | `/api/auth/mfa/enable` | sesión, o reto con `mfaSetupRequired` |
+| `POST` | `/api/auth/mfa/disable` | sesión (solo si el entorno no lo exige) |
+
+Con segundo factor, el login responde **sin `accessToken`**:
+
+```json
+{ "expiresIn": 300, "email": "ana@juriscop.test", "mfaChallenge": "eyJ…", "mfaRequired": true, "mfaSetupRequired": false }
+```
+
+- `mfaRequired: true` → `POST /api/auth/mfa/verify` con `{ "challenge": "…", "code": "123456" }` devuelve la sesión.
+- `mfaSetupRequired: true` (entorno con `BFF_MFA_ENFORCED=true` y cuenta sin MFA) → `POST /api/auth/mfa/setup`
+  con `{ "challenge": "…" }` devuelve `{ "secret", "otpauthUri" }`, y `POST /api/auth/mfa/enable` con
+  `{ "challenge": "…", "code": "…" }` activa el segundo factor y devuelve la sesión.
+
+El reto **no autentica ninguna otra ruta** (401). Cinco códigos erróneos agotan el reto; un código ya
+usado no vale dentro de su ventana de 30 s. `GET /api/auth/me` añade `tenantName`, `mfaEnabled` y
+`mfaEnforced`.
+
+### 5.2 Avisos, eventos y auditoría
+
+| Método | Ruta | Rol |
+|---|---|---|
+| `GET` | `/api/notifications?limit=50` | cualquiera → `{ items[], unread }` |
+| `GET` | `/api/notifications/unread-count` | cualquiera → `{ unread }` |
+| `POST` | `/api/notifications/read` | cualquiera → `204` (marca todo como visto para ese usuario) |
+| `GET` | `/api/events?limit=100` | `ADMIN`, `COMPLIANCE_INTERNAL` — eventos de Kira **sin payload** |
+| `GET` | `/api/audit?limit=100` | `ADMIN`, `COMPLIANCE_INTERNAL` — bitácora con el actor por nombre |
+
+Los avisos se generan al proyectar webhooks, solo cuando el estado cambia. `severity`: `info`,
+`success`, `attention` o `critical`; `resourceType`/`resourceId` indican a qué pantalla llevar.
+
+### 5.3 Consola de operaciones — `/api/platform/*` *(solo `PLATFORM_OPERATOR`)*
+
+| Método | Ruta | Qué devuelve |
+|---|---|---|
+| `GET` | `/api/platform/tenants` | Resumen de cada organización: estado KYB, faltantes, beneficiarios, cuentas, RFIs abiertas y vencidas, pagos retenidos |
+| `GET` | `/api/platform/tenants/{id}` | Ficha 360: resumen, `OnboardingView`, beneficiarios, cuentas, 20 pagos y 20 depósitos recientes, RFIs. **Queda auditado** |
+| `POST` | `/api/platform/tenants/{id}/refresh` | Relee la empresa y sus cuentas en Kira y devuelve la ficha |
+| `GET` | `/api/platform/review-queue` | Lo que pide atención en todas las organizaciones, lo crítico primero |
+
+El operador de la plataforma no pertenece a ninguna empresa (`tenantId: "__platform__"`): en las
+rutas de empresa no ve datos de nadie. Un rol de empresa en `/api/platform/*` recibe `403`.

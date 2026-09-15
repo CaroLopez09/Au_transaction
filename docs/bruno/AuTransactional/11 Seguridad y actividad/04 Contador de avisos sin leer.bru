@@ -1,0 +1,22 @@
+meta {
+  name: 04 Contador de avisos sin leer
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/notifications/unread-count
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+tests {
+  test("responde 200", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().unread).to.be.a("number");
+  });
+}

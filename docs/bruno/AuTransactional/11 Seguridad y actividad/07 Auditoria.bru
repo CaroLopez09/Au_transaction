@@ -1,0 +1,21 @@
+meta {
+  name: 07 Auditoria
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/api/audit?limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenAdmin}}
+}
+
+tests {
+  test("responde 200 con el actor por nombre", function () {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

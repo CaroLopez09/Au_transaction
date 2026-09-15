@@ -1,0 +1,22 @@
+meta {
+  name: 03 Ficha 360
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/platform/tenants/{{empresa}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenPlataforma}}
+}
+
+tests {
+  test("responde 200 con vinculacion, beneficiarios, cuentas, pagos, depositos y RFIs", function () {
+    expect(res.getStatus()).to.equal(200);
+    ["summary","onboarding","beneficialOwners","accounts","payouts","deposits","rfis"].forEach(k => expect(res.getBody()).to.have.property(k));
+  });
+}

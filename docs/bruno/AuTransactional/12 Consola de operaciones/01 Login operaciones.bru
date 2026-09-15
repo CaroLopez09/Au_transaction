@@ -1,0 +1,31 @@
+meta {
+  name: 01 Login operaciones
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "operaciones@au.test",
+    "password": "{{password}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() < 300 && res.getBody().accessToken) {
+    bru.setVar("tokenPlataforma", res.getBody().accessToken);
+  }
+}
+
+tests {
+  test("responde 200 sin empresa", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().tenantId).to.equal("__platform__");
+  });
+}

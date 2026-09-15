@@ -1,0 +1,28 @@
+meta {
+  name: 02 Verificar codigo sin reto valido
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/auth/mfa/verify
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "challenge": "no-es-un-reto",
+    "code": "123456"
+  }
+}
+
+tests {
+  test("responde 422: el inicio de sesion caduco", function () {
+    expect(res.getStatus()).to.equal(422);
+  });
+}
+
+docs {
+  Un reto de MFA es un JWT de 5 minutos que no sirve como sesion. Sin reto valido no hay verificacion.
+}

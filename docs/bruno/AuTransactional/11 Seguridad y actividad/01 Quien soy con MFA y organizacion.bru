@@ -1,0 +1,28 @@
+meta {
+  name: 01 Quien soy con MFA y organizacion
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/auth/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenAdmin}}
+}
+
+tests {
+  test("trae organizacion y estado del segundo factor", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().tenantName).to.be.a("string");
+    expect(res.getBody()).to.have.property("mfaEnabled");
+    expect(res.getBody()).to.have.property("mfaEnforced");
+  });
+}
+
+docs {
+  G-02: el nombre de la organizacion ya llega en /me.
+}

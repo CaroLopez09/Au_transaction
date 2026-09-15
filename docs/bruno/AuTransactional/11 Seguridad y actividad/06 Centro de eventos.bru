@@ -1,0 +1,22 @@
+meta {
+  name: 06 Centro de eventos
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/events?limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+tests {
+  test("responde 200 sin payload", function () {
+    expect(res.getStatus()).to.equal(200);
+    (res.getBody() || []).forEach(e => expect(e).to.not.have.property("payload"));
+  });
+}

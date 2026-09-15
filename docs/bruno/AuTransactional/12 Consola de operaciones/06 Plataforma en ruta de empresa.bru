@@ -1,0 +1,22 @@
+meta {
+  name: 06 Plataforma en ruta de empresa
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/payouts
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenPlataforma}}
+}
+
+tests {
+  test("no ve datos de ninguna empresa", function () {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody()).to.have.length(0);
+  });
+}

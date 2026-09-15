@@ -1,0 +1,21 @@
+meta {
+  name: 05 Marcar avisos como leidos
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/notifications/read
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenCompliance}}
+}
+
+tests {
+  test("responde 204", function () {
+    expect(res.getStatus()).to.equal(204);
+  });
+}

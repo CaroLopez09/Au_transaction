@@ -87,11 +87,10 @@ KIRA_WEBHOOK_SECRET=secreto-webhook-local ./mvnw spring-boot:run -Dspring-boot.r
 - `-Xmx768m` limita la memoria de la JVM. Sin límite, con IntelliJ, DataGrip y el navegador
   abiertos, el sistema llegó a matar la app por falta de memoria.
 
-**Modo B (con Kira):** añade las tres credenciales:
+**Modo B (con Kira):** las tres credenciales ya no se pasan en la linea de comandos: viven en
+`.env` en la raiz del repositorio (fuera de git, ver `API-GUIA.md` §1.2). Basta con arrancar:
 
 ```bash
-KIRA_WEBHOOK_SECRET=secreto-webhook-local \
-KIRA_API_KEY='...' KIRA_CLIENT_ID='...' KIRA_PASSWORD='...' \
 ./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"
 ```
 
@@ -784,3 +783,18 @@ Para guardar un id de la respuesta: **Script → Post Response**:
 ```javascript
 if (res.getStatus() < 300 && res.getBody().id) { bru.setVar("miId", res.getBody().id); }
 ```
+
+---
+
+## Carpetas nuevas *(15-sep)*
+
+| Carpeta | Qué cubre |
+|---|---|
+| `02 Beneficiarios finales` · 08 y 09 | Alta de un beneficiario temporal y su borrado (solo si Kira aún no lo conoce) |
+| `11 Seguridad y actividad` | `/me` con organización y MFA, reto de MFA inválido, avisos, eventos, auditoría y su 403 |
+| `12 Consola de operaciones` | Login de `operaciones@au.test`, clientes, ficha 360, bandeja, 403 para una empresa y vacío para la plataforma en rutas de empresa |
+
+El alta completa del segundo factor necesita una app autenticadora y no se automatiza en Bruno:
+se verificó con un script aparte que genera los códigos (ESTADO §3.13).
+
+Ejecutado el 15-sep contra el sandbox: colección completa **88/88** y carpetas nuevas **26/26**.

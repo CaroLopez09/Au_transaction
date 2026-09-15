@@ -1,7 +1,7 @@
 # Estado del proyecto
 
-**Fecha:** 11 de septiembre de 2026 (tarde)
-**Build:** `Tests run: 283, Failures: 0, Errors: 0` — BUILD SUCCESS (verificado con `clean`)
+**Fecha:** 15 de septiembre de 2026
+**Build:** `Tests run: 370, Failures: 0, Errors: 0` — BUILD SUCCESS
 **Rama:** `depuracion-bff` (sin commitear) · `master` = copia de seguridad previa (`dc6af92`)
 
 > Arquitectura: [`ARQUITECTURA.md`](ARQUITECTURA.md) · Contrato HTTP: [`API-GUIA.md`](API-GUIA.md) · Pruebas con Bruno: [`GUIA-BRUNO.md`](GUIA-BRUNO.md)
@@ -14,11 +14,12 @@
 cd ~/Documentos/AuTransactional
 git status                                   # rama depuracion-bff, cambios sin commitear
 ./mvnw clean test                            # 283 verdes
-KIRA_WEBHOOK_SECRET=secreto-webhook-local ./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"
+./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"   # los secretos salen de .env (§3.7)
 ```
 
 Colección de Bruno: `docs/bruno/AuTransactional/`. Ejecutada entera el 11-sep: **84/84 peticiones,
-46/46 tests** (sin credenciales de Kira).
+46/46 tests** (sin credenciales de Kira). Desde el 14-sep ya hay credenciales de sandbox: toca
+volver a recorrerla en modo B (§3.7).
 
 **Antes de tocar un flujo de Kira, verificar su contrato en la documentación oficial**
 (`https://docs.kirafin.ai/api-reference-2026-06-01/…`), no sólo en
@@ -113,6 +114,194 @@ desde esa versión; con `2026-04-14` Kira devuelve una forma simple.
 - `blocking` también puede ser un **depósito** (`virtual_account_deposit_uuid`) → `depositId`.
 - Se reconocen los 9 `answer_type`.
 
+### 3.7 Credenciales de Kira y secretos *(14-sep)*
+
+Ya hay credenciales del **sandbox** y **funcionan**: `POST /auth` devuelve `200`, y con la app
+arrancada `GET /api/reference/countries` devolvió el catálogo real de Kira.
+
+**Dónde viven.** Ningún `application*.yaml` tiene valor por defecto para un secreto: todos salen de
+variables de entorno, así que no hacía falta sacar nada del repositorio. Lo que faltaba era una
+forma local de suministrarlas sin exportarlas a mano:
+
+| | |
+|---|---|
+| `.env` (raíz, `chmod 600`) | Valores reales de local. **En `.gitignore`**, nunca se commitea |
+| `.env.example` | Plantilla con las claves vacías. Sí se commitea |
+| `application-dev.yaml` | `spring.config.import: optional:file:./.env[.properties]` |
+| `cert` / `prod` | **No leen `.env`**: las variables vienen del gestor de secretos del entorno |
+
+El import es `optional:`, así que sin el fichero el arranque no falla. `RequiredSecretsValidator`
+sigue abortando el arranque en cert y prod si falta alguna de las tres.
+
+**Detalle del token:** el sandbox devuelve `expires_in: 86400` (24 h), no 3600. `KiraClientConfig`
+no lee `expires_in`: cachea `token-ttl-seconds - token-refresh-margin-seconds` = **3300 s** fijos.
+Es conservador y por tanto seguro (reautentica de más, nunca de menos), pero si algún día Kira
+acorta el TTL por debajo de 3300 s el token caducaría antes que la caché; el 401 lo cubre
+(`invalidate()` y reintento), así que no es urgente. Lo correcto sería honrar `expires_in`.
+
+**Pendiente de rotar:** la clave y el secreto de Cognito actuales se compartieron por un canal no
+seguro (chat). Antes de pasar a producción, pedir a Kira credenciales nuevas.
+
+### 3.8 Documentos KYB: la vinculación ya puede completarse *(14-sep)*
+
+Era el bloqueador nº 1 del MVP: **no habia forma de mandar un solo documento del expediente**.
+El unico multipart del BFF era el de los RFI. Ahora hay dos rutas nuevas:
+
+| Endpoint | Qué adjunta |
+|---|---|
+| `POST /api/onboarding/documents` | Registros de la empresa: acta de constitución, carta EIN, prueba de domicilio… |
+| `POST /api/ubos/{id}/documents` | Identidad de UNA persona: anverso, reverso y selfie |
+
+**Cómo lo pide Kira** (verificado en `/compliance/required-documents` y `/api-reference/users/*`):
+no hay endpoint de subida. El archivo va dentro del `PUT /v1/users`, anidado en
+`identifying_information[].documents[]`, como data URI en base64 o como URL https que Kira
+descarga. Se eligió **base64** porque la URL exige un dominio preautorizado por Kira y un host
+público, que hoy no hay. El precio es el tope de 10 MB del cuerpo: el BFF corta en **10
+archivos y 7 MB** por petición, porque el base64 infla ~⅓.
+
+**El base64 no se guarda en ningún sitio.** `KybDocuments.withoutFiles` limpia los archivos del
+payload antes de persistirlo. Guardarlos habría significado reenviarlos en cada `PUT` posterior
+hasta reventar el tope, y además no hace falta: reenviar el registro sin archivos **no los
+borra** en Kira.
+
+**Corrección a un supuesto del código:** `completeProfile` afirmaba que "Kira exige el objeto
+COMPLETO en cada PUT: lo que no viaje se borra en silencio". La documentación dice lo contrario
+— *"Only the fields you send are written — everything else is left alone"*. El comentario sigue
+ahí y el comportamiento no se tocó (fuera de alcance), pero conviene revisarlo: si es falso,
+reenviar el payload entero en cada PUT es trabajo y riesgo de más.
+
+**Defecto de emparejamiento corregido de paso.** Kira empareja `associated_persons[]` **por
+`email`**, y la tabla `ubos` no tenía esa columna: cada sincronización probablemente le creaba
+personas duplicadas en vez de actualizarlas. `SyncUbosService` mandaba además
+`person_reference_id`, que **no es un campo de entrada documentado** (sólo aparece en enlaces de
+liveness y webhooks); se dejó como estaba, pero está sin justificar. Ahora `ubos.email` existe,
+es opcional en el alta (no rompe el contrato de `POST /api/ubos`) y obligatorio para subir
+documentos de esa persona.
+
+**Detalle que costó un 500:** `types` declarado como `@RequestPart` revienta — una parte de
+texto sin content-type llega como `application/octet-stream` y Spring no tiene convertidor. Va
+como `@RequestParam`, que lee tanto la query como los campos de formulario. Cubierto por
+`KybDocumentUploadTest`, que pasa por la capa web; las pruebas de servicio no lo veían.
+
+**Verificado:** `./mvnw clean test` → **305 verdes** (283 antes). Colección de Bruno con la app
+arrancada → **86/86 peticiones, 48/48 tests**.
+
+### 3.9 Verificación contra el sandbox real *(14-sep)*
+
+Recorrido completo con la empresa `juriscop` (`2bf7504c-…`), ya dada de alta en Kira:
+
+| Comprobación | Resultado |
+|---|---|
+| `POST /api/onboarding/documents` con `board_minutes` | `200`; `identifying_information:file_board_minutes` **desaparece** de `missing_fields` |
+| El archivo en Kira | `GET /v1/users/{id}` lo devuelve con `uploaded_at` y `content_type: application/pdf` |
+| Fusión del array | El `business_formation` subido antes **sobrevive** al añadir `board_minutes`: 2 registros coexisten |
+| Payload persistido | **312 bytes**, sin una sola cadena `base64` |
+| PUT posterior sin archivos | `200`, y los dos archivos **siguen ahí** — la asunción del diseño es correcta |
+| `POST /api/ubos/{id}/documents` con `front` + `selfie` | `200`; ambos anidados en el `passport` de esa persona |
+| Emparejamiento por email | 5 UBO locales duplicados con el mismo email → **1 sola persona** en Kira |
+
+### 3.10 Defecto encontrado en el sandbox: `completeProfile` responde 400 *(14-sep)*
+
+**`PUT /api/onboarding` falla siempre contra Kira real.** El cuerpo del alta se guarda entero en
+`onboarding_payload` y `completeProfile` lo fusiona en cada PUT, así que reenvía `type` y
+`external_id`, que sólo valen en el POST. Bisección contra el sandbox:
+
+| Cuerpo enviado | Kira |
+|---|---|
+| `{"business_description": "..."}` | **200** |
+| `+ "type": "business"` | **400** `Invalid request data` |
+| `+ "external_id": "juriscop"` | **400** `Invalid request data` |
+| `+ "source_of_funds"` / `+ "business_legal_name"` | 200 |
+
+No lo veía nadie porque las pruebas simulan Kira. **Arreglo:** excluir `type` y `external_id`
+del cuerpo del PUT (pertenecen sólo al alta). No toca el contrato del BFF.
+
+`attachDocuments` **no** tiene este problema: construye el cuerpo sólo con
+`identifying_information`, no con el payload fusionado.
+
+De paso: `business_type` es un enum cerrado — `sociedad_por_acciones_simplificada` da 400,
+`llc` da 200. El portal debería ofrecer la lista, no un texto libre.
+
+### 3.11 Alineación con Kira: vinculación *(15-sep, tarde)*
+
+Todo verificado contra el sandbox con `juriscop`, primero con `curl` directo a Kira (bisección
+campo a campo) y después de extremo a extremo por el BFF y con Bruno.
+
+| Qué | Antes | Ahora |
+|---|---|---|
+| **B1** Campos del alta en el `PUT /v1/users` | `representative_date_of_birth`, `business_trade_name`, `has_material_intermediary_ownership`, `registered_address` → **400 Unrecognized key(s)** | `SubmitOnboardingService.forUpdate` traduce a `representative_birth_date`, `doing_business_as`, `address_*` y descarta lo que no existe. `PUT /api/onboarding` con el cuerpo del asistente → **200** |
+| **AUT-015** `type` y `external_id` en el PUT | 400 | Se quitan en `forUpdate` |
+| **B6** `pendingFields` sumaba la clave `general` | `general` es la **unión de todos los productos**: se pedían 23 requisitos de otros bancos y `readyForVirtualAccounts` no llegaba nunca | `MissingFields.forProduct` usa solo la lista del producto |
+| **B2** Sincronizar beneficiarios | Heredaba el 400 | **200** por el BFF |
+| **B4** Datos de persona | No existían | `birth_date`, `nationality`, `occupation`, `gender`, `phone_number`, `document_country` y dirección plana. Con ellos desaparecen `associated_persons:birth_date` y `:nationality` |
+| Persona duplicada | 5 filas con el mismo correo (pruebas del 14-sep) sumaban 275 % y bloqueaban la sincronización | El alta rechaza un correo repetido; se fusionaron las 5 filas de dev en una |
+| G-17 / G-21 | No se podía borrar ni corregir el nombre | `DELETE /api/ubos/{id}` (solo si Kira aún no la conoce, marca `synced_to_kira`) y la edición aplica nombre, apellido y cargo |
+| **W1–W6** Webhooks | Devoluciones como acreditadas, `user.status_changed` ignorado, motivo de rechazo y liveness mal leídos | Corregido con pruebas sobre los payloads de `notification-examples`. `rejectionReason` expuesto en `OnboardingView` |
+
+**Faltantes reales de `juriscop` para `usa-virtual-accounts` tras la tarde:** solo
+`identifying_information:file_certificate_of_good_standing` y `file_portfolio_statement`.
+Los campos de empresa que Kira pedía (`document_number`, `document_country`, `pep_status`,
+`international_entity_type`, `additional_info:has_us_bank_account` y `:has_denied_bank_account`)
+se aceptan en el PUT pero **Kira no los devuelve**: el payload guardado es su única copia.
+
+**Front (`au-transactional-web`):** commit inicial `1af1dcc`. El asistente pide industria (93
+valores NAICS), identificador tributario, país emisor, tipo de entidad (empresas no
+estadounidenses), PEP y las dos preguntas de cuentas bancarias; quita la pregunta de sociedades
+intermedias (el PUT no la acepta). El formulario de beneficiario pide los datos de identidad,
+permite corregir el nombre y borrar, y el tipo de documento es un selector (G-20). Se muestran el
+motivo del rechazo y el de producto no disponible (`unsupported_reason`).
+
+**Cifras:** BFF 330 pruebas verdes · front 120/120, lint limpio · Bruno `00` + `02`: 21/21, 20/20.
+
+### 3.12 Alineación con Kira: tesorería, RFIs y robustez *(15-sep, noche)*
+
+| Qué | Cambio |
+|---|---|
+| Estados de depósito | `KYT_PENDING` y `KYT_REJECTED` propios (antes se plegaban en `PENDING`/`FAILED`; `KYT_REJECTED` puede liberarse a `COMPLETED`). Un estado desconocido ya no acredita. `DepositView.held` avisa de que la cuenta no puede pagar |
+| Cuenta del ordenante (G-25) | `DepositView.senderAccount` sale enmascarada (`****1234`) |
+| Pagos | `CANCELLED` es estado final propio (antes `FAILED`) |
+| Cuentas | `FROZEN`: nunca `fundsReady`, aunque se hubiera visto `virtual_account.activated` |
+| Idempotencia (G-07) | `POST /api/payouts` y `POST /api/recipients` aceptan `Idempotency-Key` (UUID). Repetirla devuelve el pago o destinatario ya creado. Un 202 "ya existía" de Kira ya no guarda una segunda fila local |
+| RFIs | `POST /api/rfis/{id}/items/{itemId}/ubo-link` (G-24). `resolutionReason` en la vista. Un RFI retirado (404) pasa a `WITHDRAWN` al refrescar, sincronizar o recibir su webhook |
+| Webhooks | El evento se **guarda antes de responder 2xx** (si la base falla, 5xx y Kira reintenta); JSON ilegible con firma válida → 400. `KIRA_WEBHOOK_SECRET_PREVIOUS` para rotar el secreto sin perder entregas |
+| Reconciliación | Dos workers nuevos: `TenantReconciliationWorker` (30 min, empresas que aún no pueden operar) y `VirtualAccountReconciliationWorker` (1 h; `failed`, `deactivated` y `frozen` no tienen webhook) |
+
+**Front:** estados nuevos con sus textos, aviso de depósitos retenidos, clave de idempotencia por
+intención en pagos y destinatarios, botón para generar el enlace de verificación de un beneficiario
+y motivo de cierre de los RFIs.
+
+**Cifras:** BFF **351** pruebas verdes · front 120/120, lint limpio, **E2E 31/31** (1 omitida por
+diseño) · Bruno colección completa **88/88 peticiones, 51/51 tests** contra el sandbox.
+
+**Variable de entorno nueva (opcional):** `KIRA_WEBHOOK_SECRET_PREVIOUS`, solo durante la rotación.
+
+### 3.13 Alcance ampliado de la arquitectura: MFA, actividad y consola *(15-sep, noche)*
+
+Decisiones de Carolina (15-sep): segundo factor **TOTP con QR**, consola de **solo lectura para un
+rol interno AU** y avisos **dentro de la app** (sin correo).
+
+| Pieza | Qué hay |
+|---|---|
+| **MFA (TOTP)** | RFC 6238 sin dependencias (`Totp`, verificado con los vectores del RFC). Secreto cifrado con AES-256-GCM (`MfaSecretCipher`, clave `BFF_MFA_ENCRYPTION_KEY`). Con MFA, `POST /api/auth/login` devuelve un **reto** de 5 min (`mfaChallenge`) que no sirve como sesión; `POST /api/auth/mfa/verify` lo canjea. Tope de 5 códigos erróneos por reto y un código no vale dos veces. `bff.security.mfa-enforced` (true en cert/prod): quien no lo tiene lo configura al entrar (`mfaSetupRequired`). `/api/auth/mfa/setup`, `/enable`, `/disable`. Front: paso del código y alta con QR en el ingreso, y página «Seguridad» |
+| **Avisos** | Tabla `notifications` alimentada al proyectar webhooks (vinculación aprobada/rechazada/en revisión, liveness, cuenta operativa/congelada, depósito recibido/devuelto/retenido, pago completado/fallido/retenido/cancelado, RFIs). No leídos por usuario con `users.notifications_seen_at`. `GET /api/notifications`, `/unread-count`, `POST /read`. Front: contador en la navegación (cada 60 s) y página «Avisos» |
+| **Centro de eventos** | `webhooks_log.tenant_id` al proyectar. `GET /api/events` (Administración y Cumplimiento), **sin payload** |
+| **Auditoría** | `GET /api/audit` con el actor por nombre. Página «Auditoría» |
+| **Consola de operaciones** | Rol `PLATFORM_OPERATOR` (alcance `SYSTEM`, sin empresa: `TenantId.PLATFORM` hace que las rutas de empresa devuelvan vacío). `/api/platform/tenants`, `/tenants/{id}` (ficha 360), `/tenants/{id}/refresh`, `/review-queue`. Cada ficha consultada queda auditada. Front: «Operaciones» con bandeja de revisión, listado filtrable y ficha 360; la plataforma solo ve la consola y Seguridad. Dev: `operaciones@au.test` |
+
+**Verificado:** MFA de extremo a extremo contra el BFF con códigos generados aparte en Python (12
+comprobaciones: reto no sirve como sesión, código repetido rechazado, desactivar exige código).
+Consola: plataforma ve todo, empresa recibe 403, plataforma en ruta de empresa ve vacío.
+
+**Dependencia nueva en el front:** `qrcode@1.5.4` (+ `@types/qrcode`). Revisión de riesgo:
+*aprobada con cautela* — sin fuente Endor disponible en este equipo; repetirla cuando haya
+herramientas. El QR se genera solo en memoria y la URI `otpauth://` no se guarda nunca.
+
+**Variables de entorno nuevas:** `BFF_MFA_ENCRYPTION_KEY` (obligatoria en cert/prod, el arranque
+falla sin ella) y `BFF_MFA_ENFORCED` (por defecto `true` en cert/prod, `false` en dev).
+
+**Cifras finales del día:** BFF **370** pruebas verdes · front **144** unitarias, lint limpio,
+**E2E 33/33** (1 omitida por diseño) · Bruno **88/88 + 26/26** contra el sandbox.
+
 ---
 
 ## 4. Qué falta
@@ -133,12 +322,92 @@ nueva se aplica a mano ANTES de subir la versión, o el arranque falla la valida
 ALTER TABLE webhooks_log ADD COLUMN retry_count INT NOT NULL DEFAULT 0;
 ```
 
-### 4.3 Menor
+### 4.3 Documentos KYB: lo que queda de esa pieza
+- ~~Sin probar contra el sandbox.~~ **Probado end-to-end el 14-sep** (§3.9).
+- `user.document.download.failed` no se procesa. Sólo importa si algún día se manda por URL en
+  vez de base64; con base64 no hay descarga que falle.
+- El `warnings[]` de la respuesta de Kira no se propaga al portal.
+- No hay forma de listar ni borrar un documento ya subido: Kira sólo ofrece eso para los RFI.
+
+### 4.4 Menor
 - `POST /v1/versioning/upgrade` no se expone: es una operación de cuenta, no de portal.
 - `resolution_reason` de un RFI cerrado (`expired` / `rejected`) no se guarda.
 - La cotización detallada también es exclusiva de `2026-06-01`; `CreateQuoteService` sigue en
   `2026-04-14`. Sin verificar qué campos se pierden.
 - No hay endpoint de gestión de operadores.
+
+### 4.7 *(15-sep)* Revisión integral front + BFF + arquitectura + Kira
+
+**Documento completo: [`REVISION-INTEGRAL-FRONT-BFF.md`](REVISION-INTEGRAL-FRONT-BFF.md).** Lo
+esencial: la vinculación fallará contra Kira real por cuatro motivos (B1 campos del PUT, B2 UBOs
+por el mismo PUT, B3 webhooks, B4 datos de persona), y el repo del front no tiene ningún commit.
+Plan de 7 días priorizado en su §5.
+
+### 4.6 *(pendiente 16-sep)* Completar el cronograma en ClickUp
+
+El 15-sep se agotó el cupo diario de la integración (100 llamadas) con 43 de 51 tareas creadas;
+el calendario llega sólo al 9-oct. **Al retomar:** crear las 8 de
+[`cronograma/clickup-pendientes.csv`](cronograma/clickup-pendientes.csv) (AUT-044 a AUT-051), las
+tareas de [`REVISION-DOCS-KIRA.md`](REVISION-DOCS-KIRA.md) §6 en el viernes 18-sep, y las
+dependencias entre tareas. Carpeta "AuTransactional — Integración Kira" en *Espacio del equipo [ES]*.
+
+### 4.5 *(15-sep)* Desalineaciones con la documentación nueva de Kira
+
+> **Documento completo, con payloads, líneas de código y estimación:
+> [`REVISION-DOCS-KIRA.md`](REVISION-DOCS-KIRA.md).** Abajo, el resumen.
+
+Cruce de `docs.kirafin.ai` (MCP `kira-docs`: event-catalog, notification-examples, states,
+holds, idempotency, pagination, go-live-checklist, rfis/values) contra el código. **Sin corregir
+todavía.** Todas pasan desapercibidas en las pruebas porque simulan los payloads con la forma
+antigua.
+
+**Webhooks: proyecciones que hoy se equivocan en silencio**
+
+| # | Evento | Payload documentado | Qué hace el código | Efecto |
+|---|---|---|---|---|
+| W1 | `virtual_account.deposit_funds_refunded` | sin `status`, con `return_details` | `DepositStatus.fromEventName` espera `deposit_returned` (no existe); cae a `fromWire(null)` → `COMPLETED` | **Un depósito devuelto se registra como acreditado** |
+| W2 | `deposit_scheduled`, `deposit_in_review` | sin `status` | mismo camino → `COMPLETED` | Dinero en revisión mostrado como disponible |
+| W3 | `user.status_changed` | `new_status` / `previous_status` | exige `status`; si falta, no mueve nada | **El evento que Kira pide suscribir se ignora** |
+| W4 | `user.verification.failed` | `reasons[]` | lee `reason` / `rejection_reason` / `message` | Se guarda el texto genérico; el motivo real se pierde para siempre |
+| W5 | `user.liveness_completed` | `result: "approved"` | lee `status` → `PENDING` | La prueba de vida nunca se marca completada por webhook |
+| W6 | `deposit_funds_received` | ordenante y riel en `source.sender_name` / `source.payment_rail` | los busca planos | Ordenante y riel vacíos |
+| W7 | `rfi.not_resolved` | `resolution_reason` en el evento | no se lee (ya en §4.4) | — |
+
+**Estados**
+- Depósito: `KYT_PENDING` y `KYT_REJECTED` se pliegan en `PENDING` / `FAILED`. `FAILED` es
+  terminal en el código, pero `KYT_REJECTED` puede volver a `COMPLETED` → esa transición se
+  bloquearía. `COMPLETED` tampoco es terminal para Kira (retención o clawback).
+- `DepositStatus.fromWire` cae a `COMPLETED` ante un valor desconocido: el fallo peligroso.
+- Pago: `CANCELLED` es un estado terminal propio; el código lo convierte en `FAILED`.
+  `COMPLETED` no es terminal (una devolución bancaria lo pasa a `FAILED`).
+- Cuenta virtual en `2026-06-01`: `pending/activating/active/failed/deactivated` (+ `frozen`, que
+  bloquea pagos). Pasar todo el cliente a `2026-06-01` elimina el apaño de `approved`; el
+  checklist de salida a producción pide **la misma versión en todas las peticiones** y hoy se
+  mezclan `2026-04-14` y `2026-06-01`.
+
+**Ingress de webhooks**
+- Kira **sí reintenta** (1, 5, 15 y 60 min ante `408`, `429`, `5xx` o sin respuesta) y permite
+  reenviar desde el dashboard. Los comentarios de `KiraWebhookController` y el riesgo "entrega
+  única" de §6 están desactualizados.
+- Con reintentos, conviene persistir el evento **antes** de responder `2xx` (hoy se encola en
+  memoria con `@Async`: si la app cae tras el 200, el evento se pierde) y responder `5xx` si la
+  base falla, para que Kira reintente.
+- Rotar el secreto de firma deja ~1 min de entregas con la firma anterior: `KiraWebhookVerifier`
+  sólo admite un secreto.
+
+**Rutas nuevas / no expuestas**
+- `POST /v1/rfis/{rfi}/items/{item}/ubo-link`: items `ubo_link` con `applicant_id` + `person_id`
+  (sin `url`) necesitan acuñar el enlace al hacer clic; caduca en ~1 h. El BFF no lo expone.
+- `GET /v1/virtual-accounts/deposits`: depósitos de todas las cuentas (paginado por `page`). No
+  se usa; como `listDeposits()` global se retiró en §3.1, sólo tendría sentido filtrado.
+- Un RFI `withdrawn` responde `404` en todas sus rutas: el reconciliador de RFIs debería cerrarlo
+  en local en vez de fallar en cada pasada.
+
+**Resuelve decisiones abiertas**
+- §5.4 `memo` en WIRE: es obligatorio (`extra_info.memo`) cuando el banco de la cuenta es
+  `austin_capital_trust`.
+- Sandbox: valores forzados para probar los caminos difíciles — `ein` `111111111`,
+  `111111113`, `222221006`, `222221005`; pagos con céntimos `.02`, `.03`, `.04`; depósito de `11`.
 
 ---
 
@@ -163,8 +432,9 @@ Cambio contenido al `RecipientMapper`.
 
 | Riesgo | Detalle | Mitigación actual |
 |---|---|---|
-| **Sin credenciales de Kira** | Nada del flujo real se ha probado contra el sandbox | Contratos verificados en la documentación oficial; pedir `api_key` a Kira |
-| **Webhook perdido** | Entrega única, sin reintentos | `refresh` / `sync` manuales hasta los workers |
+| **Flujo real sin probar** | Ya hay credenciales de sandbox y `/auth` responde `200` (§3.7), pero sólo se ha ejercitado `GET /v1/countries`: onboarding, cuentas y pagos siguen sin recorrerse contra Kira | Recorrer la colección de Bruno en modo B |
+| **Credenciales compartidas por chat** | La `api_key` y el secreto de Cognito del sandbox viajaron por un canal no seguro | Rotarlas con Kira antes de producción |
+| **Webhook perdido** | Kira reintenta 4 veces (~80 min) y después lo da por perdido | Evento guardado antes del 2xx, reenvío desde el dashboard y 7 workers de reconciliación |
 | **`rfi.*` no suscrito** | Exige suscripción explícita en Kira | `POST /api/rfis/sync`; pedirla a Kira |
 | **Atribución por `user_id`** | Documentado en list/get RFI, pagos y destinatarios; no probado en sandbox | Se descarta y registra lo que no se puede atribuir |
 | **Forma de `account_details` y `fees`** | Kira no documenta sus campos | Se enmascara `account_number`/`address` si viene; `fees` va tal cual al front |
@@ -184,7 +454,70 @@ ALTER TABLE rfis
 
 -- Verificacion biometrica propia eliminada (11-sep)
 DROP TABLE IF EXISTS verification_sessions;
+
+-- Reintentos de la reproyeccion de webhooks (11-sep)
+ALTER TABLE webhooks_log ADD COLUMN retry_count INT NOT NULL DEFAULT 0;
+
+-- Documentos KYB: Kira empareja associated_persons[] por email (14-sep)
+ALTER TABLE ubos ADD COLUMN email VARCHAR(255) NULL;
+
+-- Datos de identidad por persona y marca de envio a Kira (15-sep)
+ALTER TABLE ubos
+  ADD COLUMN birth_date DATE NULL,
+  ADD COLUMN nationality VARCHAR(3) NULL,
+  ADD COLUMN occupation VARCHAR(100) NULL,
+  ADD COLUMN gender VARCHAR(10) NULL,
+  ADD COLUMN phone_number VARCHAR(20) NULL,
+  ADD COLUMN document_country VARCHAR(3) NULL,
+  ADD COLUMN address_street VARCHAR(255) NULL,
+  ADD COLUMN address_city VARCHAR(100) NULL,
+  ADD COLUMN address_state VARCHAR(100) NULL,
+  ADD COLUMN address_zip_code VARCHAR(20) NULL,
+  ADD COLUMN address_country VARCHAR(3) NULL,
+  ADD COLUMN synced_to_kira BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Quien ya estaba en una empresa dada de alta con correo se envio a Kira: no se puede borrar.
+UPDATE ubos u JOIN tenants t ON t.id = u.tenant_id
+   SET u.synced_to_kira = TRUE
+ WHERE t.kira_user_id IS NOT NULL AND u.email IS NOT NULL;
+
+-- Antes de desplegar: revisar beneficiarios con correo repetido en la misma empresa
+-- (ahora el alta lo rechaza; los existentes hay que fusionarlos a mano).
+SELECT tenant_id, LOWER(email) AS email, COUNT(*) FROM ubos
+ WHERE email IS NOT NULL GROUP BY tenant_id, LOWER(email) HAVING COUNT(*) > 1;
+
+-- RFIs: motivo de cierre sin resolver (expired, rejected, withdrawn) (15-sep)
+ALTER TABLE rfis ADD COLUMN resolution_reason VARCHAR(20) NULL;
+
+-- MFA TOTP: secreto cifrado (mas largo que el texto plano) y activacion (15-sep)
+ALTER TABLE users
+  MODIFY COLUMN mfa_secret VARCHAR(255) NULL,
+  ADD COLUMN mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN notifications_seen_at DATETIME(6) NULL;
+-- Si alguna fila tenia mfa_secret en claro del esquema viejo, no es descifrable: se limpia.
+UPDATE users SET mfa_secret = NULL WHERE mfa_enabled = FALSE;
+
+-- Operadores de la plataforma: sin empresa (15-sep)
+ALTER TABLE users MODIFY COLUMN tenant_id VARCHAR(36) NULL;
+
+-- Avisos por organizacion y atribucion de eventos (15-sep)
+CREATE TABLE notifications (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  kind VARCHAR(60) NOT NULL,
+  severity VARCHAR(20) NOT NULL,
+  title VARCHAR(160) NOT NULL,
+  message VARCHAR(500) NULL,
+  resource_type VARCHAR(40) NULL,
+  resource_id VARCHAR(100) NULL,
+  created_at DATETIME(6) NOT NULL,
+  INDEX idx_notifications_tenant (tenant_id, created_at)
+);
+ALTER TABLE webhooks_log ADD COLUMN tenant_id VARCHAR(36) NULL;
 ```
+
+Los estados nuevos (`KYT_PENDING`, `KYT_REJECTED`, `CANCELLED`, `FROZEN`, `WITHDRAWN`) caben en las
+columnas `status VARCHAR(50)` existentes: no necesitan DDL.
 
 Para obtener el DDL exacto que espera Hibernate, crear un test temporal:
 
@@ -209,9 +542,9 @@ class TempDdlDumpTest { @Test void dump() {} }
 
 | | |
 |---|---|
-| Clases de producción | 169 (185 antes de depurar) |
-| Clases de prueba | 40 |
-| Pruebas | 283 |
+| Clases de producción | 171 |
+| Clases de prueba | 42 |
+| Pruebas | 305 |
 | Tablas | 12 |
-| Endpoints REST | 47 operaciones sobre 40 rutas |
-| Colección Bruno | 84 peticiones en 11 carpetas |
+| Endpoints REST | 49 operaciones sobre 42 rutas |
+| Colección Bruno | 86 peticiones en 11 carpetas |

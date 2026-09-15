@@ -1,0 +1,21 @@
+meta {
+  name: 05 Error - empresa en la consola
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/platform/tenants
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{tokenAdmin}}
+}
+
+tests {
+  test("responde 403", function () {
+    expect(res.getStatus()).to.equal(403);
+  });
+}
