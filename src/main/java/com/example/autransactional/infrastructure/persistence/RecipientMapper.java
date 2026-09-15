@@ -28,6 +28,7 @@ final class RecipientMapper {
         e.setRail(r.getRail());
         e.setStatus(r.getStatus());
         e.setReplacedByRecipientId(r.getReplacedByRecipientId());
+        e.setCreatedByUserId(r.getCreatedByUserId());
 
         RecipientHolder holder = r.getHolder();
         e.setBusiness(holder.business());
@@ -87,9 +88,11 @@ final class RecipientMapper {
                     e.getWalletAddress(), e.getDocType(), e.getDocNumber());
         };
 
-        return Recipient.rehydrate(e.getId(), TenantId.of(e.getTenantId()), holder, account,
+        Recipient recipient = Recipient.rehydrate(e.getId(), TenantId.of(e.getTenantId()), holder, account,
                 read(e.getHolderAddress()), e.getKiraRecipientId(), e.getStatus(),
                 e.getReplacedByRecipientId(), e.getCreatedAt(), e.getUpdatedAt());
+        recipient.recordAuthor(e.getCreatedByUserId());
+        return recipient;
     }
 
     private String write(PostalAddress address) {

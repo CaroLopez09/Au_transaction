@@ -32,6 +32,8 @@ public class Recipient {
     private String kiraRecipientId;
     private RecipientStatus status;
     private String replacedByRecipientId;
+    /** Operador que lo registro: no puede aprobar pagos hacia el. Null en los anteriores al 15-sep. */
+    private String createdByUserId;
     private Instant updatedAt;
 
     public Recipient(String id, TenantId tenantId, RecipientHolder holder, RecipientAccount account,
@@ -71,6 +73,10 @@ public class Recipient {
         r.replacedByRecipientId = replacedByRecipientId;
         r.updatedAt = updatedAt;
         return r;
+    }
+
+    public void recordAuthor(String userId) {
+        this.createdByUserId = userId;
     }
 
     public Rail getRail() {

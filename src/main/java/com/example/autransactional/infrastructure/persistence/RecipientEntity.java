@@ -59,6 +59,10 @@ public class RecipientEntity {
     @Column(name = "replaced_by_recipient_id", length = 36)
     private String replacedByRecipientId;
 
+    /** Operador que lo registro (segregacion de funciones al aprobar pagos). */
+    @Column(name = "created_by_user_id", length = 36)
+    private String createdByUserId;
+
     // --- Titular ---
 
     @Column(name = "is_business", nullable = false)

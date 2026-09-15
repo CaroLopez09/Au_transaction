@@ -93,6 +93,10 @@ public class PayoutEntity {
     @Column(name = "approver_user_id", length = 36)
     private String approverUserId;
 
+    /** Primera de dos firmas cuando el monto supera el umbral de la empresa. */
+    @Column(name = "first_approver_user_id", length = 36)
+    private String firstApproverUserId;
+
     // --- Control interno del BFF, ajeno a la API de Kira ---
 
     @Enumerated(EnumType.STRING)

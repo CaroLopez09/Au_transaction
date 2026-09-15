@@ -6,6 +6,7 @@ import com.example.autransactional.application.account.VirtualAccountView;
 import com.example.autransactional.application.tenant.OnboardingView;
 import com.example.autransactional.application.tenant.SubmitOnboardingService;
 import com.example.autransactional.application.tenant.UboView;
+import com.example.autransactional.application.treasury.PayoutApprovalPolicy;
 import com.example.autransactional.application.treasury.PayoutView;
 import com.example.autransactional.domain.account.DepositRepository;
 import com.example.autransactional.domain.account.VirtualAccount;
@@ -56,10 +57,13 @@ public class PlatformConsoleService {
     private final OpenVirtualAccountService accountService;
     private final AuditTrail audit;
 
+    private final PayoutApprovalPolicy approvalPolicy;
+
     public PlatformConsoleService(TenantRepository tenants, UboRepository ubos, VirtualAccountRepository accounts,
                                   PayoutRepository payouts, DepositRepository deposits, RfiRepository rfis,
                                   SubmitOnboardingService onboarding, OpenVirtualAccountService accountService,
-                                  AuditTrail audit) {
+                                  AuditTrail audit, PayoutApprovalPolicy approvalPolicy) {
+        this.approvalPolicy = approvalPolicy;
         this.tenants = tenants;
         this.ubos = ubos;
         this.accounts = accounts;
@@ -92,7 +96,9 @@ public class PlatformConsoleService {
                 OnboardingView.from(tenant),
                 UboView.Roster.from(ubos.rosterOf(tenant.getId())),
                 accounts.findByTenant(tenant.getId()).stream().map(VirtualAccountView::from).toList(),
-                payouts.findByTenant(tenant.getId(), 20).stream().map(PayoutView::from).toList(),
+                payouts.findByTenant(tenant.getId(), 20).stream()
+                        .map(p -> PayoutView.from(p, null, approvalPolicy.requiredApprovals(p.getTenantId(), p.getAmount())))
+                        .toList(),
                 deposits.findByTenant(tenant.getId(), 20).stream().map(DepositView::from).toList(),
                 rfis.findByTenant(tenant.getId()).stream().map(r -> RfiSummary.from(r, now)).toList());
     }

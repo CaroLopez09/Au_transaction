@@ -536,6 +536,10 @@ CREATE TABLE notifications (
   INDEX idx_notifications_tenant (tenant_id, created_at)
 );
 ALTER TABLE webhooks_log ADD COLUMN tenant_id VARCHAR(36) NULL;
+
+-- Doble firma por limite y segregacion destinatario/aprobador (15-sep, P1)
+ALTER TABLE payouts ADD COLUMN first_approver_user_id VARCHAR(36) NULL;
+ALTER TABLE recipients ADD COLUMN created_by_user_id VARCHAR(36) NULL;
 ```
 
 Los estados nuevos (`KYT_PENDING`, `KYT_REJECTED`, `CANCELLED`, `FROZEN`, `WITHDRAWN`) caben en las

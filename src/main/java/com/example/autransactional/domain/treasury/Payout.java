@@ -32,6 +32,8 @@ public class Payout {
     private PayoutApprovalState approvalState;
     private PayoutStatus status;
     private String approverUserId;
+    /** Primera firma de un pago que exige dos (por encima del umbral de la empresa). */
+    private String firstApproverUserId;
     private String rejectionReason;
     private String kiraPayoutId;
     private String errorCode;
@@ -70,7 +72,8 @@ public class Payout {
                                    IdempotencyKey idempotencyKey, String makerUserId, Instant createdAt,
                                    String quotationId, Instant quotationExpiresAt,
                                    PayoutApprovalState approvalState, PayoutStatus status,
-                                   String approverUserId, String rejectionReason, String kiraPayoutId,
+                                   String approverUserId, String firstApproverUserId,
+                                   String rejectionReason, String kiraPayoutId,
                                    String errorCode, String referenceNumber, String paymentMethod,
                                    Instant updatedAt) {
         Payout p = new Payout(id, tenantId, kiraUserId, virtualAccountId, recipientId, amount, fees,
@@ -82,6 +85,7 @@ public class Payout {
         p.approvalState = approvalState;
         p.status = status;
         p.approverUserId = approverUserId;
+        p.firstApproverUserId = firstApproverUserId;
         p.rejectionReason = rejectionReason;
         p.kiraPayoutId = kiraPayoutId;
         p.errorCode = errorCode;
@@ -125,10 +129,23 @@ public class Payout {
         return quotationExpiresAt != null && !now.isBefore(quotationExpiresAt);
     }
 
-    /**
-     * Segregacion de funciones: quien crea la solicitud no puede autorizar su envio.
-     */
+    /** Aprobacion de una sola firma y sin autor de destinatario conocido. */
     public void approve(String approverId, Instant now) {
+        if (!approve(approverId, now, 1, null)) {
+            throw new IllegalStateException("Una aprobacion de una firma siempre completa el pago.");
+        }
+    }
+
+    /**
+     * Segregacion de funciones (arquitectura §7):
+     *  - quien crea la solicitud no puede autorizar su envio;
+     *  - quien registro el destinatario no puede aprobar pagos hacia el;
+     *  - con dos firmas requeridas, la segunda es de otra persona.
+     *
+     * @return true si el pago queda aprobado y listo para enviar; false si solo se registro la
+     *         primera de dos firmas.
+     */
+    public boolean approve(String approverId, Instant now, int requiredApprovals, String recipientCreatorId) {
         if (approvalState != PayoutApprovalState.PENDING_APPROVAL) {
             throw new DomainException("El pago no esta pendiente de aprobacion (estado actual: "
                     + approvalState + ").");
@@ -140,12 +157,25 @@ public class Payout {
             throw new DomainException(
                     "Violacion de control interno: quien crea la solicitud de pago no puede autorizar su envio.");
         }
+        if (approverId.equals(recipientCreatorId)) {
+            throw new DomainException(
+                    "Violacion de control interno: quien registro el destinatario no puede aprobar pagos hacia el.");
+        }
+        if (approverId.equals(firstApproverUserId)) {
+            throw new DomainException("Este pago necesita la aprobacion de una segunda persona.");
+        }
         if (isQuotationExpired(now)) {
             throw new DomainException("La cotizacion vencio. Vuelve a cotizar antes de aprobar.");
+        }
+        if (requiredApprovals > 1 && firstApproverUserId == null) {
+            this.firstApproverUserId = approverId;
+            touch();
+            return false;
         }
         this.approverUserId = approverId;
         this.approvalState = PayoutApprovalState.APPROVED;
         touch();
+        return true;
     }
 
     public void reject(String approverId, String reason) {

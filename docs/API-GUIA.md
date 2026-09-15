@@ -910,6 +910,7 @@ Respuesta `201` con la proyección `PayoutView`:
   "totalDebitAmount": 155.5000,
   "approvalState": "PENDING_APPROVAL", "status": "NOT_SUBMITTED", "terminal": false,
   "makerUserId": "juriscop:treasury_maker", "approverUserId": null,
+  "firstApproverUserId": null, "requiredApprovals": 1,
   "priceLocked": true,
   "kiraPayoutId": null, "referenceNumber": null, "paymentMethod": null, "errorCode": null,
   "blockedByRfiId": null,
@@ -946,7 +947,16 @@ bancos corresponsales. `documents` admite **1 o 2** archivos, siempre como **dat
 base64** de máx. 3 MB — aquí, a diferencia del KYB, **no se aceptan URLs**.
 
 Antes de llamar a Kira se comprueba que la cotización siga **vigente y con saldo
-suficiente**, y que quien aprueba no sea quien creó el pago. La cotización se marca como
+suficiente**, y la segregación de funciones: quien aprueba no puede ser quien creó el pago
+**ni quien registró el destinatario** (los destinatarios anteriores al 15-sep no tienen autor
+guardado y no aplican esta regla).
+
+**Límite de la empresa (doble firma).** Desde `bff.payouts.approval.dual-approval-threshold`
+(`BFF_DUAL_APPROVAL_THRESHOLD`, **10.000 por defecto, en la moneda del pago**) o el umbral propio
+de la empresa en `tenant-thresholds`, el pago necesita **dos aprobaciones de personas
+distintas**. La primera responde `200` con el pago aún en `PENDING_APPROVAL`, sin llamar a
+Kira, y queda auditada como `payout.first_approval`; la segunda lo envía. `PayoutView` trae
+`requiredApprovals` (1 o 2) y `firstApproverUserId`. La cotización se marca como
 consumida **al enviar**, no al preparar: si el envío falla con `400`, Kira no la ha
 gastado y sigue siendo redimible.
 

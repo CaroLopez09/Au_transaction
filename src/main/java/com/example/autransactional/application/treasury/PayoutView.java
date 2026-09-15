@@ -29,6 +29,10 @@ public record PayoutView(
         boolean terminal,
         String makerUserId,
         String approverUserId,
+        /** Primera firma registrada cuando el pago necesita dos. */
+        String firstApproverUserId,
+        /** 1 o 2, segun el umbral de la empresa (bff.payouts.approval). */
+        int requiredApprovals,
         boolean priceLocked,
         String kiraPayoutId,
         String referenceNumber,
@@ -38,11 +42,7 @@ public record PayoutView(
         Instant createdAt,
         Instant updatedAt) {
 
-    public static PayoutView from(Payout p) {
-        return from(p, null);
-    }
-
-    public static PayoutView from(Payout p, String blockedByRfiId) {
+    public static PayoutView from(Payout p, String blockedByRfiId, int requiredApprovals) {
         return new PayoutView(
                 p.getId(),
                 p.getVirtualAccountId(),
@@ -59,6 +59,8 @@ public record PayoutView(
                 p.getStatus().isTerminal(),
                 p.getMakerUserId(),
                 p.getApproverUserId(),
+                p.getFirstApproverUserId(),
+                requiredApprovals,
                 p.isPriceLocked(),
                 p.getKiraPayoutId(),
                 p.getReferenceNumber(),

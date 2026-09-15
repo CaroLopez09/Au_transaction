@@ -66,6 +66,9 @@ class ExecutePayoutServiceTest {
     private ExecutePayoutService service;
     private Payout pago;
     private Quotation cotizacion;
+    private Recipient destinatario;
+    /** Umbral de doble firma: 5.000 USD (el pago de prueba es de 1.000). */
+    private final PayoutApprovalPolicy politica = new PayoutApprovalPolicy(new BigDecimal("5000"), null);
 
     private final AuthenticatedOperator maker =
             new AuthenticatedOperator("maker-1", "treasury.maker@juriscop.test", TENANT, Role.TREASURY_MAKER);
@@ -95,7 +98,7 @@ class ExecutePayoutServiceTest {
                 "jp_morgan", null);
         cuenta.linkKiraAccount("kva-1");
         cuenta.describeBank("Bank", "1234567890", "021000021");
-        Recipient destinatario = new Recipient("rec-1", TENANT,
+        destinatario = new Recipient("rec-1", TENANT,
                 RecipientHolder.company("Acme Corp", null, null),
                 new RecipientAccount.Wire("021000021", null, "1234567890", BankAccountKind.CHECKING,
                         "Chase", new PostalAddress("1 Bank Plaza", "New York", "NY", "10001", "US"),
@@ -118,7 +121,63 @@ class ExecutePayoutServiceTest {
 
         when(rfis.findOpenBlocking(any())).thenReturn(Optional.empty());
         service = new ExecutePayoutService(payouts, quotations, accounts, recipients, tenants, rfis, kira,
-                audit, mapper);
+                audit, mapper, politica);
+    }
+
+    // --- Limites y segregacion de funciones (arquitectura §5 y §7) ---
+
+    private final AuthenticatedOperator otroAprobador =
+            new AuthenticatedOperator("approver-3", "admin@juriscop.test", TENANT, Role.ADMIN);
+
+    private void pagoGrande() {
+        pago = new Payout("p-1", TENANT, "usr_1", "va-1", "rec-1",
+                Money.of(new BigDecimal("5000.00"), "USD"), FeeBreakdown.standard(),
+                IdempotencyKey.newKey(), "maker-1");
+    }
+
+    @Test
+    void desdeElUmbralLaPrimeraFirmaNoEnviaElPago() {
+        pagoGrande();
+
+        var vista = service.approveAndSubmit(approver, "p-1", new PayoutCommands.ApprovePayout(null, null, null, null));
+
+        verify(kira, never()).executePayout(anyString(), any(), any());
+        assertEquals("PENDING_APPROVAL", vista.approvalState());
+        assertEquals("approver-2", vista.firstApproverUserId());
+        assertEquals(2, vista.requiredApprovals());
+    }
+
+    @Test
+    void laSegundaFirmaTieneQueSerDeOtraPersonaYEntoncesSeEnvia() {
+        pagoGrande();
+        service.approveAndSubmit(approver, "p-1", new PayoutCommands.ApprovePayout(null, null, null, null));
+
+        assertThrows(DomainException.class, () -> service.approveAndSubmit(approver, "p-1",
+                new PayoutCommands.ApprovePayout(null, null, null, null)));
+        var vista = service.approveAndSubmit(otroAprobador, "p-1", new PayoutCommands.ApprovePayout(null, null, null, null));
+
+        verify(kira).executePayout(anyString(), any(), any());
+        assertEquals("SUBMITTED", vista.approvalState());
+        assertEquals("approver-3", vista.approverUserId());
+    }
+
+    @Test
+    void elUmbralDeUnaEmpresaMandaSobreElGeneral() {
+        var propia = new PayoutApprovalPolicy(new BigDecimal("5000"), Map.of("juriscop", new BigDecimal("500")));
+        assertEquals(2, propia.requiredApprovals(TENANT, Money.of(new BigDecimal("1000"), "USD")));
+        assertEquals(1, propia.requiredApprovals(TenantId.of("bankvision"), Money.of(new BigDecimal("1000"), "USD")));
+        assertEquals(1, new PayoutApprovalPolicy(null, null).requiredApprovals(TENANT, Money.of(new BigDecimal("1e9"), "USD")));
+    }
+
+    @Test
+    void quienRegistroElDestinatarioNoApruebaPagosHaciaEl() {
+        destinatario.recordAuthor("approver-2");
+
+        var e = assertThrows(DomainException.class, () -> service.approveAndSubmit(approver, "p-1",
+                new PayoutCommands.ApprovePayout(null, null, null, null)));
+
+        assertTrue(e.getMessage().contains("registro el destinatario"));
+        verify(kira, never()).executePayout(anyString(), any(), any());
     }
 
     private JsonNode json(String raw) {

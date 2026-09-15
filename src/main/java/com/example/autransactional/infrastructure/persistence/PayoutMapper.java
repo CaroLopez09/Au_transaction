@@ -28,6 +28,7 @@ final class PayoutMapper {
                 e.getApprovalState(),
                 e.getStatus(),
                 e.getApproverUserId(),
+                e.getFirstApproverUserId(),
                 e.getRejectionReason(),
                 e.getKiraPayoutId(),
                 e.getErrorCode(),
@@ -51,6 +52,7 @@ final class PayoutMapper {
         e.setIdempotencyKey(p.getIdempotencyKey().value());
         e.setMakerUserId(p.getMakerUserId());
         e.setApproverUserId(p.getApproverUserId());
+        e.setFirstApproverUserId(p.getFirstApproverUserId());
         e.setQuotationId(p.getQuotationId());
         e.setQuotationExpiresAt(p.getQuotationExpiresAt());
         e.setApprovalState(p.getApprovalState());

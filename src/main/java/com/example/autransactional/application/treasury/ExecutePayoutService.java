@@ -59,6 +59,7 @@ public class ExecutePayoutService {
     private final KiraApiClient kira;
     private final AuditTrail audit;
     private final ObjectMapper objectMapper;
+    private final PayoutApprovalPolicy approvalPolicy;
 
     /** Filtros que acepta GET /v1/payouts: cualquier otro parametro lo rechaza con 400. */
     private static final Set<String> KIRA_PAYOUT_STATUSES = Set.of(
@@ -67,7 +68,7 @@ public class ExecutePayoutService {
     public ExecutePayoutService(PayoutRepository payouts, QuotationRepository quotations,
                                 VirtualAccountRepository accounts, RecipientRepository recipients,
                                 TenantRepository tenants, RfiRepository rfis, KiraApiClient kira,
-                                AuditTrail audit, ObjectMapper objectMapper) {
+                                AuditTrail audit, ObjectMapper objectMapper, PayoutApprovalPolicy approvalPolicy) {
         this.payouts = payouts;
         this.quotations = quotations;
         this.accounts = accounts;
@@ -77,6 +78,7 @@ public class ExecutePayoutService {
         this.kira = kira;
         this.audit = audit;
         this.objectMapper = objectMapper;
+        this.approvalPolicy = approvalPolicy;
     }
 
     /**
@@ -221,7 +223,7 @@ public class ExecutePayoutService {
             if (!previous.get().getTenantId().equals(operator.tenantId())) {
                 throw new DomainException("Esa clave de idempotencia ya esta en uso.");
             }
-            return PayoutView.from(previous.get());
+            return view(previous.get());
         }
 
         // El desglose comisional vigente: 15 USD de Kira + 15 USD de margen = 30 USD.
@@ -250,7 +252,7 @@ public class ExecutePayoutService {
 
         payouts.save(payout);
         audit.record(operator, "payout.created", "payout", payout.getId(), key.value(), "OK", null);
-        return PayoutView.from(payout);
+        return view(payout);
     }
 
     @Transactional
@@ -263,9 +265,18 @@ public class ExecutePayoutService {
         Instant now = Instant.now();
         Payout payout = load(operator.tenantId(), payoutId);
         Quotation quotation = loadQuotation(operator, payout, now);
+        String recipientCreator = recipients.findByIdAndTenant(payout.getRecipientId(), operator.tenantId())
+                .map(Recipient::getCreatedByUserId).orElse(null);
+        int required = approvalPolicy.requiredApprovals(operator.tenantId(), payout.getAmount());
 
-        payout.approve(operator.userId(), now);
+        boolean complete = payout.approve(operator.userId(), now, required, recipientCreator);
         payouts.save(payout);
+        if (!complete) {
+            // Primera de dos firmas: el pago espera a otra persona y no va todavia a Kira.
+            audit.record(operator, "payout.first_approval", "payout", payout.getId(),
+                    payout.getIdempotencyKey().value(), "OK", "firmas_requeridas=" + required);
+            return view(payout);
+        }
         audit.record(operator, "payout.approved", "payout", payout.getId(),
                 payout.getIdempotencyKey().value(), "OK",
                 payout.isPriceLocked() ? "cotizacion=" + payout.getQuotationId() : "sin cotizacion");
@@ -282,7 +293,7 @@ public class ExecutePayoutService {
         payout.reject(operator.userId(), reason);
         payouts.save(payout);
         audit.record(operator, "payout.rejected", "payout", payout.getId(), null, "OK", reason);
-        return PayoutView.from(payout);
+        return view(payout);
     }
 
     /** Reconciliacion puntual: los eventos llegan una sola vez, el recurso es la autoridad final. */
@@ -290,7 +301,7 @@ public class ExecutePayoutService {
     public PayoutView refreshFromKira(AuthenticatedOperator operator, String payoutId) {
         Payout payout = load(operator.tenantId(), payoutId);
         if (payout.getKiraPayoutId() == null) {
-            return PayoutView.from(payout);
+            return view(payout);
         }
         JsonNode body = unwrap(kira.getPayout(payout.getKiraPayoutId()));
 
@@ -317,11 +328,12 @@ public class ExecutePayoutService {
 
     /** Vista con la marca de "detenido" si un RFI abierto de Kira bloquea el pago. */
     private PayoutView view(Payout payout) {
-        String rfiId = rfis.findOpenBlocking(payout.getKiraPayoutId())
+        String rfiId = payout.getKiraPayoutId() == null ? null : rfis.findOpenBlocking(payout.getKiraPayoutId())
                 .filter(r -> r.getTenantId().equals(payout.getTenantId()))
                 .map(Rfi::getId)
                 .orElse(null);
-        return PayoutView.from(payout, rfiId);
+        return PayoutView.from(payout, rfiId,
+                approvalPolicy.requiredApprovals(payout.getTenantId(), payout.getAmount()));
     }
 
     private static JsonNode unwrap(JsonNode response) {

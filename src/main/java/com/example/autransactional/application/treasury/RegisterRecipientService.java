@@ -152,6 +152,7 @@ public class RegisterRecipientService {
                 buildHolder(command),
                 buildAccount(command),
                 toAddress(command.address()));
+        recipient.recordAuthor(operator.userId());
 
         // Una clave por intencion: el reintento devuelve el mismo destinatario, no otro.
         IdempotencyKey key = clientIdempotencyKey == null || clientIdempotencyKey.isBlank()

@@ -63,6 +63,13 @@ bff:
     tenants-ms: 1800000       # empresas registradas que aun no pueden operar (GET /v1/users/{id})
     accounts-ms: 3600000      # cuentas abiertas: failed, deactivated y frozen no tienen webhook
 
+  # Limites internos de pagos (fijos en configuracion). Desde el umbral, dos aprobadores distintos.
+  # tenant-thresholds: umbral propio por id de empresa, p. ej. juriscop: 25000
+  payouts:
+    approval:
+      dual-approval-threshold: ${BFF_DUAL_APPROVAL_THRESHOLD:10000}
+      tenant-thresholds: {}
+
   # Terminos que la empresa acepta antes de enviar su expediente. Viaja a Kira como
   # tos_accepted_version. Sin version, el portal no pide la aceptacion.
   terms:

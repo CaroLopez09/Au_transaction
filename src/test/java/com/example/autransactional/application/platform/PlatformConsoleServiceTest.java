@@ -63,7 +63,8 @@ class PlatformConsoleServiceTest {
         when(rfis.findByTenant(any())).thenReturn(List.of());
         when(rfis.findOpenByTenant(any())).thenReturn(List.of());
         service = new PlatformConsoleService(tenants, ubos, accounts, payouts, deposits, rfis,
-                mock(SubmitOnboardingService.class), mock(OpenVirtualAccountService.class), audit);
+                mock(SubmitOnboardingService.class), mock(OpenVirtualAccountService.class), audit,
+                new com.example.autransactional.application.treasury.PayoutApprovalPolicy(null, null));
     }
 
     @Test
