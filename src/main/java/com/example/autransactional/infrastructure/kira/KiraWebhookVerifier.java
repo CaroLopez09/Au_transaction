@@ -33,14 +33,25 @@ public class KiraWebhookVerifier {
         return properties.webhookSecret() != null && !properties.webhookSecret().isBlank();
     }
 
+    /**
+     * Acepta la firma del secreto vigente o, si esta configurado, la del anterior: al rotar el
+     * secreto, Kira sigue firmando con el viejo durante cerca de un minuto y no hay ventana en la
+     * que acepte ambos (webhooks/overview). Tras la rotacion se borra KIRA_WEBHOOK_SECRET_PREVIOUS.
+     */
     public boolean verify(byte[] rawBody, String signatureHeader) {
         if (!isConfigured() || signatureHeader == null || rawBody == null) {
             return false;
         }
-        String expected = hmacHex(rawBody, properties.webhookSecret());
-        return MessageDigest.isEqual(
-                expected.getBytes(StandardCharsets.UTF_8),
-                signatureHeader.trim().getBytes(StandardCharsets.UTF_8));
+        byte[] received = signatureHeader.trim().getBytes(StandardCharsets.UTF_8);
+        if (matches(rawBody, properties.webhookSecret(), received)) {
+            return true;
+        }
+        String previous = properties.webhookSecretPrevious();
+        return previous != null && !previous.isBlank() && matches(rawBody, previous, received);
+    }
+
+    private static boolean matches(byte[] rawBody, String secret, byte[] received) {
+        return MessageDigest.isEqual(hmacHex(rawBody, secret).getBytes(StandardCharsets.UTF_8), received);
     }
 
     private static String hmacHex(byte[] data, String secret) {

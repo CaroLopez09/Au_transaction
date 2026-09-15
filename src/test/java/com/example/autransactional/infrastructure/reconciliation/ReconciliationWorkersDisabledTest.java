@@ -24,5 +24,7 @@ class ReconciliationWorkersDisabledTest {
         assertTrue(context.getBeansOfType(LivenessReconciliationWorker.class).isEmpty());
         assertTrue(context.getBeansOfType(RfiReconciliationWorker.class).isEmpty());
         assertTrue(context.getBeansOfType(WebhookReprojectionWorker.class).isEmpty());
+        assertTrue(context.getBeansOfType(TenantReconciliationWorker.class).isEmpty());
+        assertTrue(context.getBeansOfType(VirtualAccountReconciliationWorker.class).isEmpty());
     }
 }

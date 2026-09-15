@@ -54,6 +54,10 @@ public class WebhookEventEntity {
     @Column(name = "resource_id", length = 100)
     private String resourceId;
 
+    /** Organizacion a la que se atribuyo el evento al proyectarlo; null si no se pudo. */
+    @Column(name = "tenant_id", length = 36)
+    private String tenantId;
+
     @Column(name = "normalized_status", length = 50)
     private String normalizedStatus;
 

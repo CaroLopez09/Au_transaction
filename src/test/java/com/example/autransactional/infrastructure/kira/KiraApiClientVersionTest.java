@@ -34,7 +34,7 @@ class KiraApiClientVersionTest {
         server = MockRestServiceServer.bindTo(builder).build();
 
         KiraProperties properties = new KiraProperties("https://kira.test", "key", "client", "pw",
-                "2026-04-14", "secret", 3600, 300, 5000, 30000, "slovak_savings_bank", true);
+                "2026-04-14", "secret", null, 3600, 300, 5000, 30000, "slovak_savings_bank", true);
         KiraCredentialManager credentials = mock(KiraCredentialManager.class);
         when(credentials.getAccessToken()).thenReturn("token");
         ObjectMapper mapper = new ObjectMapper();

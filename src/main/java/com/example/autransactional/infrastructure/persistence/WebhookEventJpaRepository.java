@@ -20,4 +20,7 @@ public interface WebhookEventJpaRepository extends JpaRepository<WebhookEventEnt
      * ocupen el lote para siempre y dejen sin sitio a los eventos nuevos.
      */
     List<WebhookEventEntity> findByProcessedFalseAndRetryCountLessThanOrderByCreatedAtAsc(int maxRetries);
+
+    List<WebhookEventEntity> findByTenantIdOrderByCreatedAtDesc(String tenantId,
+                                                                org.springframework.data.domain.Pageable page);
 }

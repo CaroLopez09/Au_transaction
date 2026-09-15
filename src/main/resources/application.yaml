@@ -31,6 +31,7 @@ kira:
   client-id: ${KIRA_CLIENT_ID:}
   password: ${KIRA_PASSWORD:}
   webhook-secret: ${KIRA_WEBHOOK_SECRET:}
+  webhook-secret-previous: ${KIRA_WEBHOOK_SECRET_PREVIOUS:}
   # Version documentada y recomendada para integrar. Se envia en cada peticion
   # mientras la cuenta no este fijada con POST /v1/versioning/upgrade.
   api-version: ${KIRA_API_VERSION:2026-04-14}
@@ -59,11 +60,15 @@ bff:
     rfis-ms: 900000           # RFIs abiertos de cada empresa registrada
     webhooks-ms: 1800000      # eventos almacenados con processed = false: se vuelven a proyectar
     webhook-batch: 50
+    tenants-ms: 1800000       # empresas registradas que aun no pueden operar (GET /v1/users/{id})
+    accounts-ms: 3600000      # cuentas abiertas: failed, deactivated y frozen no tienen webhook
 
   security:
     jwt-secret: ${BFF_JWT_SECRET:}
     jwt-issuer: ${BFF_JWT_ISSUER:autransactional-bff}
     token-expiration-ms: ${BFF_JWT_TTL_MS:28800000}
+    mfa-encryption-key: ${BFF_MFA_ENCRYPTION_KEY:}
+    mfa-enforced: ${BFF_MFA_ENFORCED:false}
 
 management:
   endpoints:

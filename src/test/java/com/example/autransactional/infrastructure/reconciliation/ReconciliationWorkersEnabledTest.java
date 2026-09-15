@@ -20,11 +20,13 @@ class ReconciliationWorkersEnabledTest {
     private ApplicationContext context;
 
     @Test
-    void losCincoWorkersSeRegistranCuandoLaReconciliacionEstaActiva() {
+    void losSieteWorkersSeRegistranCuandoLaReconciliacionEstaActiva() {
         assertEquals(1, context.getBeansOfType(PayoutReconciliationWorker.class).size());
         assertEquals(1, context.getBeansOfType(QuotationReconciliationWorker.class).size());
         assertEquals(1, context.getBeansOfType(LivenessReconciliationWorker.class).size());
         assertEquals(1, context.getBeansOfType(RfiReconciliationWorker.class).size());
         assertEquals(1, context.getBeansOfType(WebhookReprojectionWorker.class).size());
+        assertEquals(1, context.getBeansOfType(TenantReconciliationWorker.class).size());
+        assertEquals(1, context.getBeansOfType(VirtualAccountReconciliationWorker.class).size());
     }
 }

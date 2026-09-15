@@ -55,7 +55,7 @@ class OpenVirtualAccountServiceTest {
 
     private KiraProperties properties(String bank, boolean sandbox) {
         return new KiraProperties("https://api.balampay.com/sandbox", "k", "c", "p", "2026-04-14",
-                "w", 3600, 300, 5000, 30000, bank, sandbox);
+                "w", null, 3600, 300, 5000, 30000, bank, sandbox);
     }
 
     @BeforeEach

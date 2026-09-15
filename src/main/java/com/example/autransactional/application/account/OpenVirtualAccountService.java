@@ -146,6 +146,23 @@ public class OpenVirtualAccountService {
     }
 
     /**
+     * Relee la cuenta sin operador, para el worker de reconciliacion: failed y deactivated no
+     * tienen webhook propio y frozen tampoco, asi que solo se ven consultando el recurso.
+     * Devuelve true si cambio el estado o la disponibilidad de fondos.
+     */
+    @Transactional
+    public boolean reconcile(VirtualAccount account) {
+        if (!account.isOpenInKira()) {
+            return false;
+        }
+        VirtualAccountStatus antes = account.getStatus();
+        boolean fondosAntes = account.isFundsReady();
+        applyRemote(account, kira.getVirtualAccount(account.getKiraAccountId()));
+        accounts.save(account);
+        return antes != account.getStatus() || fondosAntes != account.isFundsReady();
+    }
+
+    /**
      * Refresca el saldo.
      *
      * Durante la activacion, GET /balance puede responder 400: eso no es un fallo sino

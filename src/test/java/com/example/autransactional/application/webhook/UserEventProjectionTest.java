@@ -41,6 +41,8 @@ class UserEventProjectionTest {
     private final VirtualAccountRepository accounts = mock(VirtualAccountRepository.class);
     private final RecordDepositService deposits = mock(RecordDepositService.class);
     private final AnswerRfiService rfis = mock(AnswerRfiService.class);
+    private final com.example.autransactional.application.notification.NotificationService notifications =
+            mock(com.example.autransactional.application.notification.NotificationService.class);
 
     private ProcessWebhookUseCase useCase;
     private Tenant empresa;
@@ -57,7 +59,7 @@ class UserEventProjectionTest {
         when(tenants.save(any())).thenAnswer(i -> i.getArgument(0));
 
         useCase = new ProcessWebhookUseCase(events, payouts, tenants, accounts, deposits, ubos,
-                rfis, new ObjectMapper());
+                rfis, new ObjectMapper(), notifications);
     }
 
     private void procesar(String json) throws Exception {
@@ -74,6 +76,80 @@ class UserEventProjectionTest {
 
         assertEquals(TenantStatus.REJECTED, empresa.getStatus());
         assertEquals("Documento de constitucion ilegible", empresa.getRejectionReason());
+    }
+
+    // --- Payloads copiados de docs.kirafin.ai/webhooks/notification-examples (15-sep) ---
+
+    @Test
+    void docs_verificationFailedGuardaLosReasons() throws Exception {
+        procesar("""
+                { "event": "user.verification.failed",
+                  "data": { "event_id": "9a8b7c60-1d2e-4f30-8a4b-5c6d7e8f9a0b", "user_id": "usr_1",
+                            "verification_status": "rejected",
+                            "reasons": ["Verification session expired", "Document unreadable"] } }
+                """);
+
+        assertEquals(TenantStatus.REJECTED, empresa.getStatus());
+        assertEquals("Verification session expired; Document unreadable", empresa.getRejectionReason());
+    }
+
+    @Test
+    void docs_statusChangedMueveElEstadoConNewStatus() throws Exception {
+        procesar("""
+                { "event": "user.status_changed",
+                  "data": { "event_id": "8c2b1d40-5e6f-4a7b-9c8d-2e3f4a5b6c7d", "user_id": "usr_1",
+                            "previous_status": "CREATED", "new_status": "VERIFYING" } }
+                """);
+
+        assertEquals(TenantStatus.VERIFYING, empresa.getStatus());
+        verify(tenants).save(empresa);
+    }
+
+    @Test
+    void unaEmpresaVerificadaGeneraUnAvisoYElEventoQuedaAtribuido() throws Exception {
+        procesar("""
+                { "event": "user.status_changed",
+                  "data": { "event_id": "e-aviso", "user_id": "usr_1", "previous_status": "REVIEW", "new_status": "VERIFIED" } }
+                """);
+
+        verify(notifications).notify(eq(empresa.getId()), eq("onboarding.verified"), eq("success"), anyString(),
+                anyString(), eq("tenant"), eq("juriscop"));
+        ArgumentCaptor<WebhookEventEntity> stored = ArgumentCaptor.forClass(WebhookEventEntity.class);
+        verify(events).save(stored.capture());
+        assertEquals("juriscop", stored.getValue().getTenantId());
+    }
+
+    @Test
+    void unEventoQueNoCambiaElEstadoNoAvisa() throws Exception {
+        empresa.applyRemoteState(TenantStatus.VERIFIED, null, null, true);
+        procesar("""
+                { "event": "user.status_changed",
+                  "data": { "event_id": "e-igual", "user_id": "usr_1", "new_status": "VERIFIED" } }
+                """);
+
+        verify(notifications, never()).notify(any(), anyString(), anyString(), anyString(), any(), any(), any());
+    }
+
+    @Test
+    void docs_livenessCompletedLeeResult() throws Exception {
+        procesar("""
+                { "event": "user.liveness_completed",
+                  "data": { "event_id": "5b6c7d80-9e0f-4a1b-8c2d-3e4f5a6b7c8d", "user_id": "usr_1",
+                            "person_reference_id": "0123456789abcdef0123456789abcdef", "result": "approved" } }
+                """);
+
+        verify(ubos).applyLivenessResult("0123456789abcdef0123456789abcdef", LivenessStatus.COMPLETED);
+    }
+
+    @Test
+    void docs_livenessDeLaPropiaEmpresaNoTocaBeneficiarios() throws Exception {
+        procesar("""
+                { "event": "user.liveness_completed",
+                  "data": { "event_id": "e-liv-empresa", "user_id": "usr_1",
+                            "person_reference_id": null, "result": "approved" } }
+                """);
+
+        verify(ubos, never()).applyLivenessResult(any(), any());
     }
 
     @Test

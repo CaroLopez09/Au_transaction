@@ -12,6 +12,8 @@ public record KiraProperties(
         /* Version documentada y recomendada por Kira para integrar. */
         @DefaultValue("2026-04-14") String apiVersion,
         String webhookSecret,
+        /* Solo durante la rotacion del secreto de firma: Kira firma con el anterior cerca de un minuto. */
+        String webhookSecretPrevious,
         @DefaultValue("3600") long tokenTtlSeconds,
         @DefaultValue("300") long tokenRefreshMarginSeconds,
         @DefaultValue("5000") int connectTimeoutMs,

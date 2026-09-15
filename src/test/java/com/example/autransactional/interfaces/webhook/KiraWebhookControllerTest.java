@@ -94,4 +94,29 @@ class KiraWebhookControllerTest {
                 .count();
         assertEquals(1, almacenados, "tres entregas del mismo data.event_id deben dejar una sola fila");
     }
+
+    @Test
+    void elEventoYaEstaGuardadoCuandoSeResponde200() throws Exception {
+        // Guardar antes del 2xx: si la app cae despues de responder, el evento no se pierde.
+        String body = evento("evt-5");
+
+        mockMvc.perform(post("/api/webhooks/kira")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header(KiraWebhookVerifier.SIGNATURE_HEADER, sign(body))
+                        .content(body))
+                .andExpect(status().isOk());
+
+        assertTrue(events.existsByEventId("evt-5"), "la fila debe existir al recibir la respuesta, sin esperar");
+    }
+
+    @Test
+    void unJsonIlegibleConFirmaValidaDa400() throws Exception {
+        String body = "{no es json";
+
+        mockMvc.perform(post("/api/webhooks/kira")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header(KiraWebhookVerifier.SIGNATURE_HEADER, sign(body))
+                        .content(body))
+                .andExpect(status().isBadRequest());
+    }
 }

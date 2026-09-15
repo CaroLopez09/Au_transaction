@@ -12,7 +12,7 @@ class RequiredSecretsValidatorTest {
 
     private KiraProperties kira(String apiKey, String clientId, String password, String webhookSecret) {
         return new KiraProperties("https://api.balampay.com", apiKey, clientId, password,
-                "2026-04-14", webhookSecret, 3600, 300, 5000, 30000, "slovak_savings_bank", true);
+                "2026-04-14", webhookSecret, null, 3600, 300, 5000, 30000, "slovak_savings_bank", true);
     }
 
     private RequiredSecretsValidator validator(KiraProperties kira, String jwtSecret) {

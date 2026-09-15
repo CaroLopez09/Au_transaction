@@ -51,8 +51,17 @@ public class OperatorUserEntity {
     @Column(nullable = false, length = 50)
     private UserStatus status = UserStatus.ACTIVE;
 
-    @Column(name = "mfa_secret", length = 100)
+    /** Secreto TOTP cifrado con AES-GCM (MfaSecretCipher). */
+    @Column(name = "mfa_secret", length = 255)
     private String mfaSecret;
+
+    /** Avisos creados despues de este instante cuentan como no leidos para este usuario. */
+    @Column(name = "notifications_seen_at")
+    private Instant notificationsSeenAt;
+
+    /** false mientras el secreto esta pendiente de confirmar con un primer codigo. */
+    @Column(name = "mfa_enabled", nullable = false)
+    private boolean mfaEnabled = false;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();

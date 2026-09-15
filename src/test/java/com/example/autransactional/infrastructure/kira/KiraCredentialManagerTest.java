@@ -15,7 +15,7 @@ class KiraCredentialManagerTest {
 
     private KiraCredentialManager manager(String apiKey, String clientId, String password) {
         KiraProperties properties = new KiraProperties("https://kira.test", apiKey, clientId, password,
-                "2026-04-14", null, 3600, 300, 5000, 30000, "slovak_savings_bank", true);
+                "2026-04-14", null, null, 3600, 300, 5000, 30000, "slovak_savings_bank", true);
         ObjectMapper mapper = new ObjectMapper();
         return new KiraCredentialManager(RestClient.create(), properties, new KiraErrorParser(mapper),
                 Caffeine.newBuilder().build(), mapper);

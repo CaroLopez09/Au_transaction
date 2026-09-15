@@ -3,6 +3,7 @@ package com.example.autransactional.interfaces.webhook;
 import com.example.autransactional.application.webhook.ProcessWebhookUseCase;
 import com.example.autransactional.infrastructure.kira.KiraWebhookVerifier;
 import org.slf4j.Logger;
+import tools.jackson.core.JacksonException;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -16,18 +17,19 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Ingress de eventos de Kira.
  *
- * Kira entrega una sola vez, sin reintentos, y aborta a los 30 segundos. Por eso este
- * controlador solo hace dos cosas: verificar la firma sobre los bytes crudos y encolar.
- * Todo lo demas ocurre despues de haber respondido.
+ * Kira corta a los 30 segundos y reintenta 4 veces (1, 5, 15 y 60 min) ante 408, 429, 5xx
+ * o falta de respuesta. Por eso este controlador solo verifica la firma sobre los bytes
+ * crudos y guarda el evento; la proyeccion ocurre despues de haber respondido.
  *
- * Se responde 2xx incluso ante un evento desconocido: un 4xx no provoca reintento, solo
- * pierde el evento.
+ * Se responde 2xx incluso ante un evento desconocido: un 4xx es la unica respuesta que Kira
+ * no reintenta, asi que solo serviria para perder el evento.
  */
-@Tag(name = "6. Webhooks de Kira", description = "Ingress firmado con HMAC. Entrega unica, sin reintentos.")
+@Tag(name = "6. Webhooks de Kira", description = "Ingress firmado con HMAC. Kira reintenta 4 veces ante 5xx o timeout.")
 @RestController
 @RequestMapping("/api/webhooks")
 public class KiraWebhookController {
@@ -61,8 +63,18 @@ public class KiraWebhookController {
         }
 
         // Se convierte a texto solo despues de validar la firma sobre los bytes originales.
-        processWebhook.enqueue(new String(rawBody, StandardCharsets.UTF_8));
+        String payload = new String(rawBody, StandardCharsets.UTF_8);
+        Optional<String> storedId;
+        try {
+            // Se guarda ANTES de responder: si la base falla sale un 5xx y Kira reintenta.
+            storedId = processWebhook.record(payload);
+        } catch (JacksonException malformed) {
+            // Firmado pero ilegible: reintentarlo daria lo mismo, y un 4xx es lo unico que Kira no reintenta.
+            log.error("Webhook con firma valida pero JSON ilegible ({} bytes).", rawBody.length);
+            return ResponseEntity.badRequest().body(Map.of("error", "invalid_json"));
+        }
+        storedId.ifPresent(processWebhook::projectLater);
 
-        return ResponseEntity.ok(Map.of("status", "received"));
+        return ResponseEntity.ok(Map.of("status", storedId.isPresent() ? "received" : "duplicate"));
     }
 }
