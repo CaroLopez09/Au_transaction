@@ -1,7 +1,7 @@
 # Estado del proyecto
 
 **Fecha:** 15 de septiembre de 2026
-**Build:** `Tests run: 383, Failures: 0, Errors: 0` — BUILD SUCCESS
+**Build:** `Tests run: 400, Failures: 0, Errors: 0` — BUILD SUCCESS
 **Rama:** `develop` (se sube a GitHub por SSH) · `main`, `certificacion` y `produccion` detrás
 
 > Arquitectura: [`ARQUITECTURA.md`](ARQUITECTURA.md) · Contrato HTTP: [`API-GUIA.md`](API-GUIA.md) · Pruebas con Bruno: [`GUIA-BRUNO.md`](GUIA-BRUNO.md)
@@ -13,12 +13,12 @@
 ```bash
 cd ~/Documentos/AuTransactional
 git status                                   # rama develop
-./mvnw clean test                            # 383 verdes
+./mvnw clean test                            # 400 verdes
 ./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"   # los secretos salen de .env (§3.7)
 ```
 
 Colección de Bruno: `docs/bruno/AuTransactional/`. Última pasada completa contra el sandbox
-(15-sep, noche): **103/103 peticiones, 66/66 tests**.
+(15-sep, noche, tras los P1): **104/104 peticiones, 67/67 tests**.
 
 **Antes de tocar un flujo de Kira, verificar su contrato en la documentación oficial**
 (`https://docs.kirafin.ai/api-reference-2026-06-01/…`), no sólo en
@@ -320,6 +320,20 @@ las credenciales de Kira y el despliegue a cert (§4.8).
 **Cifras:** BFF **383** pruebas · front unitarias verdes, lint limpio, **E2E 33/33** (1 omitida)
 · Bruno **103/103, 66/66** contra el sandbox.
 
+### 3.15 P1 de la entrega *(15-sep, noche)*
+
+| P1 | Qué cambió |
+|---|---|
+| **Tipo real de los archivos** | `FileSignature` compara la firma de los primeros bytes con el tipo declarado (PDF, PNG, JPEG, WebP, HEIC) en documentos KYB, archivos de RFI y soportes de pago. Un ejecutable renombrado a `.pdf` se rechaza antes de llamar a Kira |
+| **D5** EIN | `PUT /api/onboarding` rechaza `ein` si `formation_country` no es `USA` (Kira: *do NOT send for non-US businesses*). Front: la carta de EIN solo se ofrece a empresas de EE. UU. |
+| **Límites y segregación** | `bff.payouts.approval`: umbral general (`BFF_DUAL_APPROVAL_THRESHOLD`, **10.000 por defecto, sin confirmar con negocio**) y por empresa. Desde el umbral, dos aprobadores distintos; la primera firma no envía el pago. Quien registró un destinatario no aprueba pagos hacia él. DDL en §7 |
+| **D9** recotizar | `POST /api/payouts/{id}/requote`: cotización nueva con el mismo importe cuando la anterior venció esperando aprobación; anula una primera firma. Front: «Recotizar» en el detalle del pago |
+| **Observabilidad** | `X-Request-Id` en respuesta, logs y auditoría; métricas `kira.api.requests`, `kira.webhooks.received`, `kira.webhooks.projection.failures`; `/actuator/metrics` solo para `PLATFORM_OPERATOR`. Front: «Código para soporte» en los errores. **Sin dependencia nueva**: exportar a Prometheus u OTLP queda por decidir |
+| **Documentación** | `ARQUITECTURA.md`, `API-GUIA.md` §5.4, cabecera y deudas de `DOCUMENTACION-CODIGO.md` (sus anexos siguen siendo del 11-sep), documentos del front |
+
+**Cifras:** BFF **400** pruebas · front **155** unitarias, lint limpio, **E2E 33/33** · Bruno
+**104/104, 67/67** contra el sandbox.
+
 ---
 
 ## 4. Qué falta
@@ -328,7 +342,8 @@ las credenciales de Kira y el despliegue a cert (§4.8).
 
 1. Aplicar el SQL de §7 (no hay Flyway y cert/prod validan el esquema).
 2. Variables: `BFF_MFA_ENCRYPTION_KEY` (obligatoria), `BFF_TERMS_VERSION` y `BFF_TERMS_URL`
-   (la versión real de AU), `KIRA_WEBHOOK_SECRET` y credenciales de Kira **rotadas**.
+   (la versión real de AU), `BFF_DUAL_APPROVAL_THRESHOLD` (el límite que decida negocio),
+   `KIRA_WEBHOOK_SECRET` y credenciales de Kira **rotadas**.
 3. `KIRA_BANK` y `KIRA_API_VERSION`: no definirlas (valen `jp_morgan` y `2026-06-01`). Si el
    entorno arrastra `slovak_savings_bank`, `portage` o `2026-04-14`, el BFF no arranca.
 4. Pedir a Kira la suscripción a `rfi.*` y fijar la cuenta a `2026-06-01`
@@ -568,6 +583,6 @@ class TempDdlDumpTest { @Test void dump() {} }
 
 | | |
 |---|---|
-| Pruebas | 383 |
-| Endpoints REST | 68 operaciones |
-| Colección Bruno | 103 peticiones en 13 carpetas |
+| Pruebas | 400 |
+| Endpoints REST | 69 operaciones |
+| Colección Bruno | 104 peticiones en 13 carpetas |

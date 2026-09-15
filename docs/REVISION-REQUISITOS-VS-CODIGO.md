@@ -247,12 +247,12 @@ Estimación con 7,5 h/día (6,5 los viernes).
 | ~~P0~~ | ~~D4 consentimiento + `tos_accepted_version`~~ | **Hecho 15-sep;** falta la versión real de los términos | — |
 | ~~P0~~ | ~~G-09 `@PreAuthorize` en refrescos + auditar descarga de documentos RFI~~ | **Hecho 15-sep** | — |
 | **P0** | DDL §7 en cert y `BFF_MFA_ENCRYPTION_KEY`; rotar credenciales | Despliegue | 0,5 d |
-| **P1** | Observabilidad mínima: Micrometer/Prometheus, `X-Request-Id` en MDC y en `audit_log`, métricas de webhooks y latencia de Kira | ARQ §5, operación en producción | 2 d |
-| **P1** | Validación de MIME real (firma de bytes) en KYB y RFI | ARQ §7 | 0,5 d |
-| **P1** | D9 recotizar al aprobar | Evita pagos fallidos | 1 d |
-| **P1** | D5 `ein` condicional | Evita rechazos | 0,5 d |
-| **P1** | Límites por monto por empresa (umbral en configuración → segunda firma) + segregación destinatario/aprobador | ARQ §5 y §7 | 2,5 d |
-| **P1** | Documentación desfasada (§8) | Entrega | 1 d |
+| ~~P1~~ | ~~Observabilidad mínima: Micrometer/Prometheus, `X-Request-Id` en MDC y en `audit_log`, métricas de webhooks y latencia de Kira~~ | **Hecho 15-sep (sin exportador)** | — |
+| ~~P1~~ | ~~Validación de MIME real (firma de bytes) en KYB y RFI~~ | **Hecho 15-sep** | — |
+| ~~P1~~ | ~~D9 recotizar al aprobar~~ | **Hecho 15-sep** | — |
+| ~~P1~~ | ~~D5 `ein` condicional~~ | **Hecho 15-sep** | — |
+| ~~P1~~ | ~~Límites por monto por empresa (umbral en configuración → segunda firma) + segregación destinatario/aprobador~~ | **Hecho 15-sep** | — |
+| ~~P1~~ | ~~Documentación desfasada (§8)~~ | **Hecho 15-sep (anexos de DOCUMENTACION-CODIGO pendientes)** | — |
 | ~~P2~~ | ~~Instrucciones cripto (G-19)~~ | **Fuera de alcance:** el piloto no usa cripto (15-sep) | — |
 | **P2** | Administración de operadores (G-13) | Hoy se dan de alta por semilla o SQL | 2 d |
 | **P2** | Paginación y filtros de servidor (G-14), exportación de auditoría | Volumen | 1,5 d |
@@ -261,9 +261,8 @@ Estimación con 7,5 h/día (6,5 los viernes).
 **Total P0 + P1 ≈ 12 días**, de unos 21 hábiles hasta el 15-oct. Deja margen para las pruebas en
 cert, las respuestas de Kira y un P2 (cripto u operadores, según lo que confirme el cliente).
 
-### Decisiones que necesito de Carolina
+### Decisiones de Carolina *(15-sep)*
 
-1. ¿El piloto usa pagos cripto? Si sí, G-19 pasa a P1.
-2. ¿Los límites por monto son por empresa y fijos en configuración, o necesitan pantalla?
-3. ¿Antimalware se resuelve en infraestructura (por ejemplo ClamAV en el despliegue) o queda como
-   deuda declarada?
+1. Sin pagos cripto: G-19 fuera de alcance.
+2. Límites por monto fijos en configuración por empresa (hechos; falta el valor real del umbral).
+3. Antimalware: sin decidir (el tipo real de los archivos ya se comprueba).

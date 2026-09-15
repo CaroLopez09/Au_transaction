@@ -125,8 +125,10 @@ cuenta) son cifras distintas y ambas se guardan.
 precio mostrado al tesorero es el que se cobró.
 
 ### `Payout` (domain/treasury)
-Concentra el **maker-checker** que Kira no ofrece. `approve()` rechaza que el creador sea el
-aprobador y que la cotización esté vencida. `grossAmountToSend()` resuelve la regla que más
+Concentra el **maker-checker** que Kira no ofrece. `approve()` rechaza que el creador o quien
+registró el destinatario sea el aprobador y que la cotización esté vencida; con dos firmas
+requeridas, la primera deja el pago pendiente y la segunda tiene que ser de otra persona.
+`replaceQuotation()` renueva una cotización vencida y anula la primera firma. `grossAmountToSend()` resuelve la regla que más
 dinero puede costar: Kira **descuenta** las comisiones del monto enviado.
 
 ### `Rfi` (domain/compliance)
@@ -234,15 +236,30 @@ constante Java que usan `@PreAuthorize` y el JWT.
 | `tesoreria_maker` | `TREASURY_MAKER` | destinatarios, cotizar, preparar pagos |
 | `tesoreria_approver` | `TREASURY_APPROVER` | aprobar / rechazar pagos |
 | `compliance_internal` | `COMPLIANCE_INTERNAL` | KYB, UBOs, liveness, RFIs |
-| `read_only` | `READ_ONLY` | sólo lectura |
+| `read_only` | `READ_ONLY` | sólo lectura (sin consultas que gasten cuota de Kira) |
+| `platform_operator` | `PLATFORM_OPERATOR` | consola multiempresa de solo lectura y métricas; sin empresa (`TenantId.PLATFORM`) |
 
 - **JWT propio del BFF** (HMAC256, 8 h). El token de Kira nunca sale del servidor.
+- **Verificación en dos pasos (TOTP, RFC 6238)**: con MFA, el login devuelve un reto de 5 min
+  que no vale como sesión y `/api/auth/mfa/verify` lo canjea. El secreto se guarda cifrado con
+  AES-256-GCM (`BFF_MFA_ENCRYPTION_KEY`). Obligatoria en cert y prod (`BFF_MFA_ENFORCED`).
+- **Segregación de funciones en pagos**: quien crea no aprueba, quien registró el destinatario
+  no aprueba pagos hacia él, y desde el umbral de la empresa (`bff.payouts.approval`) hacen falta
+  dos aprobadores distintos.
+- **Consentimientos auditados**: aceptación de términos (`tos_accepted_version`) y consentimiento
+  biométrico antes de una selfie o un enlace de prueba de vida.
+- **Archivos**: el tipo se comprueba por la firma de los primeros bytes (`FileSignature`), no por
+  el que declara el navegador.
 - `JwtTenantFilter` fija el tenant en un `ThreadLocal` y **siempre lo limpia en un
   `finally`**: sin eso, el siguiente request reutiliza el hilo del pool y hereda el tenant
   equivocado.
 - Toda consulta filtra por tenant **dentro del query**, no después: un id manipulado no
   cruza organizaciones.
-- Endpoints públicos: `/api/auth/login`, `/api/webhooks/**` (HMAC), `/actuator/health` y Swagger.
+- Endpoints públicos: `/api/auth/login`, los pasos de MFA del login, `/api/webhooks/**` (HMAC),
+  `/actuator/health` y Swagger. El resto de `/actuator/**` es solo para `PLATFORM_OPERATOR`.
+- **Correlación**: `RequestIdFilter` pone `X-Request-Id` en cada respuesta, en cada línea de log
+  y en la auditoría. Métricas de la integración: `kira.api.requests`, `kira.webhooks.received`,
+  `kira.webhooks.projection.failures` (API-GUIA §5.4).
 - **Ids del portal hacia fuera, ids de Kira hacia dentro.** El front sólo ve ids del BFF; los
   servicios los resuelven dentro de la empresa del operador y los traducen a `kiraAccountId`,
   `kiraRecipientId` o `kiraUserId` justo antes de llamar. Un id de otra empresa no existe.
@@ -256,13 +273,17 @@ constante Java que usan `@PreAuthorize` y el JWT.
 
 ## 7. Webhooks
 
-Kira entrega **una sola vez, sin reintentos**, y aborta a los 30 s. El controlador sólo
-verifica la firma HMAC sobre los **bytes crudos** y encola; todo lo demás ocurre después de
-responder `2xx`. Un `4xx` no provoca reintento, sólo pierde el evento.
+Kira aborta a los 30 s y **reintenta 4 veces** (1, 5, 15 y 60 min) ante `408`, `429`, `5xx`
+o falta de respuesta; un `4xx` no se reintenta. Por eso el controlador verifica la firma HMAC
+sobre los **bytes crudos**, **guarda el evento antes de responder** `2xx` (si la base falla sale
+un `5xx` y Kira reintenta) y proyecta después, en otro hilo. Durante la rotación del secreto se
+acepta también el anterior (`KIRA_WEBHOOK_SECRET_PREVIOUS`). Los eventos que no se proyectan los
+retoma `WebhookReprojectionWorker`, y los workers de reconciliación releen empresas, cuentas,
+pagos y RFIs por si un evento se perdió del todo.
 
 La idempotencia se apoya en `UNIQUE(event_id)` en `webhooks_log`.
 
-**Cuatro eventos son la única fuente de su dato.** Si se pierden, no se recuperan:
+**Cuatro eventos son la única fuente de su dato.** Si se pierden tras los reintentos, no se recuperan:
 
 | Evento | Qué proyecta | Por qué no hay alternativa |
 |---|---|---|

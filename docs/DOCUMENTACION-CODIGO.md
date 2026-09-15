@@ -1,7 +1,15 @@
 # AuTransactional BFF — Documentación técnica del código
 
-**Fecha:** 11 de septiembre de 2026 · **Rama:** `main` (commit base `ed853d3` + cambios sin commitear de `percentage_fee`)
-**Stack:** Java 21 · Spring Boot 4.1.1 · MySQL 8 · Maven · **169 clases de producción (11.697 líneas)** · **40 clases de prueba, 283 pruebas**
+**Fecha:** 11 de septiembre de 2026, con correcciones del 15-sep · **Rama:** `develop`
+**Stack:** Java 21 · Spring Boot 4.1.1 · MySQL 8 · Maven · **194 ficheros de producción (15.123 líneas)** · **51 ficheros de prueba, 400 pruebas**
+
+> ⚠️ **Lo que cambió después del 11-sep no está en los anexos A–C** (generados ese día). Las piezas
+> nuevas y dónde se describen: verificación en dos pasos TOTP, avisos, centro de eventos, auditoría
+> y consola de operaciones (`ESTADO.md` §3.13, `API-GUIA.md` §5); alineación con Kira, versión
+> única `2026-06-01` y banco `jp_morgan` (`ESTADO.md` §3.11–§3.14, `REVISION-DOCS-KIRA.md`);
+> términos y consentimiento biométrico, doble firma por límite, recotización, tipo real de los
+> archivos y observabilidad (`ESTADO.md` §3.14–§3.15, `API-GUIA.md` §5.4). Visión de conjunto
+> actualizada: `ARQUITECTURA.md`.
 
 Este documento describe **todo** el código del repositorio: arquitectura, configuración, seguridad,
 integración con Kira, dominio, casos de uso, API, webhooks, persistencia, errores, auditoría y pruebas.
@@ -373,7 +381,9 @@ el servicio (`DomainException` → 422). Matriz completa por endpoint en §10.
 4. Carga la empresa y `Tenant.assertActive()` (una empresa `REJECTED` no opera).
 5. Devuelve `LoginResult(accessToken, expiresIn, email, role, tenantId, tenantName)`.
 
-La columna `users.mfa_secret` existe pero **no hay MFA implementado**.
+**Desde el 15-sep hay MFA TOTP**: si el operador lo tiene activo (o es obligatorio), el paso 5
+devuelve un reto de 5 min en lugar de la sesión y `/api/auth/mfa/verify` lo canjea. El secreto se
+guarda cifrado (AES-256-GCM) en `users.mfa_secret`. Detalle en `API-GUIA.md` §5.1.
 
 ### 6.7 Webhooks (HMAC)
 
@@ -1245,8 +1255,8 @@ Hallazgos verificados en el código el 11-sep-2026 que siguen abiertos.
 |---|---|---|
 | D1 | Casos de uso dependen de `infrastructure` | `KiraApiClient` (devuelve `JsonNode`), `AuditTrail`, `AuthenticatedOperator` en `application`. Lo limpio sería un puerto `KiraGateway` |
 | D2 | `TenantContext` sin lectores | El filtro lo fija y limpia, pero ningún servicio lo usa (usan `operator.tenantId()`) |
-| D3 | Falta el worker de eventos no proyectados | §12.6; los otros cuatro están implementados |
-| D4 | MFA sin implementar | Existe `users.mfa_secret` |
+| D3 | ~~Falta el worker de eventos no proyectados~~ | Resuelto: `WebhookReprojectionWorker` (11-sep) |
+| D4 | ~~MFA sin implementar~~ | Resuelto: TOTP con secreto cifrado (15-sep) |
 | D5 | Sin gestión de operadores | Los usuarios sólo entran por la semilla de dev |
 | D6 | `idx_payouts_idempotency` redundante | Duplica el índice de `uk_payouts_idempotency` |
 | D7 | Límites aplicados en memoria | Los adaptadores leen todas las filas de la empresa y cortan con `limit` |
