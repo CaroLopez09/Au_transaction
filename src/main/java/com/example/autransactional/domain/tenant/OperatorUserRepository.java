@@ -15,4 +15,13 @@ public interface OperatorUserRepository {
 
     /** Guarda el secreto TOTP ya cifrado y si esta activo. Un secreto nulo quita el segundo factor. */
     void updateMfa(String userId, String encryptedSecret, boolean enabled);
+
+    /** true si el correo ya esta tomado: la tabla `users` lo exige unico en toda la plataforma. */
+    boolean existsByEmail(String email);
+
+    /** Alta de un operador humano de una empresa. El hash de la contrasena llega ya calculado. */
+    OperatorUser create(OperatorUser user);
+
+    /** Cambia el estado de la cuenta (alta, suspension o baja). */
+    void updateStatus(String userId, UserStatus status);
 }

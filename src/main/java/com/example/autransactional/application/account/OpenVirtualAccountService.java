@@ -89,14 +89,23 @@ public class OpenVirtualAccountService {
                     + "KYB y los campos pendientes del producto.");
         }
 
-        VirtualAccount account = new VirtualAccount(
-                UUID.randomUUID().toString(),
-                operator.tenantId(),
-                command.currency() == null || command.currency().isBlank() ? "USD" : command.currency(),
-                VirtualAccountMode.from(command.mode()),
-                properties.bank(),
-                command.description());
+        String currency = command.currency() == null || command.currency().isBlank()
+                ? "USD" : command.currency();
+        VirtualAccountMode mode = VirtualAccountMode.from(command.mode());
 
+        // G-23: si un intento anterior dejo una apertura sin confirmar, se retoma esa fila en vez
+        // de crear otra. Asi el reintento viaja con la MISMA clave de idempotencia y la empresa
+        // no acumula cuentas huerfanas cada vez que Kira falla.
+        VirtualAccount account = pendingOpening(operator.tenantId(), currency, mode)
+                .orElseGet(() -> new VirtualAccount(
+                        UUID.randomUUID().toString(),
+                        operator.tenantId(),
+                        currency,
+                        mode,
+                        properties.bank(),
+                        command.description()));
+
+        // reserveOpeningKey no la regenera si ya existe: la cuenta retomada conserva la suya.
         IdempotencyKey key = account.reserveOpeningKey();
         // En transaccion propia: si Kira falla, el rollback de este metodo no puede borrar la clave.
         idempotencyKeys.persistNow(account);
@@ -261,6 +270,15 @@ public class OpenVirtualAccountService {
         if (!account.isOpenInKira()) {
             throw new DomainException("La cuenta virtual todavia no esta abierta en Kira.");
         }
+    }
+
+    /** Apertura previa de la misma empresa, moneda y modalidad que Kira nunca confirmo (G-23). */
+    private java.util.Optional<VirtualAccount> pendingOpening(TenantId tenantId, String currency,
+                                                              VirtualAccountMode mode) {
+        return accounts.findByTenant(tenantId).stream()
+                .filter(VirtualAccount::isOpeningUnconfirmed)
+                .filter(a -> a.matches(currency, mode))
+                .findFirst();
     }
 
     private VirtualAccount load(TenantId tenantId, String accountId) {

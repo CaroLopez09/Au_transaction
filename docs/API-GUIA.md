@@ -141,7 +141,7 @@ Todas las respuestas de error tienen la misma forma (`RestExceptionHandler`):
 | Regla de negocio (credenciales, rol, pago no encontrado) | 422 | `business_rule_violation` |
 | Validación de campos | 400 | `validation_error` (+ `details`) |
 | Sin permiso / rol insuficiente | 403 | `forbidden` |
-| Sin cabecera `Authorization` | 403 | *(cuerpo vacío)* |
+| Sin cabecera `Authorization` | 401 | `unauthorized` *(16-sep: antes era un 403 con el cuerpo vacío)* |
 | Token inválido o caducado | 401 | `unauthorized` |
 | Respuestas de RFI inválidas | 422 | `rfi_answer_rejected` (+ `details` por `item_id`) |
 | Parámetro o parte multipart ausente, JSON ilegible | 400 | `validation_error` |
@@ -515,6 +515,13 @@ devuelve `readyForVirtualAccounts` en `GET /api/onboarding`.
 
 Si Kira responde `409` (ya existía una cuenta para ese user), **se reutiliza la existente**
 y se devuelve `201` con sus datos: no es un error.
+
+**Reintento de una apertura fallida *(16-sep)*.** Si una llamada anterior reservó la cuenta pero
+Kira nunca la confirmó (fila local en `PENDING` y sin `kiraAccountId`), una petición nueva con la
+misma moneda y la misma modalidad **retoma esa fila y su clave de idempotencia** en vez de crear
+otra. Así, si lo que se perdió fue la respuesta y la cuenta sí existía en Kira, el reintento no
+abre una segunda; y la empresa no acumula cuentas huérfanas cada vez que Kira falla. Una
+combinación distinta de moneda o modalidad sí abre una cuenta nueva.
 
 #### Respuesta (`VirtualAccountView`)
 
@@ -1480,3 +1487,57 @@ cada línea de log de esa petición y como `requestId` en el detalle de la audit
 Además están las métricas estándar de Spring (`http.server.requests`, JVM, pool de base de datos).
 Para enviarlas a un sistema de monitoreo (Prometheus, OTLP…) falta elegir el registro y añadir su
 dependencia: es una decisión de despliegue, no está hecha.
+
+### 5.5 Operadores de la empresa — `/api/operators` *(16-sep)*
+
+Hasta ahora los usuarios sólo entraban por la semilla de `dev` o por SQL. Éste es el único camino
+para darlos de alta desde el portal. **El alcance es siempre la empresa de la sesión:** no hay ruta
+para ver ni tocar los operadores de otra organización, ni indicando su id. Un `PLATFORM_OPERATOR`
+recibe `422` aquí: sus rutas son las de la consola (§5.3).
+
+| Método | Ruta | Rol |
+|---|---|---|
+| `GET` | `/api/operators` | `ADMIN`, `COMPLIANCE_INTERNAL` — cumplimiento necesita saber quién firma cada operación |
+| `POST` | `/api/operators` | `ADMIN` |
+| `DELETE` | `/api/operators/{id}` | `ADMIN` — desactiva, no borra |
+
+#### `POST /api/operators`
+
+```json
+{ "email": "tesoreria.maker@juriscop.test", "firstName": "Ana", "lastName": "Ruiz",
+  "password": "una-clave-de-12-o-mas", "role": "TREASURY_MAKER" }
+```
+
+El `role` viaja como el nombre de la constante (`TREASURY_MAKER`, no `tesoreria_maker`): es lo
+mismo que el portal ya recibe en el JWT y en `/api/auth/me`. **La empresa no viaja en el cuerpo**:
+sale de la sesión del administrador.
+
+Sólo se pueden asignar **`TREASURY_MAKER`, `TREASURY_APPROVER`, `COMPLIANCE_INTERNAL` y
+`READ_ONLY`**. Un `ADMIN` no puede fabricar otro `ADMIN` ni un `PLATFORM_OPERATOR` (`422`):
+escalar privilegios desde el portal dejaría el RBAC en decorativo, y esos dos siguen siendo alta
+controlada. La contraseña es de **12 caracteres como mínimo**, se guarda con BCrypt y no vuelve a
+salir en ninguna respuesta. El correo es **único en toda la plataforma**, no por empresa: uno
+repetido devuelve `422 "Ya existe un usuario con ese correo."` en vez del `500` del constraint.
+
+#### Respuesta (`OperatorView`), la misma en los tres endpoints
+
+```json
+{ "id": "…", "email": "tesoreria.maker@juriscop.test", "firstName": "Ana", "lastName": "Ruiz",
+  "fullName": "Ana Ruiz", "role": "TREASURY_MAKER",
+  "roleDescription": "Operador: Registra borradores, destinatarios y cotiza transferencias",
+  "status": "ACTIVE", "active": true, "mfaEnabled": false }
+```
+
+Nunca lleva el hash de la contraseña ni el secreto TOTP: sólo `mfaEnabled`, que es lo que el
+administrador necesita saber.
+
+#### `DELETE /api/operators/{id}`
+
+Deja al operador en **`SUSPENDED`, no lo borra**: la acción del portal es reversible y la persona
+sigue siendo el actor de los pagos y las aprobaciones que ya firmó. **Nadie se desactiva a sí
+mismo** (`422`), para no dejar a la empresa sin administrador. Un id de otra organización responde
+`422 "El operador no existe."` — el mismo mensaje que si no existiera, para no revelar usuarios
+ajenos. Uno ya desactivado, `422 "El operador ya esta desactivado."`.
+
+Las tres operaciones quedan en la bitácora (`operator.created`, `operator.suspended`, con el rol
+como detalle).

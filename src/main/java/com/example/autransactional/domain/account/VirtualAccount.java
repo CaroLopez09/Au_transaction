@@ -162,6 +162,23 @@ public class VirtualAccount {
     }
 
     /**
+     * La apertura se reservo pero Kira nunca confirmo la cuenta (G-23).
+     *
+     * Es el registro que queda cuando la llamada a Kira falla despues de haber guardado la
+     * clave de idempotencia: hay fila local, no hay cuenta remota. Un reintento debe volver
+     * sobre esta misma fila y con esta misma clave, porque si Kira si llego a crear la cuenta
+     * y lo que se perdio fue la respuesta, una clave nueva abriria una segunda cuenta.
+     */
+    public boolean isOpeningUnconfirmed() {
+        return kiraAccountId == null && status == VirtualAccountStatus.PENDING;
+    }
+
+    /** Misma moneda y misma modalidad: una cuenta pendiente de otra combinacion no sirve. */
+    public boolean matches(String currency, VirtualAccountMode mode) {
+        return this.currency.equalsIgnoreCase(currency) && this.mode == mode;
+    }
+
+    /**
      * Marca el saldo como desactualizado.
      *
      * Un deposito acreditado NO se suma al saldo local: la autoridad es Kira y en el

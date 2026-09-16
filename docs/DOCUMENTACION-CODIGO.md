@@ -2,19 +2,29 @@
 
 **Fecha:** 16 de septiembre de 2026 (base del 11-sep, actualizada con los cambios de Kira, seguridad y
 control interno) · **Rama:** `develop`
-**Stack:** Java 21 · Spring Boot 4.1.1 · MySQL 8 · Maven · **193 clases de producción (15.123 líneas)** · **51 ficheros de prueba, 400 pruebas**
+**Stack:** Java 21 · Spring Boot 4.1.1 · MySQL 8 · Maven · **199 clases de producción (15.508 líneas)** · **53 ficheros de prueba, 424 pruebas**
+**Portal que lo consume:** `au-transactional-web` — Angular 22.1 · **127 ficheros de producción (13.027 líneas)** · **155 pruebas unitarias, 34 E2E** (§18)
 
-> Secciones 1–17 revisadas y anexos A–C **regenerados desde el código el 16-sep-2026**. El detalle
-> cronológico de cada cambio está en `ESTADO.md` §3; el contrato HTTP campo a campo, en `API-GUIA.md`.
+> Secciones 1–17 revisadas y anexos A–C **regenerados desde el código el 16-sep-2026**; cifras del BFF
+> reverificadas ese mismo día con `./mvnw clean test` (**424 pruebas, 0 fallos, 0 omitidas**) y con el
+> recuento de clases, endpoints y peticiones de Bruno sobre el código. La **§18 (el portal que consume
+> el BFF)** se añadió el 16-sep-2026 desde el repositorio `au-transactional-web` (`ba4d4da`), con
+> `npm test` en verde (155/155). El detalle cronológico de cada cambio está en `ESTADO.md` §3; el
+> contrato HTTP campo a campo, en `API-GUIA.md`.
 
 Este documento describe **todo** el código del repositorio: arquitectura, configuración, seguridad,
 integración con Kira, dominio, casos de uso, API, webhooks, persistencia, errores, auditoría y pruebas.
-Las secciones 1–17 explican cómo funciona y por qué; los anexos A–C son la referencia exhaustiva
-generada desde el propio código (cada clase y método no privado, cada prueba y el DDL completo).
+Las secciones 1–17 explican cómo funciona y por qué; la §18 documenta el portal Angular que lo consume
+y los huecos de contrato que siguen abiertos; los anexos A–C son la referencia exhaustiva generada desde
+el propio código (cada clase y método no privado, cada prueba y el DDL completo).
 
 > Documentos relacionados: [`API-GUIA.md`](API-GUIA.md) (contrato HTTP campo a campo) ·
 > [`GUIA-BRUNO.md`](GUIA-BRUNO.md) (pruebas manuales) · [`ARQUITECTURA.md`](ARQUITECTURA.md) (visión resumida) ·
 > [`ESTADO.md`](ESTADO.md) (estado y pendientes) · [`kira-cuerpos-peticiones.json`](kira-cuerpos-peticiones.json) (cuerpos exactos enviados a Kira).
+>
+> Documentos del portal (repositorio `au-transactional-web`): `docs/frontend-architecture.md` (arquitectura) ·
+> `docs/frontend-backend-contract.md` (trazabilidad endpoint a endpoint, RBAC y huecos) ·
+> `docs/frontend-qa.md` (QA) · `DESIGN.md` (sistema visual).
 
 ---
 
@@ -37,6 +47,7 @@ generada desde el propio código (cada clase y método no privado, cada prueba y
 15. [Pruebas](#15-pruebas)
 16. [Herramientas, documentación y operación](#16-herramientas-documentación-y-operación)
 17. [Deuda técnica, defectos conocidos y riesgos](#17-deuda-técnica-defectos-conocidos-y-riesgos)
+18. [El portal que consume el BFF (`au-transactional-web`)](#18-el-portal-que-consume-el-bff-au-transactional-web)
 - [Anexo A. Referencia clase por clase](#anexo-a-referencia-clase-por-clase)
 - [Anexo B. Catálogo de pruebas](#anexo-b-catálogo-de-pruebas)
 - [Anexo C. DDL que espera Hibernate (MySQL)](#anexo-c-ddl-que-espera-hibernate-mysql)
@@ -1398,7 +1409,9 @@ Las etiquetas nunca llevan ids ni datos de una empresa. `GET /actuator/metrics` 
 
 ## 15. Pruebas
 
-**400 pruebas en 51 clases, todas en verde** (`./mvnw clean test`). Nombres completos en el Anexo B.
+**424 pruebas en 53 clases, todas en verde** (`./mvnw clean test`, 16-sep-2026: 0 fallos, 0 errores,
+0 omitidas). Las 24 últimas son de la gestión de operadores (G-13), del `401` sin cabecera (F7) y de
+la reutilización de aperturas sin confirmar (G-23). Nombres completos en el Anexo B.
 
 | Tipo | Cómo | Clases |
 |---|---|---|
@@ -1442,6 +1455,7 @@ idempotencia se comprueba con `IdempotencyKeyPersistenceTest`, que es de integra
 | `docs/cronograma/` | Cronograma y backlog de ClickUp |
 | `/actuator/metrics` | Métricas de la integración (sólo `PLATFORM_OPERATOR`) |
 | Git | `github.com/CaroLopez09/Au_transaction`; ramas `develop` (trabajo), `main`, `certificacion` y `produccion`. Se sube por SSH |
+| `~/Documentos/au-transactional-web` | Portal Angular que consume este BFF (§18). `npm start` sirve en `:4200` y envía `/api` a `:8080` por `proxy.conf.json`; `npm test` (unitarias) y `npm run e2e` (Playwright, necesita el BFF arriba) |
 
 ---
 
@@ -1459,7 +1473,7 @@ Hallazgos verificados en el código el 11-sep-2026, revisados el 16-sep.
 | ~~F4~~ | **Corregido el 15-sep.** `POST /api/payouts` y `POST /api/recipients` aceptan `Idempotency-Key` del portal (UUID validado) y repetirla devuelve lo ya creado | `ExecutePayoutService`, `RegisterRecipientService` | Un doble clic o un reintento de red no crea dos operaciones |
 | F5 | Logging DEBUG de `cert` apunta a `com.example.autransactional.infrastructure.kiraclient`, que no existe | `application-cert.yaml` | No hay DEBUG del cliente de Kira en cert (**sigue abierto**) |
 | F6 | Javadoc obsoleto: sigue mencionando endpoints de verificación biométrica sin seguridad (se eliminaron el 11-sep) | `OpenApiConfig` | Confusión al leer el código (**sigue abierto**) |
-| F7 | Sin cabecera `Authorization` la API responde `403` vacío en lugar de `401` | `SecurityConfig` (sin `AuthenticationEntryPoint`) | El front debe tratar ambos |
+| ~~F7~~ | **Corregido el 16-sep.** `UnauthorizedEntryPoint` responde `401` con `{"code":"unauthorized"}` cuando falta la cabecera `Authorization`; el `403` queda solo para el rol sin permiso | `SecurityConfig.exceptionHandling`, `UnauthorizedEntryPoint` | Verificado en `OperatorControllerTest` (401 con cuerpo, y `403 forbidden` con código para un rol sin permiso) |
 | F8 | Un pago sin cotización envía un bruto calculado con comisiones **estimadas** (15 + 15) | `Payout.grossAmountToSend` | Si la tarifa real difiere, el destinatario recibe un importe distinto (decisión abierta: exigir cotización) |
 
 ### 17.2 Deuda técnica
@@ -1470,7 +1484,7 @@ Hallazgos verificados en el código el 11-sep-2026, revisados el 16-sep.
 | D2 | `TenantContext` sin lectores | El filtro lo fija y limpia, pero ningún servicio lo usa (usan `operator.tenantId()`) |
 | D3 | ~~Falta el worker de eventos no proyectados~~ | Resuelto: `WebhookReprojectionWorker` (11-sep) |
 | D4 | ~~MFA sin implementar~~ | Resuelto: TOTP con secreto cifrado (15-sep) |
-| D5 | Sin gestión de operadores | Los usuarios sólo entran por la semilla de dev o por SQL (G-13) |
+| ~~D5~~ | ~~Sin gestión de operadores~~ | Resuelto el 16-sep: `ManageOperatorsService` y `GET/POST/DELETE /api/operators` (G-13). Un `ADMIN` no puede crear `ADMIN` ni `PLATFORM_OPERATOR` ni desactivarse a sí mismo |
 | D6 | `idx_payouts_idempotency` redundante | Duplica el índice de `uk_payouts_idempotency` |
 | D7 | Límites aplicados en memoria | Los adaptadores leen todas las filas de la empresa y cortan con `limit` |
 | D8 | ~~`resolution_reason` de RFI no se guarda~~ | Resuelto el 15-sep (`rfis.resolution_reason`, incluido `withdrawn`) |
@@ -1480,6 +1494,10 @@ Hallazgos verificados en el código el 11-sep-2026, revisados el 16-sep.
 | D12 | Umbral de doble firma sin confirmar | `bff.payouts.approval.dual-approval-threshold` vale 10.000 por defecto, un valor provisional |
 | D13 | Sin antimalware en los archivos | Se comprueba el tipo real (`FileSignature`), no el contenido; decisión pendiente (infraestructura o deuda declarada) |
 | D14 | Anexos de este documento | Se regeneran con un script; no hay comprobación automática de que sigan al día |
+
+> Los huecos de contrato que el **portal** tiene abiertos contra este BFF están en **§18.4**. Tras los
+> cierres del 16-sep (G-13 y G-23), el que sigue solapándose con esta sección es **G-14 con D7**
+> (límites en memoria, sin paginación de servidor), además de **G-29** con el riesgo de `ddl-auto: validate`.
 
 ### 17.3 Riesgos
 
@@ -1495,6 +1513,100 @@ Hallazgos verificados en el código el 11-sep-2026, revisados el 16-sep.
 
 
 
+
+---
+
+## 18. El portal que consume el BFF (`au-transactional-web`)
+
+Esta sección documenta el **cliente** del BFF, verificada contra el repositorio
+`~/Documentos/au-transactional-web` (`ba4d4da`, 15-sep-2026). El detalle vive en los documentos del
+propio front: [`docs/frontend-architecture.md`](../../au-transactional-web/docs/frontend-architecture.md)
+(arquitectura), [`docs/frontend-backend-contract.md`](../../au-transactional-web/docs/frontend-backend-contract.md)
+(trazabilidad endpoint a endpoint, RBAC y huecos) y
+[`docs/frontend-qa.md`](../../au-transactional-web/docs/frontend-qa.md) (QA). Aquí se recoge lo que un
+desarrollador del BFF necesita saber para no romperlo.
+
+### 18.1 Stack y tamaño
+
+| Dato | Valor |
+|---|---|
+| Framework | Angular 22.1 (standalone, `loadComponent`, signals), TypeScript 6.0 |
+| Build / pruebas | `@angular/build` 22.1, Vitest 4.1 (unitarias), Playwright 1.63 (E2E), ESLint 10 + Prettier |
+| Tamaño | **127 ficheros `.ts` de producción (13.027 líneas)** en 9 dominios |
+| Pruebas | **155 unitarias en 9 ficheros, todas en verde** (`npm test`, ejecutado el 16-sep-2026) · **34 especificaciones E2E** en 7 ficheros (2 con salto condicional según el estado real del entorno) |
+| Desarrollo | `ng serve` con `proxy.conf.json`: todo `/api` va a `http://localhost:8080` (este BFF) |
+
+### 18.2 Cómo está organizado
+
+`src/app` se divide en `core` (sesión, HTTP, configuración, permisos, layout), `shared` (UI, catálogos,
+utilidades) y `domains`. Cada dominio repite la misma separación que el BFF —`domain/`, `application/`
+(facade), `infrastructure/` (repositorio HTTP), `presentation/` (páginas y componentes)— así que **un
+endpoint nuevo del BFF se consume siempre desde un `*HttpRepository`**, nunca desde un componente.
+
+| Dominio del front | Ficheros | Áreas del BFF que consume |
+|---|---|---|
+| `onboarding` | 25 | `/api/onboarding/**`, `/api/ubos/**` (KYB, documentos, beneficiarios finales) |
+| `payouts` | 12 | `/api/payouts/**`, `/api/quotes/**` (cotización, maker-checker, doble firma, recotización) |
+| `accounts` | 9 | `/api/accounts/**` (cuentas virtuales) |
+| `deposits` | 8 | `/api/deposits/**` |
+| `rfis` | 8 | `/api/rfis/**` (respuestas, documentos, `ubo-link`) |
+| `recipients` | 7 | `/api/recipients/**` |
+| `activity` | 6 | `/api/notifications`, `/api/events`, `/api/audit` |
+| `platform` | 5 | `/api/platform/**` (consola de `PLATFORM_OPERATOR`) |
+| `home` | 2 | Agregación de las vistas anteriores |
+
+Rutas de navegación (`app.routes.ts`, todas en español): `ingresar`, `vinculacion`, `cuentas`,
+`cuentas/:id`, `depositos`, `destinatarios`, `destinatarios/nuevo`, `pagos`, `pagos/nuevo`,
+`pagos/historial`, `pagos/:id`, `solicitudes`, `solicitudes/:id`, `avisos`, `eventos`, `auditoria`,
+`seguridad` y `operaciones`, `operaciones/:id`.
+
+### 18.3 Contrato de sesión y errores (lo que el BFF no puede cambiar sin avisar)
+
+- **JWT en cada petición.** `authInterceptor` añade `Authorization: Bearer …` a todo lo que va a la URL
+  base de la API salvo `/auth/login`.
+- **Qué cierra la sesión.** Solo `401 unauthorized` y un **`403` con cuerpo vacío** (petición sin
+  cabecera, que es el defecto **F7** de §17.1). Un `403 forbidden` **no** cierra sesión: se trata como
+  rol sin permiso y lo resuelve la pantalla. Si el BFF cambiara ese par de casos, el portal expulsaría
+  al operador o lo dejaría en una pantalla muerta.
+- **Códigos de error consumidos** (`ErrorMappingService`, uno a uno los de §13): `unauthorized`,
+  `forbidden`, `validation_error`, `rfi_answer_rejected`, `not_found`, `file_too_large`,
+  `business_rule_violation`, `kira_not_configured` e `internal_error`. **Son contrato**: el front
+  enseña un mensaje distinto por código, no por texto.
+- **`X-Request-Id`.** El front lee la cabecera de la respuesta de error y la muestra como «código para
+  soporte», que es el mismo identificador que el BFF pone en sus logs y en la auditoría (§14.3).
+- **Vistas, no formas de Kira.** El portal consume las `*View` del BFF; las dos excepciones crudas a
+  propósito son `RfiView.items` y `PayoutPreviewView.fees`.
+- **Guards por rol y capacidad.** `authenticatedGuard`, `guestGuard` y `audienceGuard` separan la
+  consola de `PLATFORM_OPERATOR` (`operaciones`) del resto de áreas de empresa, reflejando el RBAC de §6.4.
+- **Despliegue.** No hay CORS en el BFF: en desarrollo funciona por proxy y en producción **el portal y
+  el BFF deben servirse en el mismo origen** o detrás de un reverse proxy (hueco G-06 de §18.4).
+
+### 18.4 Huecos abiertos del contrato front ↔ BFF
+
+Los cierres del 14 y 15-sep (consola, `tenantName` en `/me`, `Idempotency-Key`, motivo de rechazo KYB,
+avisos, auditoría, `DELETE /api/ubos/{id}`, edición de UBO, `ubo-link`, enmascarado de `senderAccount`,
+catálogos de industrias y de tipos de documento, permisos de refresco G-09) ya están en §9, §10 y §17.
+Quedan **abiertos**, y son trabajo del BFF:
+
+| ID | Hueco | Cambio esperado en el BFF | Prioridad |
+|---|---|---|---|
+| G-16 | `pendingFields` llega con nombres técnicos de Kira, sin tipo ni opciones; el front mantiene un diccionario de etiquetas | Exponer el esquema (tipo, opciones, obligatoriedad) | Alta |
+| ~~G-23~~ | **Cerrado el 16-sep:** `OpenVirtualAccountService.open` retoma la apertura sin confirmar de la misma empresa, moneda y modalidad, y reintenta **con la misma clave de idempotencia** | — | — |
+| G-29 | Las columnas del borrador KYB solo se crean solas en `dev` (`ddl-auto: update`); en `cert`/`prod` (`validate`) hay que aplicar SQL a mano | Migraciones versionadas (Flyway) — mismo riesgo que §17.3 | Alta |
+| G-03 | Las vistas solo traen `makerUserId`/`approverUserId`: el portal muestra «tú» u «otro operador» | `makerName`/`approverName` en `PayoutView`, o `GET /api/operators` | Media |
+| G-04 | JWT de 8 h sin revocación: el logout solo descarta el token en el navegador | Lista de revocación, o tokens cortos + refresh en cookie `HttpOnly` | Media |
+| G-06 | Sin CORS: obliga a mismo origen o reverse proxy en despliegue | Documentar el reverse proxy o CORS explícito por entorno | Media |
+| ~~G-13~~ | **Cerrado el 16-sep:** `GET /api/operators` (ADMIN y COMPLIANCE_INTERNAL), `POST` y `DELETE` (solo ADMIN, sin autodesactivación ni escalada a ADMIN/PLATFORM_OPERATOR) | — | — |
+| G-14 | Las listas locales solo aceptan `limit` y filtran en cliente (coincide con **D7**) | `page`, `status`, `from/to` en las listas locales | Media |
+| G-26 | `GET /api/recipients` solo devuelve activos: un pago antiguo se queda sin nombre de destinatario | Incluir `recipientName` en `PayoutView` | Baja |
+| G-28 | `transaction_countries` sin formato documentado (ISO-2 vs ISO-3, el catálogo del BFF es ISO-3) | Documentarlo y validarlo en el BFF | Baja |
+| G-05 | Sin refresh token: al expirar se vuelve a login | Refresh token en cookie `HttpOnly` | Baja |
+| G-10 | Mensajes del BFF sin tildes, se muestran tal cual | Mensajes UTF-8 o códigos estables por regla | Baja |
+| G-18 | `kira.sandbox` no se expone: «Simular depósito» se decide por configuración del front | `GET /api/capabilities` con las capacidades del entorno | Baja |
+| G-22 | `GET /api/reference/countries` responde `503` sin credenciales de Kira | Catálogo ISO local de respaldo en el BFF | Baja |
+
+G-19 (instrucciones cripto) quedó **fuera de alcance** del piloto y G-30 (documentos en el borrador) es
+una decisión de diseño asumida: el BFF no almacena documentos de identidad.
 
 ---
 
@@ -1734,7 +1846,7 @@ No confundir con el "user" de Kira, que es la empresa misma en el KYB.
 | `public String fullName()` |  |
 | `public boolean isActive()` |  |
 
-<sub>`domain/tenant/OperatorUserRepository.java` · 18 líneas</sub>
+<sub>`domain/tenant/OperatorUserRepository.java` · 27 líneas</sub>
 
 #### `OperatorUserRepository` · interfaz
 
@@ -1948,7 +2060,7 @@ Valores: `PENDING`, `COMPLETED`, `FAILED`, `REFUNDED`, `KYT_PENDING`, `KYT_REJEC
 | `public boolean isHeld()` | Retenido por cumplimiento: ni acreditado ni fallido, y detiene los pagos de la cuenta. |
 | `public boolean creditsBalance()` | Solo un deposito completado suma saldo disponible. |
 
-<sub>`domain/account/VirtualAccount.java` · 200 líneas</sub>
+<sub>`domain/account/VirtualAccount.java` · 217 líneas</sub>
 
 #### `VirtualAccount` · clase · `@Getter`
 
@@ -1969,6 +2081,8 @@ depositos recibidos por webhook. La autoridad es siempre Kira: aqui solo se refl
 | `public void refreshBalance(BigDecimal available, Instant at)` | El saldo es una proyeccion: la autoridad es Kira. En el sandbox ademas es un valor fijo del proveedor que no se mueve con la actividad. |
 | `public boolean isActivationDelayed(Instant now)` | La activacion lleva demasiado tiempo. En el sandbox puede quedarse colgada indefinidamente sin que llegue nunca el evento virtual_account.activated, asi que el portal necesita poder decir "activacion demorada, contacta con Kira" en vez de girar un spinner para siempre. |
 | `public boolean isOpenInKira()` |  |
+| `public boolean isOpeningUnconfirmed()` | La apertura se reservo pero Kira nunca confirmo la cuenta (G-23). Es el registro que queda cuando la llamada a Kira falla despues de haber guardado la clave de idempotencia: hay fila local, no hay cuenta remota. Un reintento debe volver sobre esta misma fila y con esta misma clave, porque si Kira si llego a crear la cuenta y lo que se perdio fue la respuesta, una clave nueva abriria una segunda cuenta. |
+| `public boolean matches(String currency, VirtualAccountMode mode)` | Misma moneda y misma modalidad: una cuenta pendiente de otra combinacion no sirve. |
 | `public void markBalanceStale()` | Marca el saldo como desactualizado. Un deposito acreditado NO se suma al saldo local: la autoridad es Kira y en el sandbox el saldo es ademas un valor fijo del proveedor. Inventar aqui una suma seria mostrar un numero que el banco no reconoce; lo unico honesto es decir que hay que volver a preguntar. |
 | `public boolean isBalanceStale()` |  |
 | `public Money availableBalance()` |  |
@@ -2593,6 +2707,28 @@ Los documentos NUNCA se guardan en el BFF: Kira los custodia. Por eso
 Es seguro reenviar la entrada sin ellos, porque en un PUT "a missing file works differently:
 sending other fields will not clear it".
 
+<sub>`application/tenant/ManageOperatorsService.java` · 139 líneas</sub>
+
+#### `ManageOperatorsService` · clase · `@Service`
+
+Administracion de los operadores de una empresa cliente (G-13 / D5).
+
+Hasta ahora los usuarios solo entraban por la semilla de dev o por SQL. Este servicio es el
+unico camino para darlos de alta desde el portal, y por eso concentra las tres reglas que no
+pueden quedar en manos del controlador:
+
+1. La empresa sale SIEMPRE de la sesion del administrador, nunca del cuerpo de la peticion.
+2. Un ADMIN no puede fabricar otro ADMIN ni un PLATFORM_OPERATOR: escalar privilegios desde
+   el portal convertiria el RBAC en decorativo. Esos dos siguen siendo alta controlada.
+3. Nadie se da de baja a si mismo: dejaria a la empresa sin administrador.
+
+| Método | Descripción |
+|---|---|
+| `public ManageOperatorsService(OperatorUserRepository users, PasswordEncoder passwordEncoder, AuditTrail audit)` |  |
+| `public List<OperatorView> list(AuthenticatedOperator operator)` | Operadores de la empresa del solicitante. La consola de plataforma no entra por aqui. |
+| `public OperatorView create(AuthenticatedOperator operator, OperatorCommands.CreateOperator command)` |  |
+| `public OperatorView suspend(AuthenticatedOperator operator, String userId)` | Suspende a un operador de la propia empresa. Es SUSPENDED y no DISABLED a proposito: la accion del portal es reversible y no borra la persona, que sigue siendo el actor de los pagos y las aprobaciones que ya firmo. |
+
 <sub>`application/tenant/OnboardingCommands.java` · 49 líneas</sub>
 
 #### `OnboardingCommands` · clase
@@ -2695,6 +2831,50 @@ dibuja desde lo que Kira sigue pidiendo para el producto objetivo.
 | Método | Descripción |
 |---|---|
 | `public static OnboardingView from(Tenant tenant)` |  |
+
+<sub>`application/tenant/OperatorCommands.java` · 28 líneas</sub>
+
+#### `OperatorCommands` · clase
+#### `CreateOperator` · record
+
+Alta de un operador humano de la empresa.
+
+El rol viaja como el nombre de la constante (TREASURY_MAKER, no tesoreria_maker): es lo
+que el portal ya recibe en el JWT y en /api/auth/me, asi que no hay dos vocabularios.
+La empresa NO viaja en el cuerpo: sale siempre de la sesion del ADMIN (aislamiento
+multiempresa), y admitirla aqui seria ofrecer un campo que el servicio va a ignorar.
+
+| Componente |
+|---|
+| `String email` |
+| `String firstName` |
+| `String lastName` |
+| `String password` |
+| `String role` |
+
+<sub>`application/tenant/OperatorView.java` · 34 líneas</sub>
+
+#### `OperatorView` · record
+
+Operador tal como lo ve el portal. Nunca lleva el hash de la contrasena ni el secreto TOTP:
+solo si el segundo factor esta activo, que es lo que el administrador necesita saber.
+
+| Componente |
+|---|
+| `String id` |
+| `String email` |
+| `String firstName` |
+| `String lastName` |
+| `String fullName` |
+| `String role` |
+| `String roleDescription` |
+| `String status` |
+| `boolean active` |
+| `boolean mfaEnabled` |
+
+| Método | Descripción |
+|---|---|
+| `public static OperatorView from(OperatorUser user)` |  |
 
 <sub>`application/tenant/SubmitOnboardingService.java` · 385 líneas</sub>
 
@@ -2921,7 +3101,7 @@ las cotizaciones.
 | `public static KiraDepositEvent fromResource(JsonNode resource, String fallbackKiraAccountId)` | Deposito tal como lo devuelve GET /v1/virtual-accounts/{id}/deposits. No es la forma del webhook: el ordenante va anidado en 'sender', la comision en 'fees.total_fees' y el riel en 'payment_rail'. |
 | `public boolean isIdentifiable()` |  |
 
-<sub>`application/account/OpenVirtualAccountService.java` · 270 líneas</sub>
+<sub>`application/account/OpenVirtualAccountService.java` · 288 líneas</sub>
 
 #### `OpenVirtualAccountService` · clase · `@Service`
 
@@ -3935,13 +4115,13 @@ Formato: base64(iv de 12 bytes || texto cifrado con etiqueta).
 | `public String encrypt(String plain)` |  |
 | `public String decrypt(String stored)` |  |
 
-<sub>`infrastructure/security/SecurityConfig.java` · 47 líneas</sub>
+<sub>`infrastructure/security/SecurityConfig.java` · 50 líneas</sub>
 
 #### `SecurityConfig` · clase · `@Configuration` `@EnableMethodSecurity` `@EnableConfigurationProperties(BffSecurityProperties.class)`
 
 | Método | Descripción |
 |---|---|
-| `public SecurityFilterChain filterChain(HttpSecurity http, JwtTenantFilter jwtTenantFilter) throws Exception` |  |
+| `public SecurityFilterChain filterChain(HttpSecurity http, JwtTenantFilter jwtTenantFilter, UnauthorizedEntryPoint unauthorizedEntryPoint) throws Exception` |  |
 | `public PasswordEncoder passwordEncoder()` |  |
 
 <sub>`infrastructure/security/TenantContext.java` · 37 líneas</sub>
@@ -3973,6 +4153,22 @@ Sin dependencias: el algoritmo es corto y una libreria para esto es superficie d
 | `public static String newSecret()` | 160 bits, el tamano que recomienda la RFC 4226 para SHA-1, en base32 sin relleno. |
 | `public static String otpauthUri(String issuer, String account, String secret)` |  |
 | `public static OptionalLong verify(String secret, String code, Instant now)` | Devuelve el paso de tiempo que valida el codigo, para que quien llama pueda rechazar su reutilizacion dentro de la misma ventana. Vacio si el codigo no vale. |
+
+<sub>`infrastructure/security/UnauthorizedEntryPoint.java` · 35 líneas</sub>
+
+#### `UnauthorizedEntryPoint` · clase · `@Component`
+
+Respuesta a una peticion sin sesion (F7).
+
+Sin esto, Spring Security devolvia un 403 con cuerpo vacio cuando faltaba la cabecera
+Authorization, y el portal tenia que adivinar por el hueco: un 403 vacio significaba
+"no hay sesion" y un 403 con cuerpo, "rol sin permiso". Ahora la falta de credencial es
+401 con el mismo codigo `unauthorized` que ya emite JwtTenantFilter para un token invalido,
+y el 403 queda solo para lo que de verdad es falta de permiso.
+
+| Método | Descripción |
+|---|---|
+| `public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException) throws IOException` |  |
 
 ### A.19 Infraestructura — kira
 
@@ -4256,16 +4452,19 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public Instant seenAt(String userId)` |  |
 | `public void markSeen(String userId, Instant at)` |  |
 
-<sub>`infrastructure/persistence/JpaOperatorUserRepository.java` · 56 líneas</sub>
+<sub>`infrastructure/persistence/JpaOperatorUserRepository.java` · 99 líneas</sub>
 
 #### `JpaOperatorUserRepository` · clase · `@Repository`
 
 | Método | Descripción |
 |---|---|
-| `public JpaOperatorUserRepository(OperatorUserJpaRepository jpa)` |  |
+| `public JpaOperatorUserRepository(OperatorUserJpaRepository jpa, RoleJpaRepository roles)` |  |
 | `public Optional<OperatorUser> findByEmail(String email)` |  |
 | `public Optional<OperatorUser> findById(String id)` |  |
 | `public List<OperatorUser> findByTenant(TenantId tenantId)` |  |
+| `public boolean existsByEmail(String email)` |  |
+| `public OperatorUser create(OperatorUser user)` | El rol es una FK a `roles`: se resuelve por su nombre tecnico, no por la constante del enum. Si la fila no existe el alta falla aqui y no a mitad del flush, con un mensaje util. |
+| `public void updateStatus(String userId, UserStatus status)` |  |
 | `public void updateMfa(String userId, String encryptedSecret, boolean enabled)` |  |
 
 <sub>`infrastructure/persistence/JpaPayoutRepository.java` · 67 líneas</sub>
@@ -4836,6 +5035,22 @@ Local al BFF; enviar a Kira sigue siendo POST/PUT /api/onboarding.
 | `public OnboardingDraftView get(AuthenticatedOperator operator)` |  |
 | `public OnboardingDraftView save(AuthenticatedOperator operator, OnboardingCommands.SaveDraft command)` | Reemplaza el borrador completo. Sin archivos: un data URI se rechaza con 422. |
 
+<sub>`interfaces/rest/OperatorController.java` · 59 líneas</sub>
+
+#### `OperatorController` · clase · `@Tag(name = "9. Operadores", description = "Alta, consulta y baja de los usuarios de la propia empresa. Solo ADMIN escribe.")` `@RestController` `@RequestMapping("/api/operators")`
+
+Administracion de los operadores de la propia empresa (G-13).
+
+El alcance es siempre la empresa de la sesion: no hay ruta para ver ni tocar los operadores
+de otra organizacion, ni siquiera indicando su id.
+
+| Método | Descripción |
+|---|---|
+| `public OperatorController(ManageOperatorsService operators)` |  |
+| `public List<OperatorView> list(AuthenticatedOperator operator)` |  |
+| `public OperatorView create(AuthenticatedOperator operator, OperatorCommands.CreateOperator command)` |  |
+| `public OperatorView suspend(AuthenticatedOperator operator, String id)` |  |
+
 <sub>`interfaces/rest/PayoutController.java` · 118 líneas</sub>
 
 #### `PayoutController` · clase · `@Tag(name = "2. Pagos", description = "Pagos con control interno maker-checker: quien crea no aprueba.")` `@RestController` `@RequestMapping("/api/payouts")`
@@ -5006,13 +5221,13 @@ no reintenta, asi que solo serviria para perder el evento.
 
 ## Anexo B. Catálogo de pruebas
 
-**51 clases de prueba, 400 métodos `@Test`.** Los nombres describen la regla de negocio que protegen.
+**53 clases de prueba, 424 métodos `@Test`.** Los nombres describen la regla de negocio que protegen.
 
 ### `AuTransactionalApplicationTests.java` — 1
 
 - `contextLoads` — context loads
 
-### `application/account/OpenVirtualAccountServiceTest.java` — 14
+### `application/account/OpenVirtualAccountServiceTest.java` — 17
 
 - `elBancoLoFijaElEntornoNoElFormulario` — el banco lo fija el entorno no el formulario
 - `verifiedNoBastaSiElProductoNoEsElegible` — verified no basta si el producto no es elegible
@@ -5028,6 +5243,9 @@ no reintenta, asi que solo serviria para perder el evento.
 - `simularDepositoNoExisteFueraDelSandbox` — simular deposito no existe fuera del sandbox
 - `enSandboxSimularDepositoRefrescaElSaldo` — en sandbox simular deposito refresca el saldo
 - `unaCuentaSinAbrirEnKiraNoSeRefresca` — una cuenta sin abrir en kira no se refresca
+- `elReintentoRetomaLaAperturaSinConfirmarYNoCreaOtraCuenta` — el reintento retoma la apertura sin confirmar y no crea otra cuenta
+- `unaAperturaSinConfirmarDeOtraMonedaNoSeReutiliza` — una apertura sin confirmar de otra moneda no se reutiliza
+- `unaCuentaYaConfirmadaPorKiraNoSeReutiliza` — una cuenta ya confirmada por kira no se reutiliza
 
 ### `application/account/RecordDepositServiceTest.java` — 19
 
@@ -5130,6 +5348,21 @@ no reintenta, asi que solo serviria para perder el evento.
 - `rechazaMasDeDiezArchivos` — rechaza mas de diez archivos
 - `laFusionReemplazaElRegistroDelMismoTipoYConservaLosDemas` — la fusion reemplaza el registro del mismo tipo y conserva los demas
 - `loQueSePersisteNoLlevaLosArchivos` — lo que se persiste no lleva los archivos
+
+### `application/tenant/ManageOperatorsServiceTest.java` — 12
+
+- `listaSoloLosOperadoresDeSuEmpresa` — lista solo los operadores de su empresa
+- `laVistaNuncaExponeElHashNiElSecretoMfa` — la vista nunca expone el hash ni el secreto mfa
+- `creaElOperadorEnLaEmpresaDeLaSesionYConLaClaveCifrada` — crea el operador en la empresa de la sesion y con la clave cifrada
+- `rechazaUnCorreoYaRegistrado` — rechaza un correo ya registrado
+- `unAdminNoPuedeFabricarOtroAdminNiUnOperadorDePlataforma` — un admin no puede fabricar otro admin ni un operador de plataforma
+- `rechazaUnRolInexistente` — rechaza un rol inexistente
+- `aceptaLosCuatroRolesDelegables` — acepta los cuatro roles delegables
+- `suspendeAUnOperadorDeSuEmpresa` — suspende a un operador de su empresa
+- `nadieSeDesactivaASiMismo` — nadie se desactiva a si mismo
+- `noPuedeTocarAUnOperadorDeOtraEmpresa` — no puede tocar a un operador de otra empresa
+- `noSuspendeDosVecesAlMismoOperador` — no suspende dos veces al mismo operador
+- `laConsolaDePlataformaNoEntraPorLasRutasDeEmpresa` — la consola de plataforma no entra por las rutas de empresa
 
 ### `application/tenant/OnboardingDraftServiceTest.java` — 9
 
@@ -5545,6 +5778,18 @@ no reintenta, asi que solo serviria para perder el evento.
 - `laDocumentacionNoFiltraSecretosNiLaUrlDeKira` — la documentacion no filtra secretos ni la url de kira
 - `laVerificacionBiometricaPropiaYaNoExiste` — la verificacion biometrica propia ya no existe
 - `elHealthCheckRespondeSinAutenticacion` — el health check responde sin autenticacion
+
+### `interfaces/rest/OperatorControllerTest.java` — 9
+
+- `sinCabeceraDeAutorizacionResponde401ConCuerpo` — sin cabecera de autorizacion responde 401 con cuerpo
+- `laFaltaDeSesionNuncaEsUn403Vacio` — la falta de sesion nunca es un 403 vacio
+- `unRolSinPermisoSigueSiendo403ConCodigo` — un rol sin permiso sigue siendo 403 con codigo
+- `elAdministradorListaCreaYDesactiva` — el administrador lista crea y desactiva
+- `cumplimientoLosConsultaPeroNoLosAdministra` — cumplimiento los consulta pero no los administra
+- `tesoreriaNoAdministraOperadores` — tesoreria no administra operadores
+- `unAltaSinCorreoValidoNoLlegaAlServicio` — un alta sin correo valido no llega al servicio
+- `unaContrasenaCortaNoLlegaAlServicio` — una contrasena corta no llega al servicio
+- `elComandoDeAltaNoAdmiteEmpresa` — el comando de alta no admite empresa
 
 ### `interfaces/rest/ProviderQueryAuthorizationTest.java` — 3
 

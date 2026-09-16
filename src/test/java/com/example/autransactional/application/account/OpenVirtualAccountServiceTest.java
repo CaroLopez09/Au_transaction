@@ -74,6 +74,9 @@ class OpenVirtualAccountServiceTest {
         when(accounts.findByIdAndTenant(any(), any())).thenAnswer(i -> registro.stream()
                 .filter(a -> a.getId().equals(i.getArgument(0)))
                 .findFirst());
+        when(accounts.findByTenant(any())).thenAnswer(i -> registro.stream()
+                .filter(a -> a.getTenantId().equals(i.getArgument(0)))
+                .toList());
 
         service = new OpenVirtualAccountService(accounts, tenants, kira,
                 properties("jp_morgan", true), audit, idempotencyKeys);
@@ -271,5 +274,60 @@ class OpenVirtualAccountServiceTest {
         registro.add(local);
 
         assertThrows(DomainException.class, () -> service.refresh(maker, "va-x"));
+    }
+
+    // --- G-23: un fallo de Kira no puede dejar cuentas huerfanas ---
+
+    /** Simula el intento anterior: la fila local quedo guardada y Kira nunca confirmo nada. */
+    private VirtualAccount aperturaSinConfirmar() {
+        VirtualAccount previa = new VirtualAccount("va-previa", TENANT, "USD",
+                com.example.autransactional.domain.account.VirtualAccountMode.FIAT, "jp_morgan", "Operativa");
+        previa.reserveOpeningKey();
+        registro.add(previa);
+        return previa;
+    }
+
+    @Test
+    void elReintentoRetomaLaAperturaSinConfirmarYNoCreaOtraCuenta() {
+        VirtualAccount previa = aperturaSinConfirmar();
+        String claveOriginal = previa.getOpeningIdempotencyKey();
+        kiraAbre("pending", null);
+
+        var view = service.open(maker, new VirtualAccountCommands.OpenAccount("Operativa", "fiat", "USD"));
+
+        assertEquals("va-previa", view.id(), "debe reutilizar la fila, no crear otra");
+        assertEquals(1, registro.size(), "la empresa no acumula cuentas huerfanas");
+
+        // La misma clave: si Kira si habia creado la cuenta, el reintento no abre una segunda.
+        ArgumentCaptor<IdempotencyKey> clave = ArgumentCaptor.forClass(IdempotencyKey.class);
+        verify(kira).createVirtualAccount(any(), clave.capture());
+        assertEquals(claveOriginal, clave.getValue().value());
+    }
+
+    @Test
+    void unaAperturaSinConfirmarDeOtraMonedaNoSeReutiliza() {
+        VirtualAccount previa = new VirtualAccount("va-eur", TENANT, "EUR",
+                com.example.autransactional.domain.account.VirtualAccountMode.FIAT, "jp_morgan", null);
+        previa.reserveOpeningKey();
+        registro.add(previa);
+        kiraAbre("pending", null);
+
+        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
+
+        assertNotEquals("va-eur", view.id());
+        assertEquals(2, registro.size());
+    }
+
+    @Test
+    void unaCuentaYaConfirmadaPorKiraNoSeReutiliza() {
+        // Tiene kira_account_id: es una cuenta real, no un intento a medias.
+        kiraAbre("pending", null);
+        var primera = service.open(maker, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
+        reset(kira);
+        kiraAbre("pending", null);
+
+        var segunda = service.open(maker, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
+
+        assertNotEquals(primera.id(), segunda.id(), "abrir una segunda cuenta sigue siendo posible");
     }
 }

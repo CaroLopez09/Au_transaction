@@ -1,7 +1,7 @@
 # Estado del proyecto
 
-**Fecha:** 15 de septiembre de 2026
-**Build:** `Tests run: 400, Failures: 0, Errors: 0` — BUILD SUCCESS
+**Fecha:** 16 de septiembre de 2026
+**Build:** `Tests run: 424, Failures: 0, Errors: 0` — BUILD SUCCESS
 **Rama:** `develop` (se sube a GitHub por SSH) · `main`, `certificacion` y `produccion` detrás
 
 > Arquitectura: [`ARQUITECTURA.md`](ARQUITECTURA.md) · Contrato HTTP: [`API-GUIA.md`](API-GUIA.md) · Pruebas con Bruno: [`GUIA-BRUNO.md`](GUIA-BRUNO.md)
@@ -13,7 +13,7 @@
 ```bash
 cd ~/Documentos/AuTransactional
 git status                                   # rama develop
-./mvnw clean test                            # 400 verdes
+./mvnw clean test                            # 424 verdes
 ./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"   # los secretos salen de .env (§3.7)
 ```
 
@@ -336,6 +336,21 @@ las credenciales de Kira y el despliegue a cert (§4.8).
 
 ---
 
+### 3.16 Operadores, `401` y reintento de apertura *(16-sep)*
+
+| Cambio | Qué se hizo |
+|---|---|
+| **G-13** gestión de operadores | `/api/operators`: `GET` (`ADMIN`, `COMPLIANCE_INTERNAL`), `POST` y `DELETE` (`ADMIN`). Hasta ahora los usuarios sólo entraban por la semilla de `dev` o por SQL. Tres reglas viven en `ManageOperatorsService`, no en el controlador: la empresa sale de la sesión y nunca del cuerpo; un `ADMIN` no puede crear otro `ADMIN` ni un `PLATFORM_OPERATOR`; nadie se desactiva a sí mismo. La baja deja `SUSPENDED`, no borra: la persona sigue siendo el actor de lo que ya firmó. Contrato en `API-GUIA.md` §5.5 |
+| **F7** `401` sin credencial | `UnauthorizedEntryPoint`: sin cabecera `Authorization` la respuesta era un `403` con cuerpo vacío y el portal tenía que adivinar por el hueco si era falta de sesión o de permiso. Ahora es `401 unauthorized`, el mismo código que ya emitía `JwtTenantFilter` para un token inválido, y el `403` queda sólo para el rol sin permiso |
+| **G-23** reintento de apertura | Una apertura de cuenta virtual que reservó la clave de idempotencia pero que Kira nunca confirmó se retoma en el siguiente intento (misma fila, misma clave) en vez de crear otra. Si lo que se perdió fue la respuesta y la cuenta sí existía, una clave nueva habría abierto una segunda |
+
+**Cifras:** **424** pruebas (24 nuevas), 0 fallos · 72 operaciones REST.
+
+**Pendiente de esta pieza:** la colección de Bruno no cubre todavía `/api/operators`, y el portal
+no tiene pantalla de administración de usuarios.
+
+---
+
 ## 4. Qué falta
 
 ### 4.8 *(15-sep)* Lista para desplegar en certificación
@@ -371,7 +386,6 @@ ALTER TABLE webhooks_log ADD COLUMN retry_count INT NOT NULL DEFAULT 0;
 
 ### 4.4 Menor
 - `POST /v1/versioning/upgrade` no se expone: es una operación de cuenta, no de portal.
-- No hay endpoint de gestión de operadores.
 
 ### 4.7 *(15-sep)* Revisión integral front + BFF + arquitectura + Kira
 
@@ -590,6 +604,6 @@ class TempDdlDumpTest { @Test void dump() {} }
 
 | | |
 |---|---|
-| Pruebas | 400 |
-| Endpoints REST | 69 operaciones |
+| Pruebas | 424 |
+| Endpoints REST | 72 operaciones |
 | Colección Bruno | 104 peticiones en 13 carpetas |

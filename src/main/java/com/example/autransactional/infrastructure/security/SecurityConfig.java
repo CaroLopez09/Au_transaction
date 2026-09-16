@@ -17,7 +17,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, JwtTenantFilter jwtTenantFilter) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, JwtTenantFilter jwtTenantFilter,
+                                           UnauthorizedEntryPoint unauthorizedEntryPoint) throws Exception {
         http
                 // API sin estado: no hay sesion de servlet que proteger con CSRF.
                 // El webhook se autentica por HMAC, no por cookie.
@@ -35,6 +36,8 @@ public class SecurityConfig {
                         // Swagger UI. Se apaga por configuracion en prod, no por esta regla.
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .anyRequest().authenticated())
+                // Sin credencial, 401 con cuerpo; el 403 queda para el rol sin permiso (F7).
+                .exceptionHandling(e -> e.authenticationEntryPoint(unauthorizedEntryPoint))
                 .addFilterBefore(jwtTenantFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
