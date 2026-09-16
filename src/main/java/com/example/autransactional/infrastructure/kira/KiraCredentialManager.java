@@ -42,6 +42,18 @@ public class KiraCredentialManager {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Si el entorno tiene con que hablar con Kira. El portal lo usa para decir "pendiente de
+     * configuracion" en vez de dejar que cada boton falle con un 503 (G-18).
+     */
+    public boolean isConfigured() {
+        return notBlank(properties.apiKey()) && notBlank(properties.clientId()) && notBlank(properties.password());
+    }
+
+    private static boolean notBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+
     private static void requireCredential(String value, String variable) {
         if (value == null || value.isBlank()) {
             throw new KiraNotConfiguredException("Falta " + variable

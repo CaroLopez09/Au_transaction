@@ -912,12 +912,14 @@ Respuesta `201` con la proyección `PayoutView`:
 ```json
 {
   "id": "9c1f...", "virtualAccountId": "va_demo_001", "recipientId": "rec_demo_001",
+  "recipientName": "Acme Corp",
   "quotationId": "q_9c1f",
   "amount": 125.5000, "currency": "USD",
   "kiraFee": 15.0000, "platformFee": 15.0000, "totalFee": 30.0000,
   "totalDebitAmount": 155.5000,
   "approvalState": "PENDING_APPROVAL", "status": "NOT_SUBMITTED", "terminal": false,
-  "makerUserId": "juriscop:treasury_maker", "approverUserId": null,
+  "makerUserId": "juriscop:treasury_maker", "makerName": "Ana Restrepo",
+  "approverUserId": null,
   "firstApproverUserId": null, "requiredApprovals": 1,
   "priceLocked": true,
   "kiraPayoutId": null, "referenceNumber": null, "paymentMethod": null, "errorCode": null,
@@ -925,6 +927,10 @@ Respuesta `201` con la proyección `PayoutView`:
   "createdAt": "2026-09-08T18:00:00Z", "updatedAt": "2026-09-08T18:00:00Z"
 }
 ```
+
+`recipientName`, `makerName`, `approverName` y `firstApproverName` viajan junto a sus ids porque el portal
+no tiene directorio de operadores y su listado de destinatarios solo trae los activos. Un id sin persona o
+destinatario detrás llega sin nombre (`non_null`: el campo no aparece).
 
 `amount` es lo que **recibe** el destinatario; `totalDebitAmount` el bruto que sale de la
 cuenta virtual. `priceLocked` indica si hay cotización detrás: sin ella el precio se cierra
@@ -1316,6 +1322,24 @@ estable y lo usa cada formulario de dirección. Un fallo no se cachea.
 `alpha3` es el código ISO-3 que piden la empresa y sus UBOs. Ojo: los **destinatarios** usan ISO-2
 (`US`), no este catálogo. `postalCodeFormat` es la expresión regular con la que Kira valida el
 código postal (sintaxis Ruby `\A…\Z`; en JavaScript equivale a `^…$`).
+
+#### `GET /api/capabilities`
+
+Qué permite **este entorno** (G-18). No llama a Kira y no expone ningún secreto: dice si hay
+credenciales, no cuáles.
+
+```json
+{ "sandbox": true, "providerConfigured": false, "bank": "jp_morgan",
+  "providerApiVersion": "2026-06-01", "dualApprovalThreshold": 5000.00 }
+```
+
+| Campo | Para qué |
+|---|---|
+| `sandbox` | `kira.sandbox`: existe «simular depósito». El portal deja de decidirlo por su compilación |
+| `providerConfigured` | Hay `KIRA_API_KEY`, `KIRA_CLIENT_ID` y `KIRA_PASSWORD`. En falso, todo lo que llama al proveedor responde `503 kira_not_configured` y el portal lo anuncia en vez de reintentar |
+| `bank` | Banco de las cuentas virtuales del entorno (`kira.bank`) |
+| `providerApiVersion` | Versión de la API de Kira que entiende el BFF |
+| `dualApprovalThreshold` | Desde este importe un pago necesita dos firmas, ya resuelto para la empresa de la sesión. Ausente para el operador de plataforma |
 
 ---
 

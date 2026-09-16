@@ -1593,7 +1593,7 @@ Quedan **abiertos**, y son trabajo del BFF:
 | G-16 | `pendingFields` llega con nombres técnicos de Kira, sin tipo ni opciones; el front mantiene un diccionario de etiquetas | Exponer el esquema (tipo, opciones, obligatoriedad) | Alta |
 | ~~G-23~~ | **Cerrado el 16-sep:** `OpenVirtualAccountService.open` retoma la apertura sin confirmar de la misma empresa, moneda y modalidad, y reintenta **con la misma clave de idempotencia** | — | — |
 | G-29 | Las columnas del borrador KYB solo se crean solas en `dev` (`ddl-auto: update`); en `cert`/`prod` (`validate`) hay que aplicar SQL a mano | Migraciones versionadas (Flyway) — mismo riesgo que §17.3 | Alta |
-| G-03 | Las vistas solo traen `makerUserId`/`approverUserId`: el portal muestra «tú» u «otro operador» | `makerName`/`approverName` en `PayoutView`, o `GET /api/operators` | Media |
+| G-03 | ~~Las vistas solo traen `makerUserId`/`approverUserId`~~ Cerrado (16-sep): `PayoutView` lleva `makerName`, `approverName`, `firstApproverName` y `recipientName` (G-26) | — | — |
 | G-04 | JWT de 8 h sin revocación: el logout solo descarta el token en el navegador | Lista de revocación, o tokens cortos + refresh en cookie `HttpOnly` | Media |
 | G-06 | Sin CORS: obliga a mismo origen o reverse proxy en despliegue | Documentar el reverse proxy o CORS explícito por entorno | Media |
 | ~~G-13~~ | **Cerrado el 16-sep:** `GET /api/operators` (ADMIN y COMPLIANCE_INTERNAL), `POST` y `DELETE` (solo ADMIN, sin autodesactivación ni escalada a ADMIN/PLATFORM_OPERATOR) | — | — |
@@ -3440,6 +3440,7 @@ lo muestra como "detenido" y enlaza al RFI.
 | `String id` |
 | `String virtualAccountId` |
 | `String recipientId` |
+| `String recipientName` |
 | `String quotationId` |
 | `BigDecimal amount` |
 | `String currency` |
@@ -3451,8 +3452,11 @@ lo muestra como "detenido" y enlaza al RFI.
 | `String status` |
 | `boolean terminal` |
 | `String makerUserId` |
+| `String makerName` |
 | `String approverUserId` |
+| `String approverName` |
 | `String firstApproverUserId` |
+| `String firstApproverName` |
 | `int requiredApprovals` |
 | `boolean priceLocked` |
 | `String kiraPayoutId` |
@@ -3465,7 +3469,8 @@ lo muestra como "detenido" y enlaza al RFI.
 
 | Método | Descripción |
 |---|---|
-| `public static PayoutView from(Payout p, String blockedByRfiId, int requiredApprovals)` |  |
+| `public static PayoutView from(Payout p, String blockedByRfiId, int requiredApprovals)` | Sin directorio a mano (consola de plataforma): los ids viajan, los nombres no. |
+| `public static PayoutView from(Payout p, String blockedByRfiId, int requiredApprovals, String recipientName, String makerName, String approverName, String firstApproverName)` |  |
 
 <sub>`application/treasury/QuotationCommands.java` · 30 líneas</sub>
 

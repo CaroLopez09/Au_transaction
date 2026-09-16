@@ -10,6 +10,7 @@ import com.example.autransactional.domain.shared.PostalAddress;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
 import com.example.autransactional.domain.tenant.TenantStatus;
+import com.example.autransactional.domain.tenant.UserStatus;
 import com.example.autransactional.domain.treasury.BankAccountKind;
 import com.example.autransactional.domain.treasury.Recipient;
 import com.example.autransactional.domain.treasury.RecipientAccount;
@@ -18,6 +19,8 @@ import com.example.autransactional.domain.treasury.RecipientRepository;
 import com.example.autransactional.domain.shared.IdempotencyKey;
 import com.example.autransactional.domain.shared.Money;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.OperatorUser;
+import com.example.autransactional.domain.tenant.OperatorUserRepository;
 import com.example.autransactional.domain.tenant.Role;
 import com.example.autransactional.domain.treasury.FeeBreakdown;
 import com.example.autransactional.domain.treasury.Payout;
@@ -45,6 +48,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -62,6 +66,7 @@ class ExecutePayoutServiceTest {
     private final RecipientRepository recipients = mock(RecipientRepository.class);
     private final TenantRepository tenants = mock(TenantRepository.class);
     private final RfiRepository rfis = mock(RfiRepository.class);
+    private final OperatorUserRepository usuarios = mock(OperatorUserRepository.class);
 
     private ExecutePayoutService service;
     private Payout pago;
@@ -122,7 +127,7 @@ class ExecutePayoutServiceTest {
 
         when(rfis.findOpenBlocking(any())).thenReturn(Optional.empty());
         service = new ExecutePayoutService(payouts, quotations, accounts, recipients, tenants, rfis, kira,
-                audit, mapper, politica, cotizador);
+                audit, mapper, politica, cotizador, usuarios);
     }
 
     // --- D9: recotizar un pago pendiente cuya cotizacion vencio ---
@@ -145,6 +150,51 @@ class ExecutePayoutServiceTest {
         assertNull(vista.firstApproverUserId());
         assertEquals(0, new BigDecimal("35.00").compareTo(vista.totalFee()));
         verify(audit).record(eq(approver), eq("payout.requoted"), eq("payout"), eq("p-1"), any(), eq("OK"), anyString());
+    }
+
+    // --- G-03 / G-26: el portal no tiene directorio de operadores ni de destinatarios archivados ---
+
+    @Test
+    void laVistaTraeElNombreDelMakerDelAprobadorYDelDestinatario() {
+        pagoGrande();
+        pago.attachQuotation("q-1", Instant.now().plusSeconds(900));
+        when(usuarios.findById("maker-1")).thenReturn(Optional.of(operador("maker-1", "Ana", "Restrepo")));
+        when(usuarios.findById("approver-2")).thenReturn(Optional.of(operador("approver-2", "Luis", "Gomez")));
+        service.approveAndSubmit(approver, "p-1", new PayoutCommands.ApprovePayout(null, null, null, null));
+
+        var vista = service.get(approver, "p-1");
+
+        assertEquals("Ana Restrepo", vista.makerName());
+        assertEquals("Luis Gomez", vista.firstApproverName());
+        assertEquals("Acme Corp", vista.recipientName());
+    }
+
+    @Test
+    void unOperadorQueYaNoEstaDejaElNombreVacioPeroConservaSuId() {
+        when(usuarios.findById("maker-1")).thenReturn(Optional.empty());
+
+        var vista = service.get(maker, "p-1");
+
+        assertEquals("maker-1", vista.makerUserId());
+        assertNull(vista.makerName());
+    }
+
+    @Test
+    void elListadoResuelveCadaOperadorUnaSolaVez() {
+        when(payouts.findByTenant(eq(TENANT), anyInt())).thenReturn(List.of(pago, pago, pago));
+        when(usuarios.findById("maker-1")).thenReturn(Optional.of(operador("maker-1", "Ana", "Restrepo")));
+
+        var vistas = service.list(maker, 50);
+
+        assertEquals(3, vistas.size());
+        assertEquals("Ana Restrepo", vistas.get(0).makerName());
+        verify(usuarios, times(1)).findById("maker-1");
+        verify(recipients, times(1)).findByIdAndTenant("rec-1", TENANT);
+    }
+
+    private static OperatorUser operador(String id, String nombre, String apellido) {
+        return new OperatorUser(id, TENANT, id + "@juriscop.test", "hash", nombre, apellido,
+                Role.TREASURY_MAKER, UserStatus.ACTIVE, null, false);
     }
 
     @Test

@@ -346,8 +346,29 @@ las credenciales de Kira y el despliegue a cert (§4.8).
 
 **Cifras:** **424** pruebas (24 nuevas), 0 fallos · 72 operaciones REST.
 
-**Pendiente de esta pieza:** la colección de Bruno no cubre todavía `/api/operators`, y el portal
-no tiene pantalla de administración de usuarios.
+**Pendiente de esta pieza:** la colección de Bruno no cubre todavía `/api/operators`.
+
+### 3.17 Nombres en la vista de pago *(16-sep)*
+
+| Cambio | Qué se hizo |
+|---|---|
+| **G-03** maker y aprobadores | `PayoutView` lleva `makerName`, `approverName` y `firstApproverName`. El portal no tiene directorio de operadores: mostraba «tú» u «otra persona», que no sirve para auditar quién firmó qué. Los nombres se resuelven en `ExecutePayoutService` contra `OperatorUserRepository`, con una libreta por petición (un `findById` por id, no uno por fila) |
+| **G-26** destinatario del pago | `PayoutView.recipientName` sale de `recipients.findByIdAndTenant`, que también devuelve los archivados: `GET /api/recipients` solo lista los activos, así que un pago antiguo aparecía como «No disponible en el directorio» |
+
+Un id que ya no existe deja el nombre ausente y conserva el id: el portal muestra el id y no repite
+la consulta. La consola de plataforma (`Tenant360`) sigue proyectando los pagos sin nombres, que allí
+no se muestran.
+
+### 3.18 Capacidades del entorno *(16-sep)*
+
+**G-18.** `GET /api/capabilities` devuelve `sandbox`, `providerConfigured`, `bank`,
+`providerApiVersion` y `dualApprovalThreshold` (el de la empresa de la sesión; nulo para el
+operador de plataforma). El portal decidía por su propia compilación si mostrar «Simular depósito»,
+así que una compilación equivocada ofrecía un botón que siempre fallaba. No expone ningún secreto:
+dice **si** hay credenciales de Kira, no cuáles. El front eliminó `environment.sandboxTools`.
+
+**Cifras:** **430** pruebas (6 nuevas), 0 fallos · 73 operaciones REST · front: 178 unitarias,
+lint limpio, E2E 34/34 (1 omitida).
 
 ---
 
@@ -604,6 +625,6 @@ class TempDdlDumpTest { @Test void dump() {} }
 
 | | |
 |---|---|
-| Pruebas | 424 |
-| Endpoints REST | 72 operaciones |
+| Pruebas | 430 |
+| Endpoints REST | 73 operaciones |
 | Colección Bruno | 104 peticiones en 13 carpetas |

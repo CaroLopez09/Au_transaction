@@ -4,6 +4,8 @@ import com.example.autransactional.domain.account.VirtualAccount;
 import com.example.autransactional.domain.compliance.Rfi;
 import com.example.autransactional.domain.compliance.RfiRepository;
 import com.example.autransactional.domain.account.VirtualAccountRepository;
+import com.example.autransactional.domain.tenant.OperatorUser;
+import com.example.autransactional.domain.tenant.OperatorUserRepository;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
 import com.example.autransactional.domain.treasury.Payout;
@@ -33,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +65,7 @@ public class ExecutePayoutService {
     private final ObjectMapper objectMapper;
     private final PayoutApprovalPolicy approvalPolicy;
     private final CreateQuoteService quotes;
+    private final OperatorUserRepository users;
 
     /** Filtros que acepta GET /v1/payouts: cualquier otro parametro lo rechaza con 400. */
     private static final Set<String> KIRA_PAYOUT_STATUSES = Set.of(
@@ -71,8 +75,9 @@ public class ExecutePayoutService {
                                 VirtualAccountRepository accounts, RecipientRepository recipients,
                                 TenantRepository tenants, RfiRepository rfis, KiraApiClient kira,
                                 AuditTrail audit, ObjectMapper objectMapper, PayoutApprovalPolicy approvalPolicy,
-                                CreateQuoteService quotes) {
+                                CreateQuoteService quotes, OperatorUserRepository users) {
         this.quotes = quotes;
+        this.users = users;
         this.payouts = payouts;
         this.quotations = quotations;
         this.accounts = accounts;
@@ -351,8 +356,11 @@ public class ExecutePayoutService {
 
     @Transactional(readOnly = true)
     public List<PayoutView> list(AuthenticatedOperator operator, int limit) {
+        // Una sola libreta para toda la pagina: sin ella, cien pagos del mismo maker serian
+        // cien lecturas identicas a la tabla de usuarios.
+        NameBook names = new NameBook();
         return payouts.findByTenant(operator.tenantId(), Math.min(limit, 100))
-                .stream().map(this::view).toList();
+                .stream().map(p -> view(p, names)).toList();
     }
 
     @Transactional(readOnly = true)
@@ -362,12 +370,57 @@ public class ExecutePayoutService {
 
     /** Vista con la marca de "detenido" si un RFI abierto de Kira bloquea el pago. */
     private PayoutView view(Payout payout) {
+        return view(payout, new NameBook());
+    }
+
+    private PayoutView view(Payout payout, NameBook names) {
         String rfiId = payout.getKiraPayoutId() == null ? null : rfis.findOpenBlocking(payout.getKiraPayoutId())
                 .filter(r -> r.getTenantId().equals(payout.getTenantId()))
                 .map(Rfi::getId)
                 .orElse(null);
         return PayoutView.from(payout, rfiId,
-                approvalPolicy.requiredApprovals(payout.getTenantId(), payout.getAmount()));
+                approvalPolicy.requiredApprovals(payout.getTenantId(), payout.getAmount()),
+                names.recipient(payout.getTenantId(), payout.getRecipientId()),
+                names.operator(payout.getMakerUserId()),
+                names.operator(payout.getApproverUserId()),
+                names.operator(payout.getFirstApproverUserId()));
+    }
+
+    /**
+     * Nombres de operadores y destinatarios resueltos una sola vez por peticion (G-03, G-26).
+     *
+     * Un id que ya no existe (operador borrado, destinatario de otra empresa) se memoriza como
+     * ausente: el portal muestra el id y no se repite la consulta.
+     */
+    private final class NameBook {
+
+        private final Map<String, String> operators = new HashMap<>();
+        private final Map<String, String> recipientNames = new HashMap<>();
+
+        String operator(String userId) {
+            if (userId == null) {
+                return null;
+            }
+            // computeIfAbsent no memoriza un null, y aqui la ausencia es justo lo que no
+            // conviene volver a preguntar.
+            if (!operators.containsKey(userId)) {
+                operators.put(userId, users.findById(userId).map(OperatorUser::fullName).orElse(null));
+            }
+            return operators.get(userId);
+        }
+
+        /** El destinatario archivado tampoco esta en el directorio del portal, pero si en la base. */
+        String recipient(TenantId tenantId, String recipientId) {
+            if (recipientId == null) {
+                return null;
+            }
+            if (!recipientNames.containsKey(recipientId)) {
+                recipientNames.put(recipientId, recipients.findByIdAndTenant(recipientId, tenantId)
+                        .map(Recipient::getName)
+                        .orElse(null));
+            }
+            return recipientNames.get(recipientId);
+        }
     }
 
     private static JsonNode unwrap(JsonNode response) {
