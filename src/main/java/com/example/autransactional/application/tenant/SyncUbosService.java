@@ -236,8 +236,8 @@ public class SyncUbosService {
     /**
      * Asienta el resultado del webhook user.liveness_completed.
      *
-     * Es la unica fuente de verdad del resultado y llega una sola vez, sin reintentos:
-     * si no se proyecta aqui, el dato no se recupera por GET.
+     * Es la unica fuente de verdad del resultado: si no se proyecta aqui, el dato no se recupera
+     * por GET. Kira reintenta la entrega 4 veces y despues lo da por perdido.
      */
     @Transactional
     public void applyLivenessResult(String personReferenceId,

@@ -1,15 +1,11 @@
 # AuTransactional BFF — Documentación técnica del código
 
-**Fecha:** 11 de septiembre de 2026, con correcciones del 15-sep · **Rama:** `develop`
-**Stack:** Java 21 · Spring Boot 4.1.1 · MySQL 8 · Maven · **194 ficheros de producción (15.123 líneas)** · **51 ficheros de prueba, 400 pruebas**
+**Fecha:** 16 de septiembre de 2026 (base del 11-sep, actualizada con los cambios de Kira, seguridad y
+control interno) · **Rama:** `develop`
+**Stack:** Java 21 · Spring Boot 4.1.1 · MySQL 8 · Maven · **193 clases de producción (15.123 líneas)** · **51 ficheros de prueba, 400 pruebas**
 
-> ⚠️ **Lo que cambió después del 11-sep no está en los anexos A–C** (generados ese día). Las piezas
-> nuevas y dónde se describen: verificación en dos pasos TOTP, avisos, centro de eventos, auditoría
-> y consola de operaciones (`ESTADO.md` §3.13, `API-GUIA.md` §5); alineación con Kira, versión
-> única `2026-06-01` y banco `jp_morgan` (`ESTADO.md` §3.11–§3.14, `REVISION-DOCS-KIRA.md`);
-> términos y consentimiento biométrico, doble firma por límite, recotización, tipo real de los
-> archivos y observabilidad (`ESTADO.md` §3.14–§3.15, `API-GUIA.md` §5.4). Visión de conjunto
-> actualizada: `ARQUITECTURA.md`.
+> Secciones 1–17 revisadas y anexos A–C **regenerados desde el código el 16-sep-2026**. El detalle
+> cronológico de cada cambio está en `ESTADO.md` §3; el contrato HTTP campo a campo, en `API-GUIA.md`.
 
 Este documento describe **todo** el código del repositorio: arquitectura, configuración, seguridad,
 integración con Kira, dominio, casos de uso, API, webhooks, persistencia, errores, auditoría y pruebas.
@@ -68,8 +64,11 @@ consume a través del BFF. El BFF sólo aporta lo que Kira no puede dar a un nav
 | Maker-checker de pagos | Kira no ofrece aprobación en dos pasos a los integradores |
 | Validación temprana de reglas de Kira | Muchas reglas sólo fallan en Kira al ejecutar (p. ej. riel incompatible), cuando ya se gastó la cotización |
 | Espejo local de lo que la API no devuelve | Cuestionario KYB, motivos de rechazo, estados de liveness, `bank_address` completo… |
-| Recepción de webhooks firmados | Kira entrega una sola vez, sin reintentos; un navegador no puede recibirlos |
+| Recepción de webhooks firmados | Un navegador no puede recibirlos; Kira reintenta 4 veces y después da el evento por perdido |
 | Idempotencia persistente | La clave debe sobrevivir a un reintento desde otro dispositivo |
+| Segundo factor propio (TOTP) y consentimientos | Kira verifica a la empresa, no protege la sesión de cada operador ni guarda la aceptación de términos |
+| Límites de importe y doble firma | La API no ofrece motor de aprobaciones a los integradores |
+| Observabilidad de la integración | Correlación, latencia de Kira y webhooks fallidos sólo se ven desde este lado |
 
 ---
 
@@ -85,7 +84,7 @@ Jackson 3 (`tools.jackson.*`), Hibernate 7.
 | `spring-boot-starter-data-jpa` | compile | Entidades, repositorios Spring Data, transacciones |
 | `spring-boot-starter-validation` | compile | `@NotBlank`, `@Email`, `@DecimalMin`… en los comandos |
 | `spring-boot-starter-cache` | compile | Soporte de caché (el token y los catálogos usan Caffeine directamente) |
-| `spring-boot-starter-actuator` | compile | `/actuator/health` e `info` |
+| `spring-boot-starter-actuator` | compile | `/actuator/health`, `info` y `metrics` (Micrometer, sin exportador) |
 | `com.auth0:java-jwt` 4.5.0 | compile | Emisión y verificación del JWT del BFF (HMAC256) |
 | `com.github.ben-manes.caffeine:caffeine` | compile | Caché del token de Kira y del catálogo de países |
 | `org.springdoc:springdoc-openapi-starter-webmvc-ui` 3.1.1 | compile | Swagger UI y `/v3/api-docs` |
@@ -106,8 +105,9 @@ AuTransactional/
 ├── pom.xml, mvnw, mvnw.cmd, .mvn/        Build Maven
 ├── src/main/java/com/example/autransactional/
 │   ├── AuTransactionalApplication.java   Punto de entrada (@SpringBootApplication)
-│   ├── domain/                           Lógica de negocio pura (48 ficheros)
-│   │   ├── shared/      (7)   TenantId, Money, IdempotencyKey, Rail, PostalAddress, StatusNormalizer, DomainException
+│   ├── domain/                           Lógica de negocio pura (53 ficheros)
+│   │   ├── shared/      (8)   TenantId, Money, IdempotencyKey, Rail, PostalAddress, StatusNormalizer,
+│   │   │                      FileSignature (tipo real de un archivo), DomainException
 │   │   ├── tenant/     (14)   Tenant, TenantStatus, MissingFields, EligibleProduct, Ubo, UboRoster, LivenessStatus,
 │   │   │                      OperatorUser, Role, RoleScope, UserStatus + repositorios
 │   │   ├── account/     (8)   VirtualAccount, VirtualAccountMode/Status/Readiness, Deposit, DepositStatus + repositorios
@@ -115,40 +115,49 @@ AuTransactional/
 │   │   │                      QuotationRail/Status, FeeBreakdown, Payout, PayoutStatus/ApprovalState,
 │   │   │                      NatureOfPayment, SupportingDocument + repositorios
 │   │   └── compliance/  (5)   Rfi, RfiStatus, AuditLog + repositorios
-│   ├── application/                      Casos de uso (38 ficheros)
-│   │   ├── auth/        (1)   LoginUseCase
-│   │   ├── tenant/      (7)   SubmitOnboardingService, SyncUbosService, KiraUserState, comandos y vistas
+│   ├── application/                      Casos de uso (50 ficheros)
+│   │   ├── auth/        (2)   LoginUseCase, MfaService (TOTP)
+│   │   ├── tenant/     (11)   SubmitOnboardingService (alta, perfil, documentos, términos), SyncUbosService,
+│   │   │                      OnboardingDraftService, KybDocuments, KiraUserState, comandos y vistas
 │   │   ├── account/     (6)   OpenVirtualAccountService, RecordDepositService, KiraDepositEvent, comandos y vistas
-│   │   ├── treasury/   (14)   RegisterRecipientService, CreateQuoteService, ExecutePayoutService, KiraQuoteResponse, comandos y vistas
-│   │   ├── compliance/  (5)   AnswerRfiService, RfiCommands, RfiView, RfiDocumentLink, RfiAnswerRejectedException
+│   │   ├── treasury/   (15)   RegisterRecipientService, CreateQuoteService, ExecutePayoutService,
+│   │   │                      PayoutApprovalPolicy (límites y doble firma), KiraQuoteResponse, comandos y vistas
+│   │   ├── compliance/  (6)   AnswerRfiService, RfiCommands, RfiView, RfiUboLink, RfiDocumentLink, RfiAnswerRejectedException
+│   │   ├── platform/    (1)   PlatformConsoleService (consola multiempresa de solo lectura)
+│   │   ├── notification/(3)   Notification, NotificationRepository, NotificationService (avisos en la app)
+│   │   ├── audit/       (1)   AuditQueryService (bitácora y centro de eventos)
 │   │   ├── shared/      (1)   IdempotencyKeyStore (clave de idempotencia en transacción propia)
 │   │   ├── reference/   (2)   ReferenceCatalogService, CountryView
 │   │   └── webhook/     (2)   ProcessWebhookUseCase, KiraWebhookEnvelope
-│   ├── infrastructure/                   Adaptadores técnicos (65 ficheros)
-│   │   ├── persistence/(36)   Entidades JPA, repositorios Spring Data, adaptadores de puertos, mappers
+│   ├── infrastructure/                   Adaptadores técnicos (74 ficheros)
+│   │   ├── persistence/(39)   Entidades JPA, repositorios Spring Data, adaptadores de puertos, mappers
 │   │   ├── kira/       (12)   KiraApiClient, KiraCredentialManager, KiraClientConfig, KiraProperties, KiraAmounts,
 │   │   │                      KiraErrorParser, KiraApiException, KiraNotConfiguredException, KiraResponse,
 │   │   │                      KiraAuthResponse, KiraFile, KiraWebhookVerifier
-│   │   ├── security/    (6)   SecurityConfig, JwtService, JwtTenantFilter, TenantContext, AuthenticatedOperator, BffSecurityProperties
+│   │   ├── security/    (8)   SecurityConfig, JwtService, JwtTenantFilter, TenantContext, AuthenticatedOperator,
+│   │   │                      BffSecurityProperties, Totp, MfaSecretCipher
+│   │   ├── observability/(2)  RequestIdFilter (X-Request-Id), IntegrationMetrics (métricas de Kira y webhooks)
 │   │   ├── bootstrap/   (3)   DevDataSeeder, DevSeedProperties, RequiredSecretsValidator
 │   │   ├── config/      (2)   AsyncConfig, OpenApiConfig
 │   │   ├── audit/       (1)   AuditTrail
-│   │   ├── reconciliation/(6) 5 workers programados + package-info.java
-│   └── interfaces/                       Entrada HTTP (12 ficheros)
-│       ├── rest/       (11)   10 controladores + RestExceptionHandler
+│   │   └── reconciliation/(7) 7 workers programados + package-info.java
+│   └── interfaces/                       Entrada HTTP (15 ficheros)
+│       ├── rest/       (14)   13 controladores + RestExceptionHandler
 │       └── webhook/     (1)   KiraWebhookController
 ├── src/main/resources/
 │   ├── application.yaml                  Configuración común
 │   ├── application-dev.yaml              Desarrollo local
 │   ├── application-cert.yaml             Certificación (sandbox de Kira)
 │   └── application-prod.yaml             Producción
-├── src/test/java/…                       40 clases de prueba (4.832 líneas)
+├── src/test/java/…                       51 clases de prueba (6.843 líneas)
 ├── src/test/resources/application.yaml   H2 en memoria y credenciales de prueba
 └── docs/
     ├── DOCUMENTACION-CODIGO.md           Este documento
     ├── API-GUIA.md, GUIA-BRUNO.md, ARQUITECTURA.md, ESTADO.md
+    ├── REVISION-DOCS-KIRA.md, REVISION-INTEGRAL-FRONT-BFF.md, REVISION-REQUISITOS-VS-CODIGO.md
     ├── kira-cuerpos-peticiones.json      Cuerpos exactos enviados a Kira
-    └── bruno/AuTransactional/            Colección de Bruno (84 peticiones)
+    ├── cronograma/                       Cronograma y backlog de ClickUp
+    └── bruno/AuTransactional/            Colección de Bruno (104 peticiones en 13 carpetas)
 ```
 
 ---
@@ -225,7 +234,8 @@ Cliente ──HTTP──► JwtTenantFilter ──► SecurityFilterChain (regla
 | `ddl-auto` | `${DB_DDL_AUTO:update}` | `validate` | `validate` | `create-drop` |
 | `show-sql` | `true` | `false` | `false` | — |
 | Kira `base-url` | `${KIRA_BASE_URL:https://api.balampay.com/sandbox}` | ídem sandbox | `${KIRA_BASE_URL:https://api.balampay.com}` | `http://localhost:0/sandbox` |
-| Kira `bank` / `sandbox` | `slovak_savings_bank` / `true` (por defecto común) | ídem | `${KIRA_BANK:portage}` / `false` | — |
+| Kira `bank` / `sandbox` | `jp_morgan` / `true` (por defecto común) | ídem | `jp_morgan` / `false` | — |
+| MFA obligatoria | `${BFF_MFA_ENFORCED:false}` | `${BFF_MFA_ENFORCED:true}` | `${BFF_MFA_ENFORCED:true}` | `false` |
 | JWT secret | `${BFF_JWT_SECRET:secreto-de-desarrollo-…}` | obligatorio | obligatorio | fijo de pruebas |
 | Semilla de datos | `${BFF_DEV_SEED:true}` | `false` | `false` | — |
 | Validación de secretos | no | **sí** (`RequiredSecretsValidator`) | **sí** | — |
@@ -244,34 +254,48 @@ Cliente ──HTTP──► JwtTenantFilter ──► SecurityFilterChain (regla
 | `kira.client-id` | `KIRA_CLIENT_ID` | vacío | Cuerpo de `POST /auth` |
 | `kira.password` | `KIRA_PASSWORD` | vacío | Cuerpo de `POST /auth` |
 | `kira.webhook-secret` | `KIRA_WEBHOOK_SECRET` | vacío | Verificación HMAC de webhooks |
-| `kira.api-version` | `KIRA_API_VERSION` | `2026-04-14` | Cabecera `X-Api-Version` (RFIs usan `2026-06-01`) |
+| `kira.api-version` | `KIRA_API_VERSION` | `2026-06-01` | Cabecera `X-Api-Version` en **todas** las peticiones; `KiraProperties` rechaza otra versión al arrancar |
 | `kira.token-ttl-seconds` | — | `3600` | Vida del token de Kira |
 | `kira.token-refresh-margin-seconds` | — | `300` | Se renueva antes: la caché expira a los 3300 s |
 | `kira.connect-timeout-ms` / `read-timeout-ms` | — | `5000` / `30000` | Timeouts del `RestClient` |
-| `kira.bank` | `KIRA_BANK` | `slovak_savings_bank` | Banco de las cuentas virtuales (depende del entorno) |
+| `kira.bank` | `KIRA_BANK` | `jp_morgan` | Banco de las cuentas virtuales y `capabilities.requested_banks` del alta. Kira documenta `jp_morgan` y `austin_capital_trust`; el BFF solo admite el primero (producto `usa-virtual-accounts`) y **no arranca** con otro |
 | `kira.sandbox` | `KIRA_SANDBOX` | `true` | Habilita simular depósitos |
 | `kira.base-url` | `KIRA_BASE_URL` | por perfil | Raíz de la API de Kira |
 | `bff.security.jwt-secret` | `BFF_JWT_SECRET` | vacío (dev: valor de desarrollo) | Clave HMAC256 del JWT (≥ 32 caracteres fuera de dev) |
 | `bff.security.jwt-issuer` | `BFF_JWT_ISSUER` | `autransactional-bff` | Claim `iss` |
 | `bff.security.token-expiration-ms` | `BFF_JWT_TTL_MS` | `28800000` (8 h) | Vida del JWT |
-| `bff.reconciliation.enabled` | `BFF_RECONCILIATION_ENABLED` | `true` (`false` en pruebas) | Registra o no los 4 workers |
+| `bff.security.mfa-encryption-key` | `BFF_MFA_ENCRYPTION_KEY` | vacío (dev: deriva del secreto JWT) | Clave AES-256-GCM del secreto TOTP. Obligatoria en cert y prod |
+| `bff.security.mfa-enforced` | `BFF_MFA_ENFORCED` | `false` (dev) / `true` (cert y prod) | Exige segundo factor a todos los operadores |
+| `bff.security.mfa-challenge-ttl-ms` | — | `300000` (5 min) | Vida del reto que devuelve el login |
+| `bff.security.mfa-issuer` | — | `AU Transactional` | Nombre que muestra la app autenticadora |
+| `bff.terms.version` | `BFF_TERMS_VERSION` | vacío | Versión vigente de los términos; vacía, el portal no pide aceptación |
+| `bff.terms.url` | `BFF_TERMS_URL` | vacío | Enlace a los términos que se muestra al aceptar |
+| `bff.payouts.approval.dual-approval-threshold` | `BFF_DUAL_APPROVAL_THRESHOLD` | `10000` | Desde ese importe, un pago necesita **dos** aprobadores distintos |
+| `bff.payouts.approval.tenant-thresholds` | — | vacío | Umbral propio por empresa (id del BFF → importe) |
+| `bff.reconciliation.enabled` | `BFF_RECONCILIATION_ENABLED` | `true` (`false` en pruebas) | Registra o no los 7 workers |
 | `bff.reconciliation.initial-delay-ms` | — | `60000` | Espera tras el arranque |
 | `bff.reconciliation.payouts-ms` / `payout-batch` | — | `600000` / `50` | Pagos en vuelo por pasada |
 | `bff.reconciliation.quotations-ms` | — | `300000` | Cotizaciones vencidas |
 | `bff.reconciliation.liveness-ms` | — | `3600000` | Enlaces de liveness vencidos |
 | `bff.reconciliation.rfis-ms` | — | `900000` | Sincronización de RFIs |
 | `bff.reconciliation.webhooks-ms` / `webhook-batch` | — | `1800000` / `50` | Eventos almacenados sin proyectar |
+| `bff.reconciliation.tenants-ms` | — | `1800000` | Empresas registradas que aún no pueden operar |
+| `bff.reconciliation.accounts-ms` | — | `3600000` | Cuentas abiertas (`failed`, `deactivated` y `frozen` no tienen webhook) |
+| `kira.webhook-secret-previous` | `KIRA_WEBHOOK_SECRET_PREVIOUS` | vacío | Segundo secreto válido durante la rotación (~1 min de entregas con la firma anterior) |
 | `bff.dev.seed` | `BFF_DEV_SEED` | `true` en dev | Activa `DevDataSeeder` |
 | `bff.dev.seed-password` | `BFF_DEV_SEED_PASSWORD` | `Dev12345!` | Contraseña de los operadores sembrados |
-| `management.endpoints.web.exposure.include` | — | `health,info` | Endpoints de Actuator expuestos |
+| `management.endpoints.web.exposure.include` | — | `health,info,metrics` | Endpoints de Actuator expuestos (`metrics` sólo para `PLATFORM_OPERATOR`) |
+| `logging.pattern.level` | — | `%5p [%X{requestId:-}]` | El `X-Request-Id` de la petición en cada línea de log |
 | `management.endpoint.health.show-details` | — | `never` | Sin detalle en `/actuator/health` |
 
 > ⚠️ `application-dev.yaml` ya **no** lleva la contraseña: toma `${DB_PASSWORD:…}` del entorno, así que
 > hay que exportar `DB_PASSWORD` antes de arrancar el perfil `dev`. La contraseña antigua **sigue en el
 > historial de Git** y el repositorio es público: falta rotarla. Ver §17.
 
-Las propiedades se enlazan a records `@ConfigurationProperties`: `KiraProperties` (`kira.*`),
-`BffSecurityProperties` (`bff.security.*`) y `DevSeedProperties` (`bff.dev.*`).
+Las propiedades se enlazan a records `@ConfigurationProperties`: `KiraProperties` (`kira.*`, que además
+**valida la versión de API y el banco en su constructor**), `BffSecurityProperties` (`bff.security.*`),
+`PayoutApprovalPolicy` (`bff.payouts.approval.*`, habilitado en la clase de arranque) y `DevSeedProperties`
+(`bff.dev.*`). Los términos se leen con `@Value` en `SubmitOnboardingService`.
 
 ### 5.3 Beans de configuración
 
@@ -286,18 +310,21 @@ Las propiedades se enlazan a records `@ConfigurationProperties`: `KiraProperties
 
 1. `AuTransactionalApplication.main` → Spring Boot.
 2. **`RequiredSecretsValidator`** (sólo `cert` y `prod`, `InitializingBean`): exige `KIRA_API_KEY`,
-   `KIRA_CLIENT_ID`, `KIRA_PASSWORD`, `KIRA_WEBHOOK_SECRET` y `BFF_JWT_SECRET`; lista **todas** las que faltan
+   `KIRA_CLIENT_ID`, `KIRA_PASSWORD`, `KIRA_WEBHOOK_SECRET`, `BFF_JWT_SECRET` y `BFF_MFA_ENCRYPTION_KEY`; lista **todas** las que faltan
    en un único `IllegalStateException` y exige además que el secreto JWT tenga al menos 32 caracteres. La
    aplicación no arranca si falla.
 3. **`DevDataSeeder`** (sólo `dev` con `bff.dev.seed=true`, `ApplicationRunner`, `@Transactional`), idempotente:
    - calcula el hash BCrypt de la contraseña **una sola vez**;
-   - asegura las 5 filas de `roles` (`name` = `Role.dbName()`, `description`, `scope`);
+   - asegura las 6 filas de `roles` (`name` = `Role.dbName()`, `description`, `scope`), incluida la del
+     operador de plataforma;
    - crea, si no existen, las empresas `juriscop` (Juriscop, NIT 900123456-1), `bankvision` (Bankvision,
      900234567-2) y `au-colombia` (AU Colombia, 900345678-3), jurisdicción Colombia, **estado `CREATED`** y sin
      `kira_user_id`;
    - crea un operador por rol y empresa: id `<empresa>:<rol>`, correo `<rol con puntos>@<empresa>.test`
      (p. ej. `treasury.maker@juriscop.test`), nombre según rol (Admin, Operador, Tesorero, Cumplimiento,
      Consulta), apellido = nombre de la empresa, estado `ACTIVE`;
+   - crea un operador de plataforma sin empresa (`platform:operator`, `operaciones@au.test`, rol
+     `PLATFORM_OPERATOR`), que no se replica por empresa;
    - registra en log cuántas organizaciones y operadores creó.
 4. La readiness de Actuator pasa a `UP` cuando terminan los `ApplicationRunner` (durante ese instante
    `/actuator/health` puede responder `503 OUT_OF_SERVICE`).
@@ -311,10 +338,15 @@ Las propiedades se enlazan a records `@ConfigurationProperties`: `KiraProperties
 `SecurityConfig.filterChain`:
 
 - **CSRF desactivado** (API sin estado, sin cookies) y sesión `STATELESS`.
-- Rutas **públicas**: `POST /api/auth/login`, `/api/webhooks/**` (se autentican por HMAC), `/actuator/health`,
-  `/swagger-ui.html`, `/swagger-ui/**`, `/v3/api-docs/**`.
+- Rutas **públicas**: `POST /api/auth/login`, los pasos del segundo factor que forman parte del ingreso
+  (`/api/auth/mfa/verify`, `/setup`, `/enable`, que validan el reto dentro del servicio),
+  `/api/webhooks/**` (se autentican por HMAC), `/actuator/health`, `/swagger-ui.html`, `/swagger-ui/**`,
+  `/v3/api-docs/**`.
+- `/actuator/**` (todo lo que no sea `health`) exige el rol **`PLATFORM_OPERATOR`**: las métricas no
+  llevan datos de ninguna empresa, pero tampoco son de ellas.
 - **Todo lo demás exige autenticación.**
-- `JwtTenantFilter` se inserta antes de `UsernamePasswordAuthenticationFilter`.
+- `JwtTenantFilter` se inserta antes de `UsernamePasswordAuthenticationFilter`; `RequestIdFilter`
+  (`@Order(HIGHEST_PRECEDENCE)`) corre antes que todo y fija el `X-Request-Id` de la petición.
 
 ### 6.2 JWT del BFF (`JwtService`)
 
@@ -329,7 +361,18 @@ Las propiedades se enlazan a records `@ConfigurationProperties`: `KiraProperties
 | `iat` / `exp` | emisión / emisión + `token-expiration-ms` (8 h) |
 
 `verify(token)` exige firma, emisor y vigencia; si falta `tenant_id`, `role` o `uid` lanza
-`IllegalArgumentException`. Devuelve `AuthenticatedOperator(userId, email, tenantId, role)`.
+`IllegalArgumentException`. Devuelve `AuthenticatedOperator(userId, email, tenantId, role)`. **Rechaza
+cualquier token con el claim `purpose`**: el reto del segundo factor se firma igual pero no es una sesión.
+
+### 6.2.1 Verificación en dos pasos (TOTP)
+
+| Pieza | Qué hace |
+|---|---|
+| `Totp` | RFC 6238 sin dependencias: `newSecret()` (160 bits en base32), `otpauthUri(...)` para el QR, `verify(secret, code, now)` con ventana de ±1 paso de 30 s (devuelve el paso usado) |
+| `MfaSecretCipher` | AES-256-GCM con `bff.security.mfa-encryption-key`; en dev, si falta, deriva la clave del secreto JWT |
+| `JwtService.issueMfaChallenge` / `verifyMfaChallenge` | Reto de 5 min con `purpose=mfa` y un id de reto |
+| `MfaService` | `setup` (secreto nuevo + URI para el QR), `enable`, `disable` (exige código), `verify` (canjea el reto). Tope de **5 códigos erróneos** por reto y **un código no vale dos veces** (cachés Caffeine de intentos y del último paso usado). Cada paso queda auditado |
+| `LoginUseCase` | Si el operador tiene MFA o `mfa-enforced` está activo, devuelve `mfaChallenge` + `mfaRequired`/`mfaSetupRequired` en lugar de la sesión |
 
 ### 6.3 `JwtTenantFilter`
 
@@ -358,8 +401,15 @@ servicios toman la empresa de `operator.tenantId()` (§17).
 | `TREASURY_APPROVER` | `tesoreria_approver` | Aprueba y autoriza pagos (maker-checker) | | ✓ | |
 | `COMPLIANCE_INTERNAL` | `compliance_internal` | Ficha 360, UBOs, liveness y RFIs | | | ✓ |
 | `READ_ONLY` | `read_only` | Sólo lectura | | | |
+| `PLATFORM_OPERATOR` | `platform_operator` | Operaciones y cumplimiento de AU: consola multiempresa de solo lectura | | | |
 
-Todos tienen `RoleScope.TENANT` (existe `SYSTEM` para soporte de plataforma, sin uso todavía).
+Los cinco primeros son `RoleScope.TENANT`; `PLATFORM_OPERATOR` es `RoleScope.SYSTEM` y **no pertenece a
+ninguna empresa**: su `tenantId` es el centinela `TenantId.PLATFORM` (`__platform__`), de forma que las
+rutas de empresa le devuelven vacío y las de plataforma rechazan a los roles de empresa con `403`.
+
+**Consultas que gastan cuota de Kira** (refrescos, saldo, sincronizar depósitos) exigen
+`ADMIN`, `TREASURY_MAKER`, `TREASURY_APPROVER` o `COMPLIANCE_INTERNAL`: `READ_ONLY` no las usa. El enlace de
+descarga de un documento de RFI es sólo de `ADMIN` y `COMPLIANCE_INTERNAL`, y queda auditado.
 
 **Doble barrera:** `@PreAuthorize("hasAnyRole(...)")` en el controlador **y** comprobación `role.canX()` en
 el servicio (`DomainException` → 422). Matriz completa por endpoint en §10.
@@ -379,16 +429,26 @@ el servicio (`DomainException` → 422). Matriz completa por endpoint en §10.
 2. Compara la contraseña con BCrypt. Si no coincide → **el mismo** mensaje (no revela qué cuentas existen).
 3. `OperatorUser.assertCanLogin()`: sólo `UserStatus.ACTIVE` puede entrar (`SUSPENDED` y `DISABLED` no).
 4. Carga la empresa y `Tenant.assertActive()` (una empresa `REJECTED` no opera).
-5. Devuelve `LoginResult(accessToken, expiresIn, email, role, tenantId, tenantName)`.
-
-**Desde el 15-sep hay MFA TOTP**: si el operador lo tiene activo (o es obligatorio), el paso 5
-devuelve un reto de 5 min en lugar de la sesión y `/api/auth/mfa/verify` lo canjea. El secreto se
-guarda cifrado (AES-256-GCM) en `users.mfa_secret`. Detalle en `API-GUIA.md` §5.1.
+5. Devuelve `LoginResult(accessToken, expiresIn, email, role, tenantId, tenantName, mfaChallenge,
+   mfaRequired, mfaSetupRequired)`: con segundo factor, los tres últimos sustituyen a la sesión
+   (§6.2.1). El operador de plataforma no tiene empresa y su `tenantName` es «AU Transactional».
 
 ### 6.7 Webhooks (HMAC)
 
 `KiraWebhookVerifier`: HMAC-SHA256 en hexadecimal sobre los **bytes crudos** del cuerpo con
-`kira.webhook-secret`, comparación en **tiempo constante** (`MessageDigest.isEqual`). Detalle del flujo en §11.
+`kira.webhook-secret`, comparación en **tiempo constante** (`MessageDigest.isEqual`). Acepta además
+`kira.webhook-secret-previous` mientras dura una rotación: Kira sigue firmando con el anterior cerca de un
+minuto. Detalle del flujo en §11.
+
+### 6.8 Consentimientos y archivos
+
+- **Términos**: `SubmitOnboardingService.acceptTerms` exige la versión vigente (`bff.terms.version`), la
+  manda a Kira como `tos_accepted_version` y la deja en el payload guardado y en la auditoría
+  (`tenant.terms_accepted`). El perfil que envía el portal **no** puede fijar ese campo.
+- **Consentimiento biométrico**: pedir enlaces de prueba de vida o subir una selfie exige
+  `biometricConsent`; sin él, `422` sin llamar a Kira. Queda como `tenant.biometric_consent_recorded`.
+- **Tipo real de los archivos**: `FileSignature` compara los primeros bytes con el MIME declarado (PDF,
+  PNG, JPEG, WebP, HEIC) en documentos KYB, archivos de RFI y soportes de pago.
 
 ---
 
@@ -402,7 +462,7 @@ Responsabilidades que ningún caso de uso repite:
 |---|---|
 | `x-api-key` en toda petición | cabecera fija en `doExchange` |
 | `Authorization: Bearer <token>` | `KiraCredentialManager.getAccessToken()` |
-| `X-Api-Version` | `kira.api-version` (`2026-04-14`), con dos excepciones por petición: **RFIs y sus documentos** (`RFI_API_VERSION`, esas rutas no existen antes) y la **cotización** (`QUOTATION_API_VERSION`), cuyo desglose `fees[]`/`totals` sólo existe desde `2026-06-01` |
+| `X-Api-Version` | `kira.api-version` = **`2026-06-01` en todas las peticiones** (el go-live checklist exige una sola versión). Los RFIs y el desglose `fees[]`/`totals` de la cotización sólo existen en ella, y las cuentas virtuales devuelven `pending/activating/active/failed/deactivated` en vez de `approved` |
 | `Idempotency-Key` | parámetro `IdempotencyKey` en `createUser`, `createVirtualAccount`, `createRecipient`, `executePayout` |
 | Cuerpo | JSON; si el cuerpo es `MultiValueMap` → `multipart/form-data` |
 | Reintento ante `401` | invalida el token y repite **una** vez |
@@ -427,19 +487,20 @@ Responsabilidades que ningún caso de uso repite:
 | `listRecipients` | `GET /v1/recipients?user_id=` | `RegisterRecipientService.listInKira` |
 | `getRecipient` | `GET /v1/recipients/{id}` | `RegisterRecipientService.getInKira` |
 | `createRecipient` → `KiraResponse` | `POST /v1/recipients` + idempotencia | `RegisterRecipientService.register` |
-| `createQuotation` | `POST /v1/quotations` · **`2026-06-01`** | `CreateQuoteService.create` |
+| `createQuotation` | `POST /v1/quotations` | `CreateQuoteService.create` |
 | `previewPayout` | `POST /v1/virtual-accounts/{id}/payout/preview` | `ExecutePayoutService.preview` |
 | `executePayout` | `POST /v1/virtual-accounts/{id}/payout` + idempotencia | `ExecutePayoutService.approveAndSubmit` |
 | `getPayout` | `GET /v1/payouts/{id}` | `ExecutePayoutService.refreshFromKira`, `events` |
 | `listPayouts` | `GET /v1/payouts` (page+limit) | `ExecutePayoutService.kiraHistory` |
-| `listRfis` | `GET /v1/rfis` (limit+offset) · `2026-06-01` | `AnswerRfiService.sync` |
-| `getRfi` | `GET /v1/rfis/{id}` · `2026-06-01` | `AnswerRfiService` |
-| `answerRfiItems` | `PATCH /v1/rfis/{id}/items` · `2026-06-01` | `AnswerRfiService.answer` |
-| `uploadRfiDocuments` | `POST /v1/rfis/{id}/items/{item}/documents` multipart `files` · `2026-06-01` | `AnswerRfiService.uploadDocuments` |
-| `removeRfiDocument` | `DELETE …/documents/{doc}` · `2026-06-01` | `AnswerRfiService.removeDocument` |
-| `getRfiDocumentLink` | `GET …/documents/{doc}` · `2026-06-01` | `AnswerRfiService.documentLink` |
+| `listRfis` | `GET /v1/rfis` (limit+offset) | `AnswerRfiService.sync` |
+| `getRfi` | `GET /v1/rfis/{id}` | `AnswerRfiService` |
+| `answerRfiItems` | `PATCH /v1/rfis/{id}/items` | `AnswerRfiService.answer` |
+| `uploadRfiDocuments` | `POST /v1/rfis/{id}/items/{item}/documents` multipart `files` | `AnswerRfiService.uploadDocuments` |
+| `removeRfiDocument` | `DELETE …/documents/{doc}` | `AnswerRfiService.removeDocument` |
+| `getRfiDocumentLink` | `GET …/documents/{doc}` | `AnswerRfiService.documentLink` |
+| `mintRfiUboLink` | `POST /v1/rfis/{id}/items/{item}/ubo-link` | `AnswerRfiService.mintUboLink` (ítems `ubo_link` sin `url`) |
 | `listCountries` | `GET /v1/countries` | `ReferenceCatalogService` |
-| `exchange` / `exchangeWithStatus` | genérico | uso interno |
+| `exchange` / `exchangeWithStatus` | genérico | uso interno; mide cada llamada en `kira.api.requests` (método, ruta sin ids y resultado) |
 
 ### 7.2 `KiraCredentialManager` — token
 
@@ -489,10 +550,11 @@ Responsabilidades que ningún caso de uso repite:
 |---|---|
 | `TenantId(value)` | Id de la organización; toda consulta filtra por él |
 | `Money(amount, currency)` | Importe con moneda, escala 4 (`DECIMAL(18,4)`). `of`, `zero`, `plus`/`minus` (exigen misma moneda), `isPositive`, `isLessThan` |
-| `IdempotencyKey(value)` | UUID v4. `newKey()`, `of(value)`. Una clave por intención de negocio |
+| `IdempotencyKey(value)` | UUID v4. `newKey()`, `of(value)`, `fromClient(value)` (valida el UUID que manda el portal). Una clave por intención de negocio |
 | `Rail` | `ACH`, `WIRE`, `WALLET`. `from` estricto, `fromWireOrNull` tolerante |
 | `PostalAddress(streetName, city, state, postalCode, country)` | `assertIso2Country()` (destinatarios usan ISO-2); `isBlank()` |
 | `StatusNormalizer` | `normalize` (trim + mayúsculas), `matches` (sin distinguir mayúsculas) |
+| `FileSignature` | Tipo real de un archivo por sus primeros bytes: `detect(bytes)` y `matches(mime, bytes)` para PDF, PNG, JPEG, WebP y HEIC |
 | `DomainException` | Violación de una invariante → 422 |
 
 ### 8.2 `tenant`
@@ -510,6 +572,7 @@ Responsabilidades que ningún caso de uso repite:
 | `onboardingPayload` | Objeto completo enviado a Kira (el siguiente `PUT` se construye sobre él) |
 | `onboardingIdempotencyKey` | Clave del alta (reservada una sola vez) |
 | `rejectionReason` | Motivo de rechazo (sólo llega por webhook; máx. 500 caracteres) |
+| `onboardingDraft` / `onboardingDraftUpdatedAt` | Borrador del asistente del portal; nunca viaja a Kira |
 
 | Método | Regla |
 |---|---|
@@ -527,8 +590,10 @@ Responsabilidades que ningún caso de uso repite:
 **`TenantStatus`**: `CREATED → VERIFYING → REVIEW → VERIFIED | REJECTED`. `fromWire`: `APPROVED→VERIFIED`,
 `DECLINED→REJECTED`, `PENDING`/`IN_REVIEW→REVIEW`, desconocido o nulo → `CREATED`. `canOperate()` = no `REJECTED`.
 
-**`MissingFields(byProduct)`**: mapa inmutable producto → campos. `forProduct(p)` = campos de `general` ∪
-campos de `p` sin duplicados; `isCompleteFor`, `isEmpty`, `products`.
+**`MissingFields(byProduct)`**: mapa inmutable producto → campos. `forProduct(p)` = **la lista de ese
+producto**, y sólo si no existe se usa `general`: `general` es la unión de todos los productos, así que
+sumarla pedía requisitos de otros bancos y la empresa nunca llegaba a estar lista. `isCompleteFor`,
+`isEmpty`, `products`.
 
 **`EligibleProduct(productCode, eligible, missingFields, unsupportedReason)`**: constantes
 `USA_VIRTUAL_ACCOUNTS = "usa-virtual-accounts"` y `EDD_REQUIRED = "enhanced_due_diligence_required"`;
@@ -539,6 +604,11 @@ campos de `p` sin duplicados; `isCompleteFor`, `isEmpty`, `products`.
 Campos: nombre, apellido, documento, `ownershipPercentage` (0–100), `roleInCompany` (por defecto
 "Beneficiario Final"), `hasOwnership`, `hasControl`, `signer`, `politicallyExposed`, `countryOfBirth` (ISO-3,
 obligatorio, en mayúsculas), `personReferenceId` (Kira), `livenessStatus`, `livenessLink`, `livenessExpiresAt`.
+
+Desde el 15-sep guarda también lo que Kira pide por persona en `missing_fields`: `email` (**Kira empareja
+`associated_persons[]` por correo**), `birthDate`, `nationality`, `occupation`, `gender`, `phoneNumber`,
+`documentCountry` y la dirección plana `address_*`. `syncedToKira` marca a quien ya viajó: **a esa persona
+ya no se la puede borrar** (`rename`, `delete` y `markSyncedToKira` en `SyncUbosService`).
 
 | Método | Regla |
 |---|---|
@@ -557,8 +627,9 @@ obligatorio, en mayúsculas), `personReferenceId` (Kira), `livenessStatus`, `liv
 
 #### Operadores
 
-- **`OperatorUser(id, tenantId, email, passwordHash, firstName, lastName, role, status, mfaSecret)`**:
-  `assertCanLogin`, `assertBelongsTo`, `fullName`, `isActive`.
+- **`OperatorUser(id, tenantId, email, passwordHash, firstName, lastName, role, status, mfaSecret,
+  mfaEnabled, notificationsSeenAt)`**: `assertCanLogin`, `assertBelongsTo`, `fullName`, `isActive`. El
+  operador de plataforma no tiene empresa (`tenant_id` nulo → `TenantId.PLATFORM`).
 - **`UserStatus`**: `ACTIVE` (único que puede entrar), `SUSPENDED`, `DISABLED`.
 - **`Role`**, **`RoleScope`**: §6.4.
 
@@ -583,11 +654,13 @@ Campos: `currency`, `mode` (inmutable), `bank`, `description`, `kiraAccountId`, 
 | `isOpenInKira()` | tiene `kiraAccountId` |
 
 - **`VirtualAccountMode`**: `FIAT`, `CRYPTO` (`wireValue` en minúsculas).
-- **`VirtualAccountStatus`**: `PENDING`, `ACTIVE`, `INACTIVE`, `FAILED`; `fromWire`:
-  `APPROVED`/`ACTIVATING`/`ACTIVATED→ACTIVE`, `DEACTIVATED→INACTIVE`, `DECLINED`/`REJECTED→FAILED`.
-- **`VirtualAccountReadiness.isFundsReady(status, accountNumber, activatedEventSeen)`**: `true` si se vio el
-  evento `virtual_account.activated`; `false` si el estado es `declined`, `deactivated` o `failed`; si no,
-  `true` sólo con número de cuenta real (no vacío y distinto del centinela `PENDING-ACT-ACCOUNT`).
+- **`VirtualAccountStatus`**: `PENDING`, `ACTIVE`, `INACTIVE`, `FAILED`, `FROZEN`. Sobre los valores de
+  `2026-06-01`: `active→ACTIVE`, `activating` y `pending→PENDING` (el banco aún la está abriendo),
+  `DEACTIVATED→INACTIVE`, `DECLINED`/`REJECTED`/`failed→FAILED`, `frozen→FROZEN`.
+- **`VirtualAccountReadiness.isFundsReady(status, accountNumber, activatedEventSeen)`**: `false` si está
+  **congelada**; `true` si se vio el evento `virtual_account.activated` o el estado es `active`; `false` si
+  es `declined`, `deactivated` o `failed`; si no, `true` sólo con número de cuenta real (no vacío y distinto
+  del centinela `PENDING-ACT-ACCOUNT`), que cubre las filas proyectadas con la versión anterior.
 
 #### `Deposit`
 
@@ -601,12 +674,15 @@ Tres importes independientes (`grossAmount`, `feeAmount`, `netAmount`), `currenc
 | `creditsBalance()` | `COMPLETED` y no microdepósito |
 | `markAsMicrodeposit`, `describeSender`, `linkKiraDeposit`, `net()`, `gross()` | — |
 
-**`DepositStatus`**: `PENDING`, `COMPLETED`, `FAILED`, `REFUNDED` (terminales: `FAILED`, `REFUNDED`).
-`fromWire`: `RETURNED`/`REVERSED→REFUNDED`; `DECLINED`/`REJECTED`/`KYT_REJECTED→FAILED`;
-`PROCESSING`/`IN_TRANSIT`/`IN_REVIEW`/`KYT_PENDING→PENDING`; nulo o desconocido → `COMPLETED`.
-`fromEventName`: `deposit_funds_in_transit→PENDING`, `deposit_funds_failed→FAILED`,
-`deposit_returned→REFUNDED`, `deposit_funds_received`/`microdeposit_funds_received`/`deposit_funds_in_destination→COMPLETED`
-(o el estado del payload si viene).
+**`DepositStatus`**: `PENDING`, `COMPLETED`, `FAILED`, `REFUNDED`, `KYT_PENDING`, `KYT_REJECTED`
+(terminales: `FAILED`, `REFUNDED`; `KYT_REJECTED` **no** lo es: una devolución aprobada por cumplimiento lo
+pasa a `REFUNDED`). `fromWire`: `RETURNED`/`REVERSED→REFUNDED`; `DECLINED`/`REJECTED→FAILED`;
+`KYT_PENDING` y `KYT_REJECTED` son propios; `PROCESSING`/`IN_TRANSIT`/`IN_REVIEW→PENDING`; **nulo o
+desconocido → `PENDING`** (antes acreditaba, que es el fallo caro).
+`fromEventName`: `deposit_funds_in_transit`/`deposit_scheduled`/`deposit_in_review→PENDING`,
+`deposit_funds_failed→FAILED`, `deposit_funds_refunded→REFUNDED`,
+`deposit_funds_received`/`microdeposit_funds_received`/`deposit_funds_in_destination→COMPLETED`
+(o el estado del payload si viene). `isHeld()` marca el dinero retenido que la cuenta no puede pagar.
 
 ### 8.4 `treasury`
 
@@ -661,21 +737,28 @@ Campos: `kiraUserId`, `virtualAccountId`, `recipientId` (ids del portal), `amoun
 **Máquina de aprobación (`PayoutApprovalState`, sólo BFF):**
 
 ```
-PENDING_APPROVAL ──approve (aprobador ≠ creador, cotización vigente)──► APPROVED ──markAsSubmitted──► SUBMITTED
+PENDING_APPROVAL ──approve (1ª firma si el importe supera el umbral: sigue PENDING_APPROVAL)──┐
+        │                                                                                      │
+        ├──approve (firma que completa: ≠ creador, ≠ quien registró el destinatario,  ◄────────┘
+        │           ≠ la primera firma, cotización vigente)──► APPROVED ──markAsSubmitted──► SUBMITTED
+        │
+        ├──replaceQuotation (recotizar: anula la primera firma)──► PENDING_APPROVAL
         │
         └──reject (con motivo)──► REJECTED
 ```
 
 **Estado en Kira (`PayoutStatus`):** `NOT_SUBMITTED` (local) → `CREATED` → `PENDING` / `PROCESSING` /
-`KYT_PENDING` / `IN_REVIEW` → `COMPLETED` | `FAILED` | `EXPIRED` (terminales). `UNKNOWN` para valores
-desconocidos (no terminal). `fromWire`: `RETURNED`, `CANCELLED`, `CANCELED → FAILED`. `isInFlight()`:
-`CREATED`, `PENDING`, `PROCESSING`, `KYT_PENDING`, `IN_REVIEW`.
+`KYT_PENDING` / `IN_REVIEW` → `COMPLETED` | `FAILED` | `CANCELLED` | `EXPIRED` (terminales). `UNKNOWN` para
+valores desconocidos (no terminal). `CANCELLED` es un estado final propio (antes se plegaba en `FAILED`);
+una devolución bancaria pasa el pago a `FAILED` incluso desde `COMPLETED`. `isInFlight()`: `CREATED`,
+`PENDING`, `PROCESSING`, `KYT_PENDING`, `IN_REVIEW`.
 
 | Método | Regla |
 |---|---|
 | constructor | importe > 0, creador obligatorio, `PENDING_APPROVAL` + `NOT_SUBMITTED` |
 | `attachQuotation(quotation, now)` | cotización usable y de la misma cuenta y destinatario; hereda sus comisiones reales |
-| `approve(approverId, now)` | sólo desde `PENDING_APPROVAL`; aprobador distinto del creador; cotización no vencida |
+| `approve(approverId, now, requiredApprovals, recipientCreatorId)` | sólo desde `PENDING_APPROVAL`; el aprobador no puede ser el creador del pago, ni quien registró el destinatario, ni repetir su propia firma; cotización no vencida. Con dos firmas requeridas, la primera guarda `firstApproverUserId` y devuelve `false` (el pago no se envía) |
+| `replaceQuotation(quotation, now)` | recotiza un pago pendiente: ata la cotización nueva y **anula la primera firma**, porque el precio pudo cambiar |
 | `reject(approverId, reason)` | sólo desde `PENDING_APPROVAL` |
 | `assertSubmittable(now)` | aprobado, no enviado antes y cotización vigente |
 | `markAsSubmitted(kiraId, status)` | exige `APPROVED`; pasa a `SUBMITTED`; estado desconocido → `CREATED` |
@@ -741,26 +824,36 @@ Ver §6.6.
 | Método | Pasos |
 |---|---|
 | `status` | Devuelve `OnboardingView` desde el estado local (no llama a Kira) |
-| `register(RegisterBusiness)` | 1) rol `canManageCompliance`; 2) `tenant.assertActive`; 3) si ya está en Kira devuelve el estado sin llamar; 4) cuerpo `{type: business, business_legal_name, email, source_of_funds, external_id: tenantId}`; 5) reserva y guarda la clave de idempotencia; 6) `POST /v1/users`; 7) `linkKiraUser`, guarda el payload, aplica estado; 8) auditoría OK. Si Kira falla: auditoría ERROR y relanza |
-| `completeProfile(CompleteProfile)` | 1) rol; 2) activa y registrada; 3) **fusión superficial** del payload guardado con el nuevo (una clave nueva reemplaza entera a la guardada: `associated_persons` debe ir completo); 4) `PUT /v1/users/{id}`; 5) guarda payload y estado; 6) auditoría; 7) **relee con `GET`** porque el estado real lo confirma el recurso |
+| `register(RegisterBusiness)` | 1) rol `canManageCompliance`; 2) `tenant.assertActive`; 3) si ya está en Kira devuelve el estado sin llamar; 4) cuerpo `{type: business, business_legal_name, email, source_of_funds, capabilities: {requested_banks: [kira.bank]}, external_id: tenantId}`; 5) reserva y guarda la clave de idempotencia; 6) `POST /v1/users`; 7) `linkKiraUser`, guarda el payload, aplica estado; 8) auditoría OK. Si Kira falla: auditoría ERROR y relanza |
+| `completeProfile(CompleteProfile)` | 1) rol; 2) activa y registrada; 3) descarta `tos_accepted_version` del perfil recibido; 4) **fusión superficial** del payload guardado con el nuevo (una clave nueva reemplaza entera a la guardada: `associated_persons` debe ir completo); 5) `forUpdate` traduce el cuerpo al vocabulario del `PUT`; 6) `PUT /v1/users/{id}`; 7) guarda payload y estado; 8) auditoría; 9) **relee con `GET`** porque el estado real lo confirma el recurso |
+| `forUpdate(profile)` (estático) | El alta y la actualización **no comparten nombres** y el `PUT` rechaza entero lo que no reconoce (`400 Unrecognized key(s)`, verificado en sandbox): quita `type`, `external_id` y `has_material_intermediary_ownership`; renombra `representative_date_of_birth→representative_birth_date` y `business_trade_name→doing_business_as`; aplana `registered_address` en `address_*`; y rechaza `ein` si el país de constitución no es `USA` (Kira: *do NOT send for non-US businesses*) |
+| `attachDocuments(AttachDocuments)` | Kira no tiene endpoint de subida: el archivo viaja en el `PUT` dentro de `identifying_information[].documents[]` como *data URI* base64. Máximo 10 archivos y 7 MB por petición (el base64 infla ⅓ y el cuerpo entero no puede pasar de 10 MB), tipo real comprobado con `FileSignature`. **El base64 no se guarda**: `KybDocuments.withoutFiles` lo limpia antes de persistir el payload |
+| `terms` / `acceptTerms(AcceptTerms)` | Versión vigente (`bff.terms.version`), su enlace y la aceptada. Aceptar exige el expediente creado y la versión vigente; manda `tos_accepted_version` a Kira y audita `tenant.terms_accepted` |
 | `refresh` | Registrada → `GET /v1/users/{id}` → aplica estado |
+| `reconcile(tenantId)` | Igual que `refresh` pero sin operador: lo usa `TenantReconciliationWorker`; devuelve `true` si cambió el estado o la elegibilidad |
 
 `KiraUserState.from(json)` normaliza POST, PUT y GET: `id`, `status`, `missing_fields` (objeto producto →
 lista), `eligible_products[]` (`product_code`, `eligible`, `missing_fields`, `unsupported_reason`) y
 `verification_triggered` (nulo si no viene).
 
-`OnboardingView`: `tenantId`, `name`, `kiraUserId`, `status`, `verificationTriggered`,
-`pendingFields` (= `missingFields.forProduct("usa-virtual-accounts")`), `eligibleProducts`,
-`readyForVirtualAccounts`, `enhancedDueDiligenceRequired`.
+`OnboardingView`: `tenantId`, `name`, `kiraUserId`, `status`, **`rejectionReason`** (sólo existe aquí:
+ningún `GET` de Kira lo devuelve), `verificationTriggered`, `pendingFields`
+(= `missingFields.forProduct("usa-virtual-accounts")`), `eligibleProducts`, `readyForVirtualAccounts`,
+`enhancedDueDiligenceRequired`.
+
+**`OnboardingDraftService`** guarda el borrador del asistente (`GET`/`PUT /api/onboarding/draft`):
+reemplaza el objeto completo, `{}` lo borra y rechaza archivos (`422` ante un *data URI*). Nunca viaja a Kira.
 
 ### 9.3 `SyncUbosService` — beneficiarios finales
 
 | Método | Pasos |
 |---|---|
 | `list` | `UboView.Roster` (miembros, suma, hay beneficiario, liveness completo) |
-| `save(SaveUbo)` | Rol; sin `id` crea, con `id` carga dentro de la empresa; `describeDocument` + `describeRole`; auditoría `tenant.ubo_saved`. **No llama a Kira** |
-| `syncToKira` | Rol; `roster.assertReadyForVerification()`; construye `associated_persons[]` (`first_name`, `last_name`, `has_ownership`, `ownership_percentage`, `has_control`, `is_signer`, `pep_status`, `country_of_birth`, `title`, y si existen `document_type`, `document_number`, `person_reference_id`); lo envía con `onboarding.completeProfile`; auditoría `tenant.ubos_synced` |
-| `requestLivenessLinks(urls)` | Rol; `tenant.assertVerificationInProgress()`; `redirect` sólo si llegan **ambas** URLs; `POST …/liveness-link`; cada enlace se asigna por `person_reference_id` o, si no, por nombre completo; vencimiento `expires_at` o +7 días; auditoría |
+| `save(SaveUbo)` | Rol; sin `id` crea, con `id` carga dentro de la empresa; `rename` (nombre, apellido y cargo), `describeDocument`, `describeRole` y `describeIdentity` (fecha de nacimiento, nacionalidad, ocupación, género, teléfono, país del documento y dirección); **rechaza un correo repetido en la empresa** (Kira empareja por correo y duplicaba personas); auditoría `tenant.ubo_saved`. **No llama a Kira** |
+| `delete(id)` | Rol; sólo si Kira **aún no conoce** a esa persona (`syncedToKira`); devuelve el grupo actualizado |
+| `syncToKira` | Rol; `roster.assertReadyForVerification()`; construye `associated_persons[]` (`first_name`, `last_name`, `email`, `has_ownership`, `ownership_percentage`, `has_control`, `is_signer`, `pep_status`, `country_of_birth`, `title`, `birth_date`, `nationality`, `occupation`, `gender`, `phone_number`, `document_country` y la dirección plana `address_*`; **sin `person_reference_id`**, que no es campo de entrada documentado); lo envía con `onboarding.completeProfile`; marca a cada persona como enviada; auditoría `tenant.ubos_synced` |
+| `attachDocuments(id, docs, biometricConsent)` | Documento de identidad de **una** persona, anidado en su entrada de `associated_persons[]` (de ahí que necesite correo). Con una selfie exige el consentimiento y lo audita |
+| `requestLivenessLinks(cmd)` | Rol; **exige `biometricConsent`** y lo audita; `tenant.assertVerificationInProgress()`; `redirect` sólo si llegan **ambas** URLs; `POST …/liveness-link`; cada enlace se asigna por `person_reference_id` o, si no, por nombre completo; vencimiento `expires_at` o +7 días; auditoría |
 | `applyLivenessResult(personRef, status)` | Proyección del webhook `user.liveness_completed`: busca por referencia y aplica el estado |
 
 ### 9.4 `OpenVirtualAccountService` — cuentas virtuales
@@ -772,6 +865,7 @@ lista), `eligible_products[]` (`product_code`, `eligible`, `missing_fields`, `un
 | `refresh` | Abierta en Kira → `GET /v1/virtual-accounts/{id}` → aplica; si está demorada, WARN |
 | `refreshBalance` | `GET …/balance`; `available_balance` numérico; un **`400` no es error** (sigue activándose) y devuelve el último saldo |
 | `simulateDeposit` | Sólo con `kira.sandbox=true` (si no, `422` sin llamar); `{amount: 2 decimales, payment_type: wire|ach}`; auditoría; refresca saldo |
+| `reconcile(account)` | Sin operador, para `VirtualAccountReconciliationWorker`: `failed`, `deactivated` y `frozen` no tienen webhook propio |
 
 `applyRemote`: enlaza `id`, `describeBank(bank_name, account_number, routing_number)`, estado y saldo si viene.
 
@@ -794,7 +888,9 @@ lista), `eligible_products[]` (`product_code`, `eligible`, `missing_fields`, `un
 `fees.total_fees`, `payment_rail`).
 
 `DepositView`: `id`, `kiraDepositId`, `virtualAccountId`, `grossAmount`, `feeAmount`, `netAmount`, `currency`,
-`senderName`, `senderAccount`, `rail`, `status`, `microdeposit`, `creditsBalance`, `createdAt`, `updatedAt`.
+`senderName`, **`senderAccount` enmascarada** (`****1234`), `rail`, `status`, `microdeposit`,
+`creditsBalance`, **`held`** (retenido por KYT: la cuenta no puede pagar con ese dinero), `createdAt`,
+`updatedAt`.
 
 ### 9.6 `RegisterRecipientService` — destinatarios
 
@@ -802,7 +898,7 @@ lista), `eligible_products[]` (`product_code`, `eligible`, `missing_fields`, `un
 |---|---|
 | `list` | Sólo **activos** de la empresa, ordenados por nombre |
 | `get` | Uno de la empresa |
-| `register(RegisterRecipient)` | 1) rol `canCreatePayout`; 2) empresa verificada y registrada; 3) construye titular (empresa o persona) y cuenta según riel (valida routing, SWIFT, par token/red, dirección ISO-2); 4) clave nueva; 5) `POST /v1/recipients` (`user_id`, `type`, nombres, contacto, `address`, `account` con `account_type` y sus campos; `bank_address` texto en ACH y objeto en WIRE); 6) lee `recipient_id` (o `id`); 7) guarda; 8) auditoría (marca "ya existía" si fue `202`) |
+| `register(RegisterRecipient, clientKey?)` | 0) con `Idempotency-Key` del portal, repetir la petición devuelve el destinatario ya creado; 1) rol `canCreatePayout`; 2) empresa verificada y registrada; 2b) guarda **quién lo registró** (después no podrá aprobar pagos hacia él); 3) construye titular (empresa o persona) y cuenta según riel (valida routing, SWIFT, par token/red, dirección ISO-2); 4) clave nueva; 5) `POST /v1/recipients` (`user_id`, `type`, nombres, contacto, `address`, `account` con `account_type` y sus campos; `bank_address` texto en ACH y objeto en WIRE); 6) lee `recipient_id` (o `id`); 7) guarda; 8) auditoría (marca "ya existía" si fue `202`) |
 | `archive(id, replacedBy?)` | Rol; con reemplazo (de la misma empresa) enlaza y archiva; sin él, archiva |
 | `listInKira` | Registrada → `GET /v1/recipients?user_id=` → `KiraRecipientView` con cuenta enmascarada y `localRecipientId` si existe en la empresa |
 | `getInKira(id)` | Destinatario local registrado → `GET /v1/recipients/{kiraId}` |
@@ -832,8 +928,9 @@ contingencia; 10) guarda y audita. `list(limit)` y `get(id)` leen dentro de la e
 
 | Método | Pasos |
 |---|---|
-| `create(CreatePayout)` | 1) rol; 2) empresa verificada y registrada; 3) cuenta de la empresa abierta en Kira y destinatario usable; 4) clave nueva; 5) pago con `kiraUserId` **de la empresa**, ids del portal y comisiones estimadas; 6) con `quotationId`: debe ser de la misma cuenta y destinatario y se ata (hereda comisiones); 7) guarda y audita `payout.created` |
-| `approveAndSubmit(id, ApprovePayout?)` | 1) rol `canApprovePayout`; 2) carga el pago; 3) si hay cotización, `assertRedeemable`; 4) `approve` (aprobador ≠ creador); 5) guarda y audita `payout.approved`; 6) **envío**: `assertSubmittable`, cuenta con fondos listos, destinatario usable con id de Kira; cuerpo (`recipient_id` de Kira, `amount` bruto, `quote_id` **o** `client_markup`, `nature_of_payment`, `supporting_documents`, `extra_info {memo ≤255, internal_notes ≤1000}`); `POST /v1/virtual-accounts/{kiraAccountId}/payout` con la clave del pago; lee `id` o `payout_id`; `markAsSubmitted`, `describeRemote`; marca la cotización `EXECUTED`; audita `payout.submitted OK`. Si Kira falla: `fail`, audita ERROR y relanza |
+| `create(CreatePayout, clientKey?)` | 0) con `Idempotency-Key` del portal, repetir devuelve el pago ya creado; 1) rol; 2) empresa verificada y registrada; 3) cuenta de la empresa abierta en Kira y destinatario usable; 4) clave nueva; 5) pago con `kiraUserId` **de la empresa**, ids del portal y comisiones estimadas; 6) con `quotationId`: debe ser de la misma cuenta y destinatario y se ata (hereda comisiones); 7) guarda y audita `payout.created` |
+| `approveAndSubmit(id, ApprovePayout?)` | 1) rol `canApprovePayout`; 2) carga el pago; 3) si hay cotización, `assertRedeemable`; 4) `approve` con las firmas que pide `PayoutApprovalPolicy` y el autor del destinatario: **si es la primera de dos, guarda la firma, audita `payout.first_approval` y termina sin llamar a Kira**; 5) guarda y audita `payout.approved`; 6) **envío**: `assertSubmittable`, cuenta con fondos listos, destinatario usable con id de Kira; cuerpo (`recipient_id` de Kira, `amount` bruto, `quote_id` **o** `client_markup`, `nature_of_payment`, `supporting_documents`, `extra_info {memo ≤255, internal_notes ≤1000}`); `POST /v1/virtual-accounts/{kiraAccountId}/payout` con la clave del pago; lee `id` o `payout_id`; `markAsSubmitted`, `describeRemote`; marca la cotización `EXECUTED`; audita `payout.submitted OK`. Si Kira falla: `fail`, audita ERROR y relanza |
+| `requote(id)` | Rol maker o aprobador; pago pendiente con precio fijado; pide a Kira una cotización nueva con la misma cuenta, destinatario, riel e importe (`CreateQuoteService.requote`), la ata al pago, vence la anterior y **anula la primera firma**; audita `payout.requoted` |
 | `reject(id, reason)` | Rol aprobador; `payout.reject`; auditoría |
 | `refreshFromKira(id)` | Sin `kiraPayoutId` devuelve el estado local; si no, `GET /v1/payouts/{id}` → `applyRemoteStatus(status, error_code)` y `describeRemote(reference_number, payment_method)` |
 | `list(limit)` (máx. 100), `get(id)` | Con `blockedByRfiId` si un RFI abierto lo detiene |
@@ -851,12 +948,17 @@ contingencia; 10) guarda y audita. `list(limit)` y `get(id)` leen dentro de la e
 | `answer(id, AnswerItems)` | Rol; RFI abierto; validación **por item** (repetido, ajeno, de tipo documento, valor no escalar) → `RfiAnswerRejectedException` sin llamar; `PATCH …/items {items: [{item_id, answer_value}]}`; `409` → relee, guarda y `422`; `422` → errores por `item_id`; tras éxito relee (si falla la relectura, WARN) y audita. `@Transactional(noRollbackFor = DomainException.class)` |
 | `uploadDocuments(id, itemId, files)` | Rol; RFI abierto; item de tipo documento; valida cantidad (`answer_spec.max_files` o 20), tamaño (30 MB), vacío y MIME (`answer_spec.mime_types` o PDF/JPEG/PNG/HEIC/WebP); multipart a Kira; `409`/`422` como arriba; relee y audita |
 | `removeDocument(id, itemId, documentId)` | Rol; RFI abierto; item documento; `DELETE`; `422` (último archivo) por item; relee y audita |
-| `documentLink(id, itemId, documentId)` | Item documento de la empresa → `{downloadUrl, expiresAt}`; la URL no se registra |
+| `documentLink(id, itemId, documentId)` | Item documento de la empresa → `{downloadUrl, expiresAt}`; la URL es una credencial al portador y **no se registra**, pero sí queda auditado quién la pidió (`compliance.rfi_document_link_issued`) |
+| `mintUboLink(id, itemId)` | Ítems `ubo_link` que llegan con `applicant_id` y `person_id` pero **sin `url`**: acuña el enlace con `POST …/ubo-link` (caduca en ~1 h) |
 | `syncForTenant(tenantId)` | Lo mismo que `sync` pero sin operador (lo usa el worker de reconciliación); devuelve cuántos RFIs asentó |
 | `applyWebhook(kiraRfiId, rawStatus)` | Aplica el estado del evento si el RFI existe; relee siempre de Kira; atribuye por RFI local o por `user_id`/bloqueo; `upsert` |
 
-`RfiView`: `id`, `kiraRfiId`, `status`, `open`, `overdue`, `dueDate`, `totalItems`, `pendingItems`, `items`,
+`RfiView`: `id`, `kiraRfiId`, `status`, `open`, `overdue`, `dueDate`, **`resolutionReason`** (por qué cerró
+sin resolverse: `expired`, `rejected` o `withdrawn`), `totalItems`, `pendingItems`, `items`,
 `blocking {type, kiraResourceId, payoutId, payoutStatus, depositId, depositStatus}`, `createdAt`, `updatedAt`.
+
+Un RFI **retirado** responde `404` en todas sus rutas: al refrescar, sincronizar o recibir su webhook pasa a
+`WITHDRAWN` en local en vez de fallar en cada pasada.
 
 ### 9.10 `ReferenceCatalogService`
 
@@ -876,6 +978,35 @@ clave ya reservada y confirman antes de volver. Los llaman `SubmitOnboardingServ
 uso no borre la clave. Vive en una clase aparte porque una llamada interna al propio servicio no pasa
 por el proxy de Spring y la propagación no se aplicaría.
 
+### 9.13 `MfaService` — segundo factor
+
+Ver §6.2.1. Auditoría: `auth.mfa_setup_started`, `auth.mfa_enabled`, `auth.mfa_disabled`,
+`auth.mfa_verified` y `auth.mfa_failed`.
+
+### 9.14 `NotificationService` y `AuditQueryService` — avisos, eventos y bitácora
+
+- **`NotificationService`**: al proyectar un webhook crea el aviso de negocio de esa empresa
+  (vinculación aprobada, rechazada o en revisión, prueba de vida, cuenta operativa o congelada, depósito
+  recibido, devuelto o retenido, pago completado, fallido, retenido o cancelado, RFI abierto o cerrado).
+  `feed(operator, limit)`, `unreadCount(operator)` (contra `users.notifications_seen_at`) y `markAllRead`.
+- **`AuditQueryService`**: `auditTrail(operator, limit)` resuelve el actor a nombre y correo, y
+  `events(operator, limit)` devuelve los webhooks recibidos de esa empresa **sin el payload** (puede traer
+  datos personales y aquí sólo interesa qué pasó y si se proyectó). Tope de 200 filas.
+
+### 9.15 `PlatformConsoleService` — consola de operaciones
+
+Sólo `PLATFORM_OPERATOR` (§6.4). `tenants()` resume cada empresa (estado KYB, faltantes, beneficiarios,
+cuentas, RFIs abiertos y vencidos, pagos retenidos), `tenant(id)` arma la ficha 360 (resumen,
+`OnboardingView`, beneficiarios, cuentas, 20 pagos y 20 depósitos recientes, RFIs) y **queda auditada**
+(`platform.tenant_viewed`), `refresh(id)` relee empresa y cuentas en Kira, y `reviewQueue()` ordena lo que
+pide atención en todas las organizaciones, lo crítico primero. Es **de solo lectura**: no remedia expedientes.
+
+### 9.16 `PayoutApprovalPolicy` — límites de aprobación
+
+Record de configuración (`bff.payouts.approval`): umbral general y por empresa. `requiredApprovals(tenant,
+amount)` devuelve 1 o 2 y `thresholdFor(tenant)` el límite aplicado. Es lo único que decide si un pago
+necesita doble firma; el resto de la regla vive en `Payout.approve`.
+
 ---
 
 ## 10. API REST
@@ -890,9 +1021,16 @@ Contrato campo a campo y ejemplos: [`API-GUIA.md`](API-GUIA.md).
 | GET | `/api/onboarding` | autenticado | `OnboardingController.status` | no |
 | POST | `/api/onboarding` → **201** | ADMIN, COMPLIANCE_INTERNAL | `.register` | `POST /v1/users` |
 | PUT | `/api/onboarding` | ADMIN, COMPLIANCE_INTERNAL | `.completeProfile` | `PUT` + `GET /v1/users/{id}` |
-| POST | `/api/onboarding/refresh` | autenticado | `.refresh` | `GET /v1/users/{id}` |
+| POST | `/api/onboarding/refresh` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.refresh` | `GET /v1/users/{id}` |
+| POST | `/api/onboarding/documents` (multipart `files`) | ADMIN, COMPLIANCE_INTERNAL | `.attachDocuments` | `PUT` + `GET /v1/users/{id}` |
+| GET | `/api/onboarding/draft` | autenticado | `OnboardingDraftController.get` | no |
+| PUT | `/api/onboarding/draft` | ADMIN, COMPLIANCE_INTERNAL | `.save` | no |
+| GET | `/api/onboarding/terms` | autenticado | `OnboardingController.terms` | no |
+| POST | `/api/onboarding/terms` | ADMIN, COMPLIANCE_INTERNAL | `.acceptTerms` | `PUT /v1/users/{id}` |
 | GET | `/api/ubos` | autenticado | `UboController.list` | no |
 | POST | `/api/ubos` | ADMIN, COMPLIANCE_INTERNAL | `.save` | no |
+| DELETE | `/api/ubos/{id}` | ADMIN, COMPLIANCE_INTERNAL | `.delete` (sólo si Kira no lo conoce) | no |
+| POST | `/api/ubos/{id}/documents` (multipart `files`, `biometricConsent`) | ADMIN, COMPLIANCE_INTERNAL | `.attachDocuments` | `PUT /v1/users/{id}` |
 | POST | `/api/ubos/sync` | ADMIN, COMPLIANCE_INTERNAL | `.sync` | `PUT` + `GET /v1/users/{id}` |
 | POST | `/api/ubos/liveness-links` | ADMIN, COMPLIANCE_INTERNAL | `.requestLivenessLinks` | `POST …/liveness-link` |
 | GET | `/api/rfis?open=` | autenticado | `RfiController.list` | no |
@@ -902,19 +1040,20 @@ Contrato campo a campo y ejemplos: [`API-GUIA.md`](API-GUIA.md).
 | PATCH | `/api/rfis/{id}/items` | ADMIN, COMPLIANCE_INTERNAL | `.answer` | `PATCH …/items` + `GET` |
 | POST | `/api/rfis/{id}/items/{itemId}/documents` (multipart `files`) | ADMIN, COMPLIANCE_INTERNAL | `.uploadDocuments` | `POST …/documents` + `GET` |
 | DELETE | `/api/rfis/{id}/items/{itemId}/documents/{documentId}` | ADMIN, COMPLIANCE_INTERNAL | `.removeDocument` | `DELETE …/documents/{doc}` + `GET` |
-| GET | `/api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | autenticado | `.documentLink` | `GET …/documents/{doc}` |
+| GET | `/api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | ADMIN, COMPLIANCE_INTERNAL | `.documentLink` (auditado) | `GET …/documents/{doc}` |
+| POST | `/api/rfis/{id}/items/{itemId}/ubo-link` | ADMIN, COMPLIANCE_INTERNAL | `.mintUboLink` | `POST …/ubo-link` |
 | GET | `/api/virtual-accounts` | autenticado | `VirtualAccountController.list` | no |
 | GET | `/api/virtual-accounts/{id}` | autenticado | `.get` | no |
 | POST | `/api/virtual-accounts` → **201** | ADMIN, TREASURY_MAKER, COMPLIANCE_INTERNAL | `.open` | `POST /v1/virtual-accounts` (+ lista/detalle si 409) |
-| POST | `/api/virtual-accounts/{id}/refresh` | autenticado | `.refresh` | `GET /v1/virtual-accounts/{id}` |
-| POST | `/api/virtual-accounts/{id}/balance` | autenticado | `.refreshBalance` | `GET …/balance` |
+| POST | `/api/virtual-accounts/{id}/refresh` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.refresh` | `GET /v1/virtual-accounts/{id}` |
+| POST | `/api/virtual-accounts/{id}/balance` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.refreshBalance` | `GET …/balance` |
 | POST | `/api/virtual-accounts/{id}/simulate-deposit` | ADMIN, TREASURY_MAKER | `.simulateDeposit` | `POST …/simulate-deposit` + balance |
 | GET | `/api/deposits?limit=50` | autenticado | `DepositController.list` | no |
 | GET | `/api/virtual-accounts/{id}/deposits?limit=50` | autenticado | `.listByAccount` | no |
-| POST | `/api/virtual-accounts/{id}/deposits/sync` | autenticado | `.syncFromKira` | `GET …/deposits` |
+| POST | `/api/virtual-accounts/{id}/deposits/sync` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.syncFromKira` | `GET …/deposits` |
 | GET | `/api/recipients` | autenticado | `RecipientController.list` | no |
 | GET | `/api/recipients/{id}` | autenticado | `.get` | no |
-| POST | `/api/recipients` → **201** | TREASURY_MAKER, ADMIN | `.register` | `POST /v1/recipients` |
+| POST | `/api/recipients` → **201** (`Idempotency-Key` opcional) | TREASURY_MAKER, ADMIN | `.register` | `POST /v1/recipients` |
 | POST | `/api/recipients/{id}/archive` | TREASURY_MAKER, ADMIN | `.archive` | no |
 | GET | `/api/recipients/kira` | autenticado | `.listInKira` | `GET /v1/recipients` |
 | GET | `/api/recipients/{id}/kira` | autenticado | `.getInKira` | `GET /v1/recipients/{id}` |
@@ -923,22 +1062,39 @@ Contrato campo a campo y ejemplos: [`API-GUIA.md`](API-GUIA.md).
 | POST | `/api/quotations` → **201** | TREASURY_MAKER, ADMIN | `.create` | `POST /v1/quotations` |
 | GET | `/api/payouts?limit=50` | autenticado | `PayoutController.list` | no |
 | GET | `/api/payouts/{id}` | autenticado | `.get` | no |
-| POST | `/api/payouts` → **201** | TREASURY_MAKER, ADMIN | `.create` | no |
-| POST | `/api/payouts/{id}/approve` | TREASURY_APPROVER, ADMIN | `.approve` | `POST …/payout` |
+| POST | `/api/payouts` → **201** (`Idempotency-Key` opcional) | TREASURY_MAKER, ADMIN | `.create` | no |
+| POST | `/api/payouts/{id}/approve` | TREASURY_APPROVER, ADMIN | `.approve` | `POST …/payout` (no en la 1ª de dos firmas) |
+| POST | `/api/payouts/{id}/requote` | TREASURY_MAKER, TREASURY_APPROVER, ADMIN | `.requote` | `POST /v1/quotations` |
 | POST | `/api/payouts/{id}/reject` | TREASURY_APPROVER, ADMIN | `.reject` | no |
-| POST | `/api/payouts/{id}/refresh` | autenticado | `.refresh` | `GET /v1/payouts/{id}` |
+| POST | `/api/payouts/{id}/refresh` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.refresh` | `GET /v1/payouts/{id}` |
 | GET | `/api/payouts/{id}/events` | autenticado | `.events` | `GET /v1/payouts/{id}` |
 | POST | `/api/payouts/preview` | TREASURY_MAKER, ADMIN | `.preview` | `POST …/payout/preview` |
 | GET | `/api/payouts/kira?status=&page=1&limit=20&fromDate=&toDate=` | autenticado | `.kiraHistory` | `GET /v1/payouts` |
 | GET | `/api/reference/countries` | autenticado | `ReferenceController.countries` | `GET /v1/countries` (cache 24 h) |
+| POST | `/api/auth/mfa/verify` | **público** (canjea el reto) | `AuthController.verifyMfa` → `MfaService.verify` | no |
+| POST | `/api/auth/mfa/setup` | **público** (con reto) o autenticado | `.setupMfa` | no |
+| POST | `/api/auth/mfa/enable` | **público** (con reto) o autenticado | `.enableMfa` | no |
+| POST | `/api/auth/mfa/disable` | autenticado | `.disableMfa` | no |
+| GET | `/api/notifications?limit=50` | autenticado | `ActivityController.notifications` | no |
+| GET | `/api/notifications/unread-count` | autenticado | `.unreadCount` | no |
+| POST | `/api/notifications/read` → **204** | autenticado | `.markAllRead` | no |
+| GET | `/api/events?limit=100` | ADMIN, COMPLIANCE_INTERNAL | `.events` (sin payload) | no |
+| GET | `/api/audit?limit=100` | ADMIN, COMPLIANCE_INTERNAL | `.auditTrail` | no |
+| GET | `/api/platform/tenants` | PLATFORM_OPERATOR | `PlatformController.tenants` | no |
+| GET | `/api/platform/tenants/{id}` | PLATFORM_OPERATOR | `.tenant` (auditado) | no |
+| POST | `/api/platform/tenants/{id}/refresh` | PLATFORM_OPERATOR | `.refresh` | `GET /v1/users/{id}` + cuentas |
+| GET | `/api/platform/review-queue` | PLATFORM_OPERATOR | `.reviewQueue` | no |
 | POST | `/api/webhooks/kira` | **público (HMAC)** | `KiraWebhookController.receive` | según evento |
 
-Además: `GET /actuator/health` (público), `GET /swagger-ui.html` y `GET /v3/api-docs` (públicos salvo en prod).
+Además: `GET /actuator/health` (público), `GET /actuator/metrics` (**sólo `PLATFORM_OPERATOR`**),
+`GET /swagger-ui.html` y `GET /v3/api-docs` (públicos salvo en prod). Cada respuesta lleva su
+`X-Request-Id` (§14).
 
-**Total: 47 operaciones sobre 40 rutas en 11 controladores.** Los grupos de Swagger (`@Tag`) son:
+**Total: 69 operaciones en 14 controladores.** Los grupos de Swagger (`@Tag`) son:
 `0. Catalogos`, `1. Sesion`, `1.1 Onboarding KYB`, `1.2 Beneficiarios finales`,
 `1.3 Solicitudes de informacion (RFI)`, `2. Pagos`, `2.1 Cotizaciones`, `2.2 Destinatarios`,
-`2.3 Cuentas virtuales`, `2.4 Depositos`, `6. Webhooks de Kira`.
+`2.3 Cuentas virtuales`, `2.4 Depositos`, `6. Webhooks de Kira`, `7. Actividad`,
+`8. Consola de operaciones`.
 
 ---
 
@@ -949,17 +1105,28 @@ Además: `GET /actuator/health` (público), `GET /swagger-ui.html` y `GET /v3/ap
 `POST /api/webhooks/kira`, cualquier `Content-Type`, cuerpo como `byte[]`:
 
 1. Sin `kira.webhook-secret` → `503 {"error":"webhook_secret_not_configured"}` (log ERROR).
-2. Firma `x-signature-sha256` inválida o ausente → `401 {"error":"invalid_signature"}` (log WARN con tamaño).
-3. Válida → convierte a texto **después** de verificar y `processWebhook.enqueue(payload)` → `200 {"status":"received"}`.
+2. Firma `x-signature-sha256` inválida o ausente → `401 {"error":"invalid_signature"}` (log WARN con
+   tamaño). Durante una rotación vale también `kira.webhook-secret-previous`.
+3. Válida → convierte a texto **después** de verificar y **guarda el evento antes de responder**
+   (`processWebhook.record`): si la base falla, sale un `5xx` y Kira reintenta. JSON ilegible con firma
+   válida → `400 {"error":"invalid_json"}` (reintentarlo daría lo mismo).
+4. `200 {"status":"received"}` o `{"status":"duplicate"}`, y la proyección sigue después en otro hilo
+   (`projectLater`).
 
-Kira entrega **una sola vez**, sin reintentos, y aborta a los 30 s: por eso se responde inmediatamente y
-nunca con `4xx` ante un evento desconocido.
+Kira aborta a los 30 s y **reintenta 4 veces** (1, 5, 15 y 60 min) ante `408`, `429`, `5xx` o falta de
+respuesta; un `4xx` no se reintenta. Por eso se responde enseguida y nunca con `4xx` ante un evento
+desconocido. Cada resultado incrementa `kira.webhooks.received` (§14).
 
 ### 11.2 Procesamiento — `ProcessWebhookUseCase`
 
-`enqueue` (`@Async` en `webhookExecutor`) llama a `process` y **nunca propaga** excepciones (sólo log).
+`record(rawPayload)` (`@Transactional`, dentro de la petición de Kira) guarda el evento y devuelve su id
+interno, o vacío si era duplicado. `projectLater(storedId)` (`@Async` en `webhookExecutor`) proyecta
+después llamando a `self.reproject(...)` **a través del proxy de Spring** (una llamada directa a `this` se
+saltaría la transacción) y **nunca propaga** excepciones: la fila queda con `processing_error`, suma una a
+`kira.webhooks.projection.failures` y la recoge `WebhookReprojectionWorker`. `process(rawPayload)` hace las
+dos cosas en el mismo hilo y lo usan las pruebas.
 
-`process(rawPayload)`:
+Pasos comunes:
 
 1. `KiraWebhookEnvelope.from(json)` normaliza las dos envolturas:
    - plana `{event, data{event_id, status, …}}`;
@@ -968,25 +1135,23 @@ nunca con `4xx` ante un evento desconocido.
 2. Sin `event_id` → WARN y se guarda con id `no-id:<uuid>`; con `event_id` ya existente → se ignora.
 3. Inserta en `webhooks_log` (`saveAndFlush`); una violación de unicidad concurrente se ignora.
 4. `applyProjection`; si falla, guarda `processing_error` (máx. 1000) y deja `processed = false`; si no,
-   `processed = true` y `processed_at`.
-
-> ⚠️ `process` está anotado `@Transactional`, pero `enqueue` lo invoca dentro de la misma clase, así que el
-> proxy de Spring no aplica: en ejecución real **cada operación de repositorio corre en su propia
-> transacción** (§17).
+   `processed = true` y `processed_at`. La proyección anota además `tenant_id` en la fila y crea el aviso
+   de negocio de esa empresa (§9.14).
 
 ### 11.3 Proyecciones por familia
 
 | Prefijo | Qué hace |
 |---|---|
 | `payout.*` | `resource_id` = `payout_id` o `id`; `normalized_status` = `PayoutStatus.fromWire`. Si el pago local existe: `applyRemoteStatus` (con `error_code = va-payout-bank-returned` para `payout.returned`). Se decide por el **valor** del estado, no por el nombre (payout.* y payout.status_changed se solapan) |
-| `user.*` | `resource_id` = `user_id` o `id`. `user.liveness_completed` → `SyncUbosService.applyLivenessResult(person_reference_id o subject_id, LivenessStatus)`. Con empresa local: `user.verification.failed` → `rejectVerification(reason/rejection_reason/message)`; `user.verification.accepted` → `VERIFIED` y verificación disparada; otros con `status` explícito → aplica estado; **sin `status` no se toca** (evita degradar a `CREATED`) |
-| `virtual_account.*` | Si el nombre contiene `deposit` → `KiraDepositEvent.from` + `RecordDepositService.apply`. Si no, con cuenta local: `virtual_account.activated` → `markActivatedEventSeen`; otros con estado → `applyRemoteStatus`; siempre `describeBank` |
-| `rfi.*` | `resource_id` = `rfi_id` o `id`; `AnswerRfiService.applyWebhook` (relee el RFI en Kira) |
+| `user.*` | `resource_id` = `user_id` o `id`. `user.liveness_completed` → `SyncUbosService.applyLivenessResult(person_reference_id o subject_id, LivenessStatus)` leyendo **`result`** (es donde Kira manda `approved`), y una referencia nula no se proyecta. Con empresa local: `user.verification.failed` → `rejectVerification` con **`reasons[]` unidos por `; `**; `user.status_changed` → **`new_status`** (es el evento que Kira pide suscribir); `user.verification.accepted` → `VERIFIED` y verificación disparada; otros con `status` explícito → aplica estado; **sin estado no se toca** (evita degradar a `CREATED`) |
+| `virtual_account.*` | Si el nombre contiene `deposit` → `KiraDepositEvent.from` (ordenante y riel salen de `source.sender_name` y `source.payment_rail`) + `RecordDepositService.apply`; el estado sale del **nombre del evento** cuando el payload no lo trae, así que un `deposit_funds_refunded` ya no se acredita. Si no, con cuenta local: `virtual_account.activated` → `markActivatedEventSeen`; otros con estado → `applyRemoteStatus`; siempre `describeBank` |
+| `rfi.*` | `resource_id` = `rfi_id` o `id`; `AnswerRfiService.applyWebhook` (relee el RFI en Kira; guarda `to_status` y `resolution_reason`, y un `404` lo cierra como `WITHDRAWN`) |
 | otros | Se almacenan y se registra INFO |
 
 **Eventos que son única fuente de su dato:** `user.verification.failed` (motivo del rechazo),
 `user.liveness_completed` (resultado real), `virtual_account.activated` (fondos-listos) y
-`payout.status_changed` (`KYT_PENDING`/`IN_REVIEW`).
+`payout.status_changed` (`KYT_PENDING`/`IN_REVIEW`). Si se pierden tras los cuatro reintentos, los workers
+de reconciliación releen empresas, cuentas, pagos y RFIs (§12.6).
 
 ---
 
@@ -1011,22 +1176,24 @@ direcciones.
 
 ### 12.2 Tablas
 
-12 tablas, ids `VARCHAR(36)`, importes `DECIMAL(18,4)`, enums como `VARCHAR`, JSON nativo donde el dato es libre.
+13 tablas, ids `VARCHAR(36)`, importes `DECIMAL(18,4)`, enums como `VARCHAR`, JSON nativo donde el dato es libre.
 
 | Tabla | Entidad | Contenido | Claves y restricciones |
 |---|---|---|---|
 | `tenants` | `TenantEntity` | Empresas y estado del bucle KYB (`missing_fields`, `eligible_products`, `onboarding_payload` JSON; `verification_triggered`, `onboarding_idempotency_key`, `rejection_reason`) | `uk_tenants_name`, `uk_tenants_kira_user` |
 | `roles` | `RoleEntity` | Catálogo RBAC (`name`, `description`, `scope`) | `uk_roles_name` |
-| `users` | `OperatorUserEntity` | Operadores (`email`, `password_hash`, nombres, `role_id`, `tenant_id` nulo para soporte, `status`, `mfa_secret`) | `uk_users_email`, **FK `fk_users_role` → `roles.id`** |
+| `users` | `OperatorUserEntity` | Operadores (`email`, `password_hash`, nombres, `role_id`, `tenant_id` **nulo para el operador de plataforma**, `status`, `mfa_secret` cifrado, `mfa_enabled`, `notifications_seen_at`) | `uk_users_email`, **FK `fk_users_role` → `roles.id`** |
 | `ubos` | `UboEntity` | Beneficiarios, booleanos del KYB, liveness (`liveness_link TEXT`) | `idx_ubos_tenant` |
 | `virtual_accounts` | `VirtualAccountEntity` | Cuentas, banco, saldo, `activated_event_seen`, `opening_idempotency_key` | `uk_va_kira_account`, `idx_virtual_accounts_tenant` |
 | `deposits` | `DepositEntity` | Bruto, comisión, neto, ordenante, riel, estado, microdepósito | `uk_deposits_kira_id`, `idx_deposits_tenant` |
-| `recipients` | `RecipientEntity` | Espejo completo: titular, contacto, `holder_address`/`bank_address` JSON, columnas ACH/WIRE/WALLET, estado, reemplazo | `uk_recipients_kira_id`, `idx_recipients_tenant` |
+| `recipients` | `RecipientEntity` | Espejo completo: titular, contacto, `holder_address`/`bank_address` JSON, columnas ACH/WIRE/WALLET, estado, reemplazo, `created_by_user_id` (segregación de funciones) | `uk_recipients_kira_id`, `idx_recipients_tenant` |
 | `quotations` | `QuotationEntity` | Riel, importes, tasa, comisiones, `fees_snapshot` JSON, `rate_source`, vencimiento | `idx_quotations_tenant` |
-| `payouts` | `PayoutEntity` | Pago, comisiones, maker/approver, estados, cotización, `idempotency_key`, comprobante | `uk_payouts_idempotency`, `uk_payouts_kira_id`, `idx_payouts_tenant`, `idx_payouts_idempotency` |
-| `rfis` | `RfiEntity` | Estado, `items_payload` JSON, plazo, bloqueo | `uk_rfis_kira_id`, `idx_rfis_tenant`, `idx_rfis_blocking` |
-| `webhooks_log` | `WebhookEventEntity` | Evento crudo (`payload` JSON), tipo, `resource_id`, `normalized_status`, `processed`, `processing_error`, `retry_count` | `uk_webhooks_event_id`, `idx_webhooks_event` |
-| `audit_logs` | `AuditLogEntity` | Bitácora (`changes` JSON) | `idx_audit_tenant (tenant_id, created_at)` |
+| `payouts` | `PayoutEntity` | Pago, comisiones, maker/approver, `first_approver_user_id` (doble firma), estados, cotización, `idempotency_key`, comprobante | `uk_payouts_idempotency`, `uk_payouts_kira_id`, `idx_payouts_tenant`, `idx_payouts_idempotency` |
+| `rfis` | `RfiEntity` | Estado, `resolution_reason`, `items_payload` JSON, plazo, bloqueo | `uk_rfis_kira_id`, `idx_rfis_tenant`, `idx_rfis_blocking` |
+| `webhooks_log` | `WebhookEventEntity` | Evento crudo (`payload` JSON), tipo, `resource_id`, `tenant_id` (para el centro de eventos), `normalized_status`, `processed`, `processing_error`, `retry_count` | `uk_webhooks_event_id`, `idx_webhooks_event` |
+| `audit_logs` | `AuditLogEntity` | Bitácora (`changes` JSON, con `requestId` e `idempotencyKey`) | `idx_audit_tenant (tenant_id, created_at)` |
+| `notifications` | `NotificationEntity` | Avisos de negocio por empresa (tipo, severidad, título, mensaje, recurso) | `idx_notifications_tenant (tenant_id, created_at)` |
+| `tenants` (borrador) | `TenantEntity` | `onboarding_draft` JSON y `onboarding_draft_updated_at`: el asistente del portal | — |
 
 Columnas exactas y tipos: **Anexo C**.
 
@@ -1044,8 +1211,9 @@ Columnas exactas y tipos: **Anexo C**.
 | `QuotationJpaRepository` | `findByIdAndTenantId`, `findByTenantIdOrderByCreatedAtDesc`, `findByStatusAndQuoteExpiresAtBefore` |
 | `PayoutJpaRepository` | `findByIdAndTenantId`, `findByIdempotencyKey`, `findByKiraPayoutId`, `findByTenantIdOrderByCreatedAtDesc`, `findByKiraPayoutIdIsNotNullAndStatusInOrderByUpdatedAtAsc` (en vuelo) |
 | `RfiJpaRepository` | `findByIdAndTenantId`, `findByKiraRfiId`, `findByTenantIdOrderByCreatedAtDesc`, `findByTenantIdAndStatusInOrderByCreatedAtDesc`, `findFirstByBlockingResourceIdAndStatusInOrderByCreatedAtDesc` |
-| `WebhookEventJpaRepository` | `existsByEventId`, `findByEventId` |
+| `WebhookEventJpaRepository` | `existsByEventId`, `findByEventId`, `findByTenantIdOrderByCreatedAtDesc` (centro de eventos) |
 | `AuditLogJpaRepository` | `findByTenantIdOrderByCreatedAtDesc` |
+| `NotificationJpaRepository` | `findByTenantIdOrderByCreatedAtDesc`, conteo de no leídos desde `notifications_seen_at` |
 
 Los límites (`limit`) se aplican en memoria en los adaptadores (`stream().limit(...)`).
 
@@ -1059,7 +1227,13 @@ Columnas propias del BFF que tapan huecos de la API: `payouts.approval_state`, `
 `balance_refreshed_at`, `opening_idempotency_key`; `recipients` (espejo completo); `quotations.rail`,
 `destination_currency`, `balance_sufficient`, `rate_source`, `fees_snapshot`; `deposits.microdeposit`,
 `updated_at`; `webhooks_log.resource_id`, `normalized_status`, `processing_error`, `retry_count`;
-`rfis.blocking_type`, `blocking_resource_id`.
+`rfis.blocking_type`, `blocking_resource_id`, `resolution_reason`.
+
+Añadidas después (15-sep): `ubos.email` y sus datos de identidad (`birth_date`, `nationality`,
+`occupation`, `gender`, `phone_number`, `document_country`, `address_*`) más `synced_to_kira`;
+`users.mfa_enabled`, `notifications_seen_at` y `tenant_id` nulo; `webhooks_log.tenant_id`;
+`payouts.first_approver_user_id`; `recipients.created_by_user_id`; la tabla `notifications`; y
+`tenants.onboarding_draft`. El SQL exacto para cert y prod está en `ESTADO.md` §7.
 
 ### 12.5 Regenerar el DDL
 
@@ -1079,11 +1253,14 @@ class TempDdlDumpTest { @Test void dump() {} }
 
 `./mvnw test -Dtest=TempDdlDumpTest -Dsurefire.failIfNoSpecifiedTests=false`, revisar
 `target/schema-mysql.sql` y **borrar la clase**. Si aparece un `enum('…')`, falta
-`@JdbcTypeCode(SqlTypes.VARCHAR)`.
+`@JdbcTypeCode(SqlTypes.VARCHAR)`. El anexo C es ese volcado con una columna por línea.
+
+Los anexos A y B se regeneran con `python3 scripts/generar-anexos-documentacion.py a` (referencia clase
+por clase) y `… b` (catálogo de pruebas), desde la raíz del repositorio.
 
 ### 12.6 Reconciliación
 
-Cinco workers `@Component` con `@Scheduled(fixedDelayString = …)`, todos condicionados a
+Siete workers `@Component` con `@Scheduled(fixedDelayString = …)`, todos condicionados a
 `bff.reconciliation.enabled` (por defecto `true`; `false` en las pruebas). Ninguno lleva
 `@Transactional`: cada guardado va en su propia transacción, así que un fallo aislado no deshace lo ya
 reconciliado. Un error por elemento se registra y el lote continúa; un `KiraNotConfiguredException`
@@ -1096,6 +1273,8 @@ corta el lote con un solo aviso.
 | `LivenessReconciliationWorker` | 1 h | `findPendingLivenessExpiredBefore(now)` → `expireLivenessLink()` (sin llamar a Kira) |
 | `RfiReconciliationWorker` | 15 min | Por cada empresa con `kiraUserId`: `AnswerRfiService.syncForTenant` |
 | `WebhookReprojectionWorker` | 30 min (lote de 50) | `findByProcessedFalseAndRetryCountLessThanOrderByCreatedAtAsc(5)` → `ProcessWebhookUseCase.reproject` |
+| `TenantReconciliationWorker` | 30 min | Empresas registradas que aún no pueden operar → `SubmitOnboardingService.reconcile` (recupera un `user.status_changed` perdido) |
+| `VirtualAccountReconciliationWorker` | 1 h | Cuentas abiertas → `OpenVirtualAccountService.reconcile`: `failed`, `deactivated` y `frozen` **no tienen webhook propio** |
 
 **Tope de reintentos.** `WebhookReprojectionWorker.MAX_RETRIES = 5`. Cada fallo incrementa
 `webhooks_log.retry_count`; al quinto, la fila queda con `processing_error = 'Max retries reached'`
@@ -1148,16 +1327,22 @@ sin cuerpo a peticiones anónimas; el controlador de webhooks responde `401`/`50
 ### 14.1 `AuditTrail.record(operator, action, resourceType, resourceId, idempotencyKey, result, detail)`
 
 Guarda un `AuditLog` con empresa, usuario y rol del operador (nulos si no hay), `changes` =
-`{idempotencyKey?, result?, detail?}` en JSON y la IP del cliente (primer valor de `X-Forwarded-For` o
-`remoteAddr`; nula fuera de una petición HTTP).
+`{idempotencyKey?, result?, detail?, requestId?}` en JSON y la IP del cliente (primer valor de
+`X-Forwarded-For` o `remoteAddr`; nula fuera de una petición HTTP). El `requestId` sale del MDC
+(§14.3) y es lo que enlaza una fila de la bitácora con las líneas de log de esa misma petición.
 
-**Acciones auditadas (18):**
+**Acciones auditadas (30):**
 
 | Acción | Recurso | Servicio |
 |---|---|---|
 | `tenant.onboarding_registered` (OK / ERROR) | tenant | `SubmitOnboardingService.register` |
 | `tenant.onboarding_profile_updated` | tenant | `SubmitOnboardingService.completeProfile` |
+| `tenant.kyb_documents_attached` (OK / ERROR) | tenant | `SubmitOnboardingService.attachDocuments` |
+| `tenant.terms_accepted` | tenant | `SubmitOnboardingService.acceptTerms` |
 | `tenant.ubo_saved` | ubo | `SyncUbosService.save` |
+| `tenant.ubo_deleted` | ubo | `SyncUbosService.delete` |
+| `tenant.ubo_documents_attached` (OK / ERROR) | ubo | `SyncUbosService.attachDocuments` |
+| `tenant.biometric_consent_recorded` (`selfie` / `liveness`) | ubo o tenant | `SyncUbosService` |
 | `tenant.ubos_synced` | tenant | `SyncUbosService.syncToKira` |
 | `tenant.liveness_links_requested` | tenant | `SyncUbosService.requestLivenessLinks` |
 | `virtual_account.opened` (OK / ERROR / reutilizada) | virtual_account | `OpenVirtualAccountService.open` |
@@ -1166,37 +1351,62 @@ Guarda un `AuditLog` con empresa, usuario y rol del operador (nulos si no hay), 
 | `recipient.archived` | recipient | `RegisterRecipientService.archive` |
 | `quotation.created` | quotation | `CreateQuoteService.create` |
 | `payout.created` | payout | `ExecutePayoutService.create` |
+| `payout.first_approval` | payout | `ExecutePayoutService.approveAndSubmit` (1.ª de dos firmas) |
 | `payout.approved` | payout | `ExecutePayoutService.approveAndSubmit` |
+| `payout.requoted` | payout | `ExecutePayoutService.requote` |
 | `payout.submitted` (OK / ERROR) | payout | `ExecutePayoutService.submitToKira` |
 | `payout.rejected` | payout | `ExecutePayoutService.reject` |
 | `compliance.rfis_synced` | tenant | `AnswerRfiService.sync` |
 | `compliance.rfi_answered` | rfi | `AnswerRfiService.answer` |
 | `compliance.rfi_documents_uploaded` | rfi | `AnswerRfiService.uploadDocuments` |
 | `compliance.rfi_document_removed` | rfi | `AnswerRfiService.removeDocument` |
+| `compliance.rfi_document_link_issued` | rfi | `AnswerRfiService.documentLink` (quién pidió la descarga; la URL no) |
+| `compliance.rfi_ubo_link_minted` | rfi | `AnswerRfiService.mintUboLink` |
+| `auth.mfa_setup_started`, `auth.mfa_enabled`, `auth.mfa_disabled`, `auth.mfa_verified`, `auth.mfa_failed` | user | `MfaService` |
+| `platform.tenant_viewed` | tenant | `PlatformConsoleService.tenant` (consulta de una ficha 360) |
 
-No se auditan: lecturas, `refresh`, sincronización de depósitos, vista previa de pagos, enlaces de descarga
-ni proyecciones de webhooks.
+No se auditan: lecturas ordinarias, `refresh`, sincronización de depósitos, vista previa de pagos ni
+proyecciones de webhooks.
 
 ### 14.2 Logging
 
-SLF4J con `Logger` por clase. Niveles relevantes: INFO en reintentos por 401, reutilización de cuentas y
+SLF4J con `Logger` por clase; cada línea lleva entre corchetes el `requestId` de su petición
+(`logging.pattern.level`). Niveles relevantes: INFO en reintentos por 401, reutilización de cuentas y
 eventos sin correspondencia local; WARN en cotizaciones que no cuadran o con tasa de contingencia,
 activación demorada, entradas no atribuibles y webhooks con firma inválida; ERROR en fallos de envío a
 Kira, eventos no proyectados y errores no controlados. Las credenciales y las URLs de descarga nunca se
 registran.
 
+### 14.3 Correlación y métricas
+
+- **`RequestIdFilter`** (el primero de la cadena): toma `X-Request-Id` si tiene forma de id
+  (`[A-Za-z0-9-]{8,64}`) o genera un UUID, lo pone en el MDC, lo devuelve en la respuesta y lo limpia al
+  terminar. Un valor con saltos de línea se sustituye: no se escribe texto ajeno en los logs.
+- **`IntegrationMetrics`** (Micrometer, vía Actuator; **sin exportador**, la elección de Prometheus u OTLP
+  es una decisión de despliegue pendiente):
+
+| Métrica | Etiquetas | Para qué |
+|---|---|---|
+| `kira.api.requests` (timer) | `method`, `route` (los segmentos variables van como `{id}`), `outcome` (código HTTP o `io_error`) | Latencia y errores del proveedor |
+| `kira.webhooks.received` (contador) | `result`: `received`, `duplicate`, `invalid_signature`, `invalid_json`, `not_configured` | Firmas rotas, secreto sin configurar, reintentos |
+| `kira.webhooks.projection.failures` (contador) | `event` | Eventos guardados que no se proyectaron |
+
+Las etiquetas nunca llevan ids ni datos de una empresa. `GET /actuator/metrics` es sólo para
+`PLATFORM_OPERATOR`.
+
 ---
 
 ## 15. Pruebas
 
-**283 pruebas en 40 clases, todas en verde** (`./mvnw clean test`). Nombres completos en el Anexo B.
+**400 pruebas en 51 clases, todas en verde** (`./mvnw clean test`). Nombres completos en el Anexo B.
 
 | Tipo | Cómo | Clases |
 |---|---|---|
-| Dominio | JUnit puro, sin mocks | `RfiTest`, `TenantOnboardingTest`, `UboRosterTest`, `VirtualAccountActivationTest`, `VirtualAccountReadinessTest`, `PayoutTest`, `PayoutStatusTest`, `QuotationTest`, `QuotationRailTest`, `RecipientAccountTest` |
+| Dominio | JUnit puro, sin mocks | `RfiTest`, `TenantOnboardingTest`, `UboRosterTest`, `VirtualAccountActivationTest`, `VirtualAccountReadinessTest`, `PayoutTest`, `PayoutStatusTest`, `QuotationTest`, `QuotationRailTest`, `RecipientAccountTest`, `FileSignatureTest` |
 | Aplicación | Mockito para `KiraApiClient`, repositorios y `AuditTrail`; captura de cuerpos enviados | `SubmitOnboardingServiceTest`, `SyncUbosServiceTest`, `KiraUserStateTest`, `OpenVirtualAccountServiceTest`, `RecordDepositServiceTest`, `RegisterRecipientServiceTest`, `CreateQuoteServiceTest`, `ExecutePayoutServiceTest`, `AnswerRfiServiceTest`, `ReferenceCatalogServiceTest`, `KiraWebhookEnvelopeTest`, `UserEventProjectionTest` |
-| Infraestructura | `MockRestServiceServer` sobre `RestClient`; unitarias | `KiraApiClientVersionTest`, `KiraCredentialManagerTest`, `KiraAmountsTest`, `KiraWebhookVerifierTest`, `RequiredSecretsValidatorTest` |
-| Reconciliación | Mockito sobre repositorios y `KiraApiClient` | `PayoutReconciliationWorkerTest`, `QuotationReconciliationWorkerTest`, `LivenessReconciliationWorkerTest`, `RfiReconciliationWorkerTest`, `WebhookReprojectionWorkerTest` |
+| Infraestructura | `MockRestServiceServer` sobre `RestClient`; unitarias | `KiraApiClientVersionTest`, `KiraCredentialManagerTest`, `KiraAmountsTest`, `KiraWebhookVerifierTest`, `KiraPropertiesTest`, `RequiredSecretsValidatorTest`, `TotpTest` (vectores de la RFC 6238) |
+| Seguridad y consola | Mockito y MockMvc | `MfaServiceTest`, `PlatformConsoleServiceTest`, `ProviderQueryAuthorizationTest` (G-09), `ObservabilityTest` |
+| Reconciliación | Mockito sobre repositorios y `KiraApiClient` | `PayoutReconciliationWorkerTest`, `QuotationReconciliationWorkerTest`, `LivenessReconciliationWorkerTest`, `RfiReconciliationWorkerTest`, `WebhookReprojectionWorkerTest`, `TenantAndAccountReconciliationWorkerTest` |
 | Integración | `@SpringBootTest` con H2 y MockMvc | `AuTransactionalApplicationTests`, `OpenApiDocsTest`, `KiraWebhookControllerTest`, `DevDataSeederTest`, `CertProfileStartupTest`, `IdempotencyKeyPersistenceTest`, `ReconciliationWorkersEnabledTest`, `ReconciliationWorkersDisabledTest` |
 
 `src/test/resources/application.yaml`: H2 `MODE=MySQL`, `ddl-auto: create-drop`, credenciales de Kira de
@@ -1223,18 +1433,21 @@ idempotencia se comprueba con `IdempotencyKeyPersistenceTest`, que es de integra
 | `./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"` | Arrancar en dev (con `KIRA_WEBHOOK_SECRET` y credenciales de Kira si se quiere llegar a Kira) |
 | `http://localhost:8080/swagger-ui.html` | Swagger UI (no en prod) |
 | `/actuator/health` | Salud (`UP`) |
-| `docs/bruno/AuTransactional/` | Colección de Bruno: 84 peticiones en 11 carpetas, entorno `local` |
+| `docs/bruno/AuTransactional/` | Colección de Bruno: 104 peticiones en 13 carpetas, entorno `local` |
 | `docs/GUIA-BRUNO.md` | Guía de pruebas paso a paso |
 | `docs/API-GUIA.md` | Contrato HTTP y trampas de Kira |
 | `docs/kira-cuerpos-peticiones.json` | Cuerpos exactos enviados a Kira |
 | `docs/ARQUITECTURA.md`, `docs/ESTADO.md` | Visión resumida y estado/pendientes |
-| Git | Remoto `origin` = `github.com/CaroLopez09/Au_transaction` (público), rama `main` |
+| `docs/REVISION-REQUISITOS-VS-CODIGO.md` | Requisitos de la arquitectura y de Kira frente a lo construido, con el plan hasta el 15-oct |
+| `docs/cronograma/` | Cronograma y backlog de ClickUp |
+| `/actuator/metrics` | Métricas de la integración (sólo `PLATFORM_OPERATOR`) |
+| Git | `github.com/CaroLopez09/Au_transaction`; ramas `develop` (trabajo), `main`, `certificacion` y `produccion`. Se sube por SSH |
 
 ---
 
 ## 17. Deuda técnica, defectos conocidos y riesgos
 
-Hallazgos verificados en el código el 11-sep-2026 que siguen abiertos.
+Hallazgos verificados en el código el 11-sep-2026, revisados el 16-sep.
 
 ### 17.1 Defectos
 
@@ -1242,10 +1455,10 @@ Hallazgos verificados en el código el 11-sep-2026 que siguen abiertos.
 |---|---|---|---|
 | ~~F1~~ | **Corregido el 11-sep (noche).** La clave se consolida con `IdempotencyKeyStore` en una transacción propia (`REQUIRES_NEW`) antes de llamar a Kira, así que el rollback del caso de uso ya no la borra | `SubmitOnboardingService.register`, `OpenVirtualAccountService.open` | Verificado con `IdempotencyKeyPersistenceTest` (integración con H2) |
 | F2 | **Se pierde la traza de un envío fallido.** `approveAndSubmit` marca el pago como `FAILED` y audita `ERROR`, pero relanza dentro de la transacción: todo se revierte | `ExecutePayoutService.approveAndSubmit` | El pago vuelve a `PENDING_APPROVAL` (esperado) pero **no queda auditoría del intento fallido** |
-| F3 | **`process()` de webhooks no es transaccional en ejecución real**: `enqueue` lo invoca dentro de la misma clase y el proxy no aplica | `ProcessWebhookUseCase` | Cada guardado va en su propia transacción: una proyección puede quedar a medias. El comentario de `AnswerRfiService.applyWebhook` supone lo contrario |
-| F4 | Clave de idempotencia **por petición HTTP**, no persistida antes de llamar, en destinatarios y pagos creados | `RegisterRecipientService.register` | Un reintento del portal genera otra clave (Kira responde `202` si detecta el duplicado de destinatario) |
-| F5 | Logging DEBUG de `cert` apunta a `com.example.autransactional.infrastructure.kiraclient`, que no existe | `application-cert.yaml` | No hay DEBUG del cliente de Kira en cert |
-| F6 | Javadoc obsoleto: sigue mencionando endpoints de verificación biométrica sin seguridad | `OpenApiConfig` | Confusión al leer el código |
+| ~~F3~~ | **Corregido el 15-sep.** El evento se guarda en la petición (`record`, `@Transactional`) y la proyección corre aparte llamando a `self.reproject(...)` por el proxy de Spring | `ProcessWebhookUseCase` | La proyección ya abre su transacción; un fallo deja `processing_error` y lo retoma el worker |
+| ~~F4~~ | **Corregido el 15-sep.** `POST /api/payouts` y `POST /api/recipients` aceptan `Idempotency-Key` del portal (UUID validado) y repetirla devuelve lo ya creado | `ExecutePayoutService`, `RegisterRecipientService` | Un doble clic o un reintento de red no crea dos operaciones |
+| F5 | Logging DEBUG de `cert` apunta a `com.example.autransactional.infrastructure.kiraclient`, que no existe | `application-cert.yaml` | No hay DEBUG del cliente de Kira en cert (**sigue abierto**) |
+| F6 | Javadoc obsoleto: sigue mencionando endpoints de verificación biométrica sin seguridad (se eliminaron el 11-sep) | `OpenApiConfig` | Confusión al leer el código (**sigue abierto**) |
 | F7 | Sin cabecera `Authorization` la API responde `403` vacío en lugar de `401` | `SecurityConfig` (sin `AuthenticationEntryPoint`) | El front debe tratar ambos |
 | F8 | Un pago sin cotización envía un bruto calculado con comisiones **estimadas** (15 + 15) | `Payout.grossAmountToSend` | Si la tarifa real difiere, el destinatario recibe un importe distinto (decisión abierta: exigir cotización) |
 
@@ -1257,22 +1470,28 @@ Hallazgos verificados en el código el 11-sep-2026 que siguen abiertos.
 | D2 | `TenantContext` sin lectores | El filtro lo fija y limpia, pero ningún servicio lo usa (usan `operator.tenantId()`) |
 | D3 | ~~Falta el worker de eventos no proyectados~~ | Resuelto: `WebhookReprojectionWorker` (11-sep) |
 | D4 | ~~MFA sin implementar~~ | Resuelto: TOTP con secreto cifrado (15-sep) |
-| D5 | Sin gestión de operadores | Los usuarios sólo entran por la semilla de dev |
+| D5 | Sin gestión de operadores | Los usuarios sólo entran por la semilla de dev o por SQL (G-13) |
 | D6 | `idx_payouts_idempotency` redundante | Duplica el índice de `uk_payouts_idempotency` |
 | D7 | Límites aplicados en memoria | Los adaptadores leen todas las filas de la empresa y cortan con `limit` |
-| D8 | `resolution_reason` de RFI no se guarda | Motivo `expired`/`rejected` de un RFI cerrado |
-| D9 | Cotización en versión `2026-04-14` | La cotización detallada sólo existe en `2026-06-01` (sin verificar qué se pierde) |
+| D8 | ~~`resolution_reason` de RFI no se guarda~~ | Resuelto el 15-sep (`rfis.resolution_reason`, incluido `withdrawn`) |
+| D9 | ~~Versiones de API mezcladas~~ | Resuelto el 15-sep: **`2026-06-01` en todas las peticiones** y `KiraProperties` rechaza otra |
 | D10 | Tablas huérfanas en la base de dev | `audit_log`, `operator_user`, `payout`, `tenant`, `webhook_event` (restos del esquema anterior) |
+| D11 | Métricas sin exportador | Hay `kira.*` en Micrometer, pero falta decidir Prometheus u OTLP y añadir la dependencia |
+| D12 | Umbral de doble firma sin confirmar | `bff.payouts.approval.dual-approval-threshold` vale 10.000 por defecto, un valor provisional |
+| D13 | Sin antimalware en los archivos | Se comprueba el tipo real (`FileSignature`), no el contenido; decisión pendiente (infraestructura o deuda declarada) |
+| D14 | Anexos de este documento | Se regeneran con un script; no hay comprobación automática de que sigan al día |
 
 ### 17.3 Riesgos
 
 | Riesgo | Mitigación actual |
 |---|---|
 | **Contraseña de MySQL en el historial de un repositorio público** | Parcial: `application-dev.yaml` ya la toma de `${DB_PASSWORD}`, pero el valor antiguo sigue en los commits ya hechos. Falta **rotarla** y valorar hacer el repo privado |
-| Sin credenciales de Kira: el flujo real no se ha probado contra el sandbox | Contratos verificados en docs.kirafin.ai; cuerpos en `kira-cuerpos-peticiones.json` |
-| Webhook perdido (entrega única) | Los cinco workers de reconciliación (§12.6), más `refresh`/`sync` manuales |
-| Eventos `rfi.*` requieren suscripción explícita en Kira | `POST /api/rfis/sync` |
-| `ddl-auto: validate` en cert/prod con esquema aplicado a mano | Regenerar el DDL (§12.5) antes de desplegar |
+| **Credenciales del sandbox de Kira compartidas por chat** | Pedirlas nuevas antes de producción (`ESTADO.md` §4.8) |
+| Cuentas y pagos sin recorrer contra Kira | Vinculación, beneficiarios y RFIs sí se probaron; abrir cuenta y pagar necesitan una empresa `VERIFIED` en el sandbox |
+| Webhook perdido | Kira reintenta 4 veces; el evento se guarda antes del `2xx`, se puede reenviar desde su panel y hay siete workers de reconciliación (§12.6) |
+| Eventos `rfi.*` requieren suscripción explícita en Kira | `POST /api/rfis/sync` mientras tanto; hay que pedirla |
+| `ddl-auto: validate` en cert/prod con esquema aplicado a mano | Regenerar el DDL (§12.5) y aplicar el SQL de `ESTADO.md` §7 antes de desplegar |
+| Banco y producto acoplados | `jp_morgan` ↔ `usa-virtual-accounts` es una inferencia por el nombre del producto `-act`; Kira no lo documenta |
 
 
 
@@ -1281,13 +1500,13 @@ Hallazgos verificados en el código el 11-sep-2026 que siguen abiertos.
 
 ## Anexo A. Referencia clase por clase
 
-Generado automáticamente desde el código fuente el 11-sep-2026: **todos** los tipos de `src/main/java` (clases, records, enums e interfaces, incluidos los anidados), con su javadoc, anotaciones, campos constantes o documentados y todos los métodos no privados. Los métodos privados se omiten; su lógica se explica en las secciones 8 a 12.
+Generado automáticamente desde el código fuente el 16-sep-2026: **todos** los tipos de `src/main/java` (clases, records, enums e interfaces, incluidos los anidados), con su javadoc, anotaciones, campos constantes o documentados y todos los métodos no privados. Los métodos privados se omiten; su lógica se explica en las secciones 8 a 12.
 
 ### A.1 Arranque
 
-<sub>`AuTransactionalApplication.java` · 14 líneas</sub>
+<sub>`AuTransactionalApplication.java` · 16 líneas</sub>
 
-#### `AuTransactionalApplication` · clase · `@SpringBootApplication`
+#### `AuTransactionalApplication` · clase · `@SpringBootApplication` `@EnableConfigurationProperties(PayoutApprovalPolicy.class)`
 
 | Método | Descripción |
 |---|---|
@@ -1295,7 +1514,7 @@ Generado automáticamente desde el código fuente el 11-sep-2026: **todos** los 
 
 ### A.2 Dominio — shared
 
-<sub>`domain/shared/DomainException.java` · 9 líneas</sub>
+<sub>`domain/shared/DomainException.java` · 8 líneas</sub>
 
 #### `DomainException` · clase
 
@@ -1305,7 +1524,19 @@ Violacion de una invariante de negocio. Se traduce a HTTP 409/422 en la capa RES
 |---|---|
 | `public DomainException(String message)` |  |
 
-<sub>`domain/shared/IdempotencyKey.java` · 30 líneas</sub>
+<sub>`domain/shared/FileSignature.java` · 60 líneas</sub>
+
+#### `FileSignature` · clase
+
+Tipo real de un archivo por sus primeros bytes (arquitectura §7: validar el MIME real, no el
+que declara el navegador). Solo reconoce los formatos que Kira acepta.
+
+| Método | Descripción |
+|---|---|
+| `public static String detect(byte[] content)` | MIME detectado, o null si no es ninguno de los formatos admitidos. |
+| `public static boolean matches(String declaredMime, byte[] content)` | El contenido es de verdad del tipo declarado. |
+
+<sub>`domain/shared/IdempotencyKey.java` · 41 líneas</sub>
 
 #### `IdempotencyKey` · record
 
@@ -1321,9 +1552,10 @@ Regla: una clave nueva por intencion distinta; la misma solo para reintentar la 
 |---|---|
 | `public static IdempotencyKey newKey()` |  |
 | `public static IdempotencyKey of(String value)` |  |
+| `public static IdempotencyKey fromClient(String value)` | Clave que manda el portal para que un doble clic o un reintento de red no cree dos operaciones. Kira solo acepta UUID: se valida aqui para no descubrirlo en su 400. |
 | `public String toString()` |  |
 
-<sub>`domain/shared/Money.java` · 69 líneas</sub>
+<sub>`domain/shared/Money.java` · 68 líneas</sub>
 
 #### `Money` · record
 
@@ -1336,10 +1568,6 @@ de monedas distintas es el error que este tipo hace imposible.
 | `BigDecimal amount` |
 | `String currency` |
 
-| Campo | Descripción |
-|---|---|
-| `public static final int SCALE = 4` | La escala del esquema: DECIMAL(18, 4) en cada columna de importe. |
-
 | Método | Descripción |
 |---|---|
 | `public static Money of(BigDecimal amount, String currency)` |  |
@@ -1351,7 +1579,7 @@ de monedas distintas es el error que este tipo hace imposible.
 | `public boolean isLessThan(Money other)` |  |
 | `public String toString()` |  |
 
-<sub>`domain/shared/PostalAddress.java` · 34 líneas</sub>
+<sub>`domain/shared/PostalAddress.java` · 33 líneas</sub>
 
 #### `PostalAddress` · record
 
@@ -1374,7 +1602,7 @@ tal como lo exige cada superficie y esta clase solo comprueba la longitud.
 | `public void assertIso2Country()` | Direccion de un destinatario: pais en ISO-2. |
 | `public boolean isBlank()` |  |
 
-<sub>`domain/shared/Rail.java` · 40 líneas</sub>
+<sub>`domain/shared/Rail.java` · 39 líneas</sub>
 
 #### `Rail` · enum
 
@@ -1391,7 +1619,7 @@ Valores: `ACH`, `WIRE`, `WALLET`.
 | `public static Rail from(String raw)` |  |
 | `public static Rail fromWireOrNull(String raw)` | Tolerante: un riel desconocido en un evento no debe romper la proyeccion. |
 
-<sub>`domain/shared/StatusNormalizer.java` · 24 líneas</sub>
+<sub>`domain/shared/StatusNormalizer.java` · 23 líneas</sub>
 
 #### `StatusNormalizer` · clase
 
@@ -1405,7 +1633,7 @@ comparar SIEMPRE sin distinguir mayusculas y tolerar valores desconocidos.
 | `public static String normalize(String raw)` |  |
 | `public static boolean matches(String raw, String expected)` |  |
 
-<sub>`domain/shared/TenantId.java` · 23 líneas</sub>
+<sub>`domain/shared/TenantId.java` · 34 líneas</sub>
 
 #### `TenantId` · record
 
@@ -1417,12 +1645,13 @@ Identificador de la organizacion propietaria del dato. Toda consulta debe filtra
 
 | Método | Descripción |
 |---|---|
+| `public boolean isPlatform()` |  |
 | `public static TenantId of(String value)` |  |
 | `public String toString()` |  |
 
 ### A.3 Dominio — tenant
 
-<sub>`domain/tenant/EligibleProduct.java` · 29 líneas</sub>
+<sub>`domain/tenant/EligibleProduct.java` · 28 líneas</sub>
 
 #### `EligibleProduct` · record
 
@@ -1439,16 +1668,11 @@ segunda mitad de esa pregunta.
 | `List<String> missingFields` |
 | `String unsupportedReason` |
 
-| Campo | Descripción |
-|---|---|
-| `public static final String USA_VIRTUAL_ACCOUNTS = "usa-virtual-accounts"` | Producto objetivo de la integracion: cuentas virtuales en bancos de EE. UU. |
-| `public static final String EDD_REQUIRED = "enhanced_due_diligence_required"` | Motivo que Kira devuelve cuando exige diligencia reforzada (file_proof_of_address). |
-
 | Método | Descripción |
 |---|---|
 | `public boolean requiresEnhancedDueDiligence()` |  |
 
-<sub>`domain/tenant/LivenessStatus.java` · 33 líneas</sub>
+<sub>`domain/tenant/LivenessStatus.java` · 32 líneas</sub>
 
 #### `LivenessStatus` · enum
 
@@ -1461,34 +1685,29 @@ Valores: `PENDING`, `COMPLETED`, `EXPIRED`, `FAILED`.
 | `public static LivenessStatus fromWire(String raw)` |  |
 | `public boolean isFinal()` |  |
 
-<sub>`domain/tenant/MissingFields.java` · 55 líneas</sub>
+<sub>`domain/tenant/MissingFields.java` · 56 líneas</sub>
 
 #### `MissingFields` · record
 
 Campos que Kira todavia exige para verificar a la empresa, agrupados por producto.
 
 Es la fuente de verdad del formulario de onboarding: la pantalla NO debe tener campos
-estaticos, sino renderizar lo que llegue aqui. La clave "general" aplica a todos los
-productos; el resto son codigos de producto (p. ej. usa-virtual-accounts).
+estaticos, sino renderizar lo que llegue aqui. Las claves son codigos de producto
+(p. ej. usa-virtual-accounts) mas "general", que es la union de todos ellos.
 
 | Componente |
 |---|
-| `Map<String` |
-| `List<String>> byProduct` |
-
-| Campo | Descripción |
-|---|---|
-| `public static final String GENERAL = "general"` |  |
+| `Map<String, List<String>> byProduct` |
 
 | Método | Descripción |
 |---|---|
 | `public static MissingFields empty()` |  |
-| `public List<String> forProduct(String productCode)` | Lo que falta para un producto concreto: los generales mas los suyos. |
+| `public List<String> forProduct(String productCode)` | Lo que falta para un producto concreto. "general" NO es una base comun: es la union de los faltantes de todos los productos (docs.kirafin.ai: "a general key holding every token once"; confirmado en sandbox el 15-sep, donde traia requisitos de otros bancos). Sumarlo pedia datos de productos que no se usan y dejaba el producto sin completar para siempre. Solo se usa si Kira no lista el producto por separado. |
 | `public boolean isCompleteFor(String productCode)` |  |
 | `public boolean isEmpty()` |  |
 | `public Set<String> products()` |  |
 
-<sub>`domain/tenant/OperatorUser.java` · 34 líneas</sub>
+<sub>`domain/tenant/OperatorUser.java` · 33 líneas</sub>
 
 #### `OperatorUser` · record
 
@@ -1506,6 +1725,7 @@ No confundir con el "user" de Kira, que es la empresa misma en el KYB.
 | `Role role` |
 | `UserStatus status` |
 | `String mfaSecret` |
+| `boolean mfaEnabled` |
 
 | Método | Descripción |
 |---|---|
@@ -1514,17 +1734,11 @@ No confundir con el "user" de Kira, que es la empresa misma en el KYB.
 | `public String fullName()` |  |
 | `public boolean isActive()` |  |
 
-<sub>`domain/tenant/OperatorUserRepository.java` · 16 líneas</sub>
+<sub>`domain/tenant/OperatorUserRepository.java` · 18 líneas</sub>
 
 #### `OperatorUserRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<OperatorUser> findByEmail(String email)` |  |
-| `Optional<OperatorUser> findById(String id)` |  |
-| `List<OperatorUser> findByTenant(TenantId tenantId)` |  |
-
-<sub>`domain/tenant/Role.java` · 75 líneas</sub>
+<sub>`domain/tenant/Role.java` · 80 líneas</sub>
 
 #### `Role` · enum
 
@@ -1535,20 +1749,20 @@ La segregacion de funciones exige separar quien prepara un pago (TREASURY_MAKER)
 de quien lo autoriza (TREASURY_APPROVER): la API de Kira no ofrece maker-checker
 para integradores, asi que el control es del BFF.
 
-Valores: `ADMIN`, `TREASURY_MAKER`, `TREASURY_APPROVER`, `COMPLIANCE_INTERNAL`, `READ_ONLY`.
+Valores: `ADMIN`, `TREASURY_MAKER`, `TREASURY_APPROVER`, `COMPLIANCE_INTERNAL`, `READ_ONLY`, `PLATFORM_OPERATOR`.
 
 | Método | Descripción |
 |---|---|
-| `Role(String dbName, RoleScope scope, String description)` |  |
 | `public String dbName()` |  |
 | `public RoleScope scope()` |  |
 | `public String description()` |  |
 | `public static Role fromDbName(String raw)` |  |
 | `public boolean canCreatePayout()` |  |
 | `public boolean canApprovePayout()` |  |
+| `public boolean isPlatform()` |  |
 | `public boolean canManageCompliance()` | Ficha 360, UBOs, liveness y RFIs. |
 
-<sub>`domain/tenant/RoleScope.java` · 8 líneas</sub>
+<sub>`domain/tenant/RoleScope.java` · 7 líneas</sub>
 
 #### `RoleScope` · enum
 
@@ -1556,7 +1770,7 @@ Alcance del rol: propio de la empresa cliente o del soporte de la plataforma.
 
 Valores: `TENANT`, `SYSTEM`.
 
-<sub>`domain/tenant/Tenant.java` · 221 líneas</sub>
+<sub>`domain/tenant/Tenant.java` · 248 líneas</sub>
 
 #### `Tenant` · clase · `@Getter`
 
@@ -1573,13 +1787,15 @@ objetivo. Por eso el agregado guarda el estado de ese bucle y no solo el resulta
 | Método | Descripción |
 |---|---|
 | `public Tenant(TenantId id, String name, String taxId, String jurisdiction)` |  |
-| `public static Tenant rehydrate(TenantId id, String name, String taxId, String jurisdiction, …)` |  |
+| `public static Tenant rehydrate(TenantId id, String name, String taxId, String jurisdiction, String kiraUserId, TenantStatus status, List<EligibleProduct> eligibleProducts, MissingFields missingFields, boolean verificationTriggered, String onboardingPayload, String onboardingIdempotencyKey, String rejectionReason, Instant createdAt, Instant updatedAt)` |  |
+| `public void saveOnboardingDraft(String draftJson, Instant now)` | Reemplaza el borrador completo. El portal es dueno del objeto entero. |
+| `public void restoreOnboardingDraft(String draftJson, Instant updatedAt)` | Solo para rehidratar desde la base: no modifica la fecha de actualizacion del agregado. |
 | `public IdempotencyKey reserveOnboardingKey()` | Reserva la clave de idempotencia del alta en Kira. Una clave por intencion de negocio, no por intento HTTP: se persiste ANTES de la primera llamada y todos los reintentos reutilizan la misma, o un timeout seguido de reintento crearia dos empresas en Kira. |
 | `public void linkKiraUser(String kiraUserId)` | Se invoca tras el 201 de POST /v1/users. No cambia el estado: el 201 devuelve CREATED y la verificacion NO se dispara sola. Solo un PUT completo (con source_of_funds) la dispara. |
 | `public boolean isRegisteredInKira()` |  |
 | `public void assertRegisteredInKira()` |  |
 | `public void recordOnboardingPayload(String payloadJson)` | Guarda el objeto completo enviado a Kira. Es obligatorio conservarlo: el GET no devuelve los campos del cuestionario y un PUT parcial borra en silencio lo que no viaje en el, asi que el siguiente PUT solo puede construirse a partir de lo que se envio la vez anterior. |
-| `public void applyRemoteState(TenantStatus incoming, MissingFields missingFields, …)` | Asienta lo que devolvieron POST/PUT/GET de /v1/users. |
+| `public void applyRemoteState(TenantStatus incoming, MissingFields missingFields, List<EligibleProduct> eligibleProducts, Boolean verificationTriggered)` | Asienta lo que devolvieron POST/PUT/GET de /v1/users. |
 | `public Optional<EligibleProduct> product(String productCode)` |  |
 | `public boolean isReadyFor(String productCode)` | Abrir cuenta virtual exige KYB VERIFIED y el producto concreto elegible. |
 | `public void assertVerificationInProgress()` | POST /v1/users/{id}/liveness-link devuelve 422 "No verification is in progress" si el KYB aun no se disparo. Se comprueba aqui para no gastar la llamada. |
@@ -1588,20 +1804,13 @@ objetivo. Por eso el agregado guarda el estado de ese bucle y no solo el resulta
 | `public void assertActive()` |  |
 | `public void assertCanOperateTreasury()` | Ninguna operacion de tesoreria sale hacia Kira si el KYB no esta aprobado. |
 
-<sub>`domain/tenant/TenantRepository.java` · 19 líneas</sub>
+<sub>`domain/tenant/TenantRepository.java` · 18 líneas</sub>
 
 #### `TenantRepository` · interfaz
 
 Puerto de salida. La implementacion vive en infrastructure/persistence.
 
-| Método | Descripción |
-|---|---|
-| `Tenant save(Tenant tenant)` |  |
-| `Optional<Tenant> findById(TenantId id)` |  |
-| `Optional<Tenant> findByKiraUserId(String kiraUserId)` |  |
-| `List<Tenant> findAll()` |  |
-
-<sub>`domain/tenant/TenantStatus.java` · 40 líneas</sub>
+<sub>`domain/tenant/TenantStatus.java` · 39 líneas</sub>
 
 #### `TenantStatus` · enum
 
@@ -1616,7 +1825,7 @@ Valores: `CREATED`, `VERIFYING`, `REVIEW`, `VERIFIED`, `REJECTED`.
 | `public static TenantStatus fromWire(String raw)` |  |
 | `public boolean canOperate()` |  |
 
-<sub>`domain/tenant/Ubo.java` · 179 líneas</sub>
+<sub>`domain/tenant/Ubo.java` · 295 líneas</sub>
 
 #### `Ubo` · clase · `@Getter`
 
@@ -1629,17 +1838,18 @@ el resultado real del liveness solo llega una vez, por webhook.
 El enlace de liveness que emite Kira vive 7 dias: por eso la fecha de vencimiento se
 guarda aparte del estado. Un enlace vencido no se reintenta, se vuelve a pedir.
 
-| Campo | Descripción |
-|---|---|
-| `public static final String DEFAULT_ROLE = "Beneficiario Final"` | Rol por defecto cuando el formulario de onboarding no lo precisa. |
-| `public static final BigDecimal BENEFICIAL_OWNER_THRESHOLD = new BigDecimal("5")` | Umbral a partir del cual Kira considera beneficiario final a una persona. |
-
 | Método | Descripción |
 |---|---|
-| `public Ubo(String id, TenantId tenantId, String firstName, String lastName, …)` |  |
-| `public static Ubo rehydrate(String id, TenantId tenantId, String personReferenceId, …)` |  |
+| `public Ubo(String id, TenantId tenantId, String firstName, String lastName, BigDecimal ownershipPercentage, String roleInCompany)` |  |
+| `public static Ubo rehydrate(String id, TenantId tenantId, String personReferenceId, String firstName, String lastName, String email, String documentType, String documentNumber, BigDecimal ownershipPercentage, String roleInCompany, boolean hasOwnership, boolean hasControl, boolean signer, boolean politicallyExposed, String countryOfBirth, LocalDate birthDate, String nationality, String occupation, String gender, String phoneNumber, String documentCountry, PostalAddress residentialAddress, boolean syncedToKira, LivenessStatus livenessStatus, String livenessLink, Instant livenessExpiresAt, Instant createdAt, Instant updatedAt)` |  |
+| `public void describeEmail(String email)` | Kira empareja las personas de associated_persons[] por `email`: sin el, cada sincronizacion le crea una persona nueva en vez de actualizar la que ya tiene. Es opcional en el alta para no romper los beneficiarios ya registrados, pero hace falta para colgarle documentos a la persona. |
+| `public void assertIdentifiableInKira()` | Sin email no hay forma de decirle a Kira a que persona pertenece el documento. |
 | `public void describeDocument(String documentType, String documentNumber)` |  |
-| `public void describeRole(boolean hasOwnership, BigDecimal ownershipPercentage, boolean hasControl, …)` | Define el papel de la persona en el KYB. hasOwnership es un booleano explicito y no se deduce del cargo: el titulo NO identifica al beneficiario, y omitirlo deja el KYB bloqueado sin decir por que. |
+| `public void rename(String firstName, String lastName, String roleInCompany)` | Corrige nombre, apellido y cargo. Antes la edicion los exigia pero no los aplicaba (G-21). |
+| `public void describeIdentity(LocalDate birthDate, String nationality, String occupation, String gender, String phoneNumber, String documentCountry, PostalAddress residentialAddress)` | Datos de identidad de la persona. Todos opcionales aqui: es Kira quien decide, por banco, cuales faltan (missing_fields). Un valor vacio borra el guardado. |
+| `public boolean isKnownToKira()` | Solo lo que aun no conoce Kira se puede borrar: alli la persona no desaparece al quitarla aqui. |
+| `public void markSyncedToKira()` |  |
+| `public void describeRole(boolean hasOwnership, BigDecimal ownershipPercentage, boolean hasControl, boolean signer, boolean politicallyExposed, String countryOfBirth)` | Define el papel de la persona en el KYB. hasOwnership es un booleano explicito y no se deduce del cargo: el titulo NO identifica al beneficiario, y omitirlo deja el KYB bloqueado sin decir por que. |
 | `public boolean isBeneficialOwner()` | Kira exige al menos una persona asi para verificar a la empresa. |
 | `public void linkKiraPerson(String personReferenceId)` |  |
 | `public void assignLivenessLink(String link, Instant expiresAt)` | Se invoca con la respuesta de POST /v1/users/{id}/liveness-link. |
@@ -1648,20 +1858,11 @@ guarda aparte del estado. Un enlace vencido no se reintenta, se vuelve a pedir.
 | `public void expireLivenessLink()` |  |
 | `public String fullName()` |  |
 
-<sub>`domain/tenant/UboRepository.java` · 24 líneas</sub>
+<sub>`domain/tenant/UboRepository.java` · 25 líneas</sub>
 
 #### `UboRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Ubo save(Ubo ubo)` |  |
-| `Optional<Ubo> findByIdAndTenant(String id, TenantId tenantId)` |  |
-| `Optional<Ubo> findByPersonReferenceId(String personReferenceId)` | Los webhooks de liveness identifican a la persona por esta referencia de Kira. |
-| `List<Ubo> findByTenant(TenantId tenantId)` |  |
-| `UboRoster rosterOf(TenantId tenantId)` |  |
-| `List<Ubo> findPendingLivenessExpiredBefore(java.time.Instant cutoff)` | Enlaces de liveness que ya vencieron y siguen en PENDING: material del reconciliador. |
-
-<sub>`domain/tenant/UboRoster.java` · 63 líneas</sub>
+<sub>`domain/tenant/UboRoster.java` · 62 líneas</sub>
 
 #### `UboRoster` · record
 
@@ -1686,7 +1887,7 @@ aunque el formulario parezca completo.
 | `public List<Ubo> pendingLiveness()` | UBOs cuyo enlace de prueba de vida sigue pendiente de resolverse. |
 | `public boolean livenessComplete()` |  |
 
-<sub>`domain/tenant/UserStatus.java` · 13 líneas</sub>
+<sub>`domain/tenant/UserStatus.java` · 12 líneas</sub>
 
 #### `UserStatus` · enum
 
@@ -1700,7 +1901,7 @@ Valores: `ACTIVE`, `SUSPENDED`, `DISABLED`.
 
 ### A.4 Dominio — account
 
-<sub>`domain/account/Deposit.java` · 142 líneas</sub>
+<sub>`domain/account/Deposit.java` · 141 líneas</sub>
 
 #### `Deposit` · clase · `@Getter`
 
@@ -1710,14 +1911,10 @@ Se guardan los tres importes por separado porque son tres hechos distintos:
 lo que envio el ordenante (bruto), lo que cobro el banco (comision) y lo que
 quedo disponible (neto). Derivar uno de los otros pierde el desglose contable.
 
-| Campo | Descripción |
-|---|---|
-| `private boolean microdeposit` | Deposito de verificacion de cuenta, no un ingreso real del cliente. |
-
 | Método | Descripción |
 |---|---|
-| `public Deposit(String id, TenantId tenantId, String virtualAccountId, …)` |  |
-| `public static Deposit rehydrate(String id, TenantId tenantId, String virtualAccountId, …)` |  |
+| `public Deposit(String id, TenantId tenantId, String virtualAccountId, BigDecimal grossAmount, BigDecimal feeAmount, String currency)` |  |
+| `public static Deposit rehydrate(String id, TenantId tenantId, String virtualAccountId, String kiraDepositId, BigDecimal grossAmount, BigDecimal feeAmount, BigDecimal netAmount, String currency, String senderName, String senderAccount, Rail rail, DepositStatus status, boolean microdeposit, Instant createdAt, Instant updatedAt)` |  |
 | `public void markAsMicrodeposit()` |  |
 | `public void applyRemoteStatus(DepositStatus incoming)` | Aplica el estado que trae un evento. No retrocede desde un estado terminal: los eventos llegan una sola vez y sin orden garantizado, asi que un 'in_transit' que llega tarde no puede resucitar un deposito ya devuelto. |
 | `public void restate(BigDecimal grossAmount, BigDecimal feeAmount, BigDecimal netAmount)` | Corrige los importes con lo que traiga un evento posterior mas completo. |
@@ -1727,41 +1924,31 @@ quedo disponible (neto). Derivar uno de los otros pierde el desglose contable.
 | `public Money net()` |  |
 | `public Money gross()` |  |
 
-<sub>`domain/account/DepositRepository.java` · 18 líneas</sub>
+<sub>`domain/account/DepositRepository.java` · 17 líneas</sub>
 
 #### `DepositRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Deposit save(Deposit deposit)` |  |
-| `Optional<Deposit> findByKiraDepositId(String kiraDepositId)` |  |
-| `List<Deposit> findByTenant(TenantId tenantId, int limit)` |  |
-| `List<Deposit> findByVirtualAccount(String virtualAccountId, int limit)` |  |
-
-<sub>`domain/account/DepositStatus.java` · 77 líneas</sub>
+<sub>`domain/account/DepositStatus.java` · 97 líneas</sub>
 
 #### `DepositStatus` · enum
 
 Estado del deposito entrante.
 
-REFUNDED existe porque un deposito completado puede revertirse despues: la ficha tiene
-que soportar el paso COMPLETED -> REFUNDED, que es justo lo que reproduce el valor
-magico de 11 en el simulador del sandbox.
+Los seis valores de docs.kirafin.ai/reference/virtual-accounts/values. Solo FAILED y
+REFUNDED son finales: un COMPLETED todavia puede retenerse o devolverse, que es justo lo que
+reproduce el valor magico de 11 en el simulador del sandbox.
 
-Valores: `PENDING`, `COMPLETED`, `FAILED`, `REFUNDED`.
-
-| Campo | Descripción |
-|---|---|
-| `private static final Set<DepositStatus> TERMINAL = Set.of(FAILED, REFUNDED)` | Una vez revertido o fallido, el deposito ya no vuelve a acreditar. |
+Valores: `PENDING`, `COMPLETED`, `FAILED`, `REFUNDED`, `KYT_PENDING`, `KYT_REJECTED`.
 
 | Método | Descripción |
 |---|---|
 | `public static DepositStatus fromWire(String raw)` |  |
 | `public static DepositStatus fromEventName(String eventName, String rawStatus)` | Estado que implica cada evento de la familia de depositos. El nombre del evento es mas fiable que el 'status' del payload, porque hay eventos cuyo estado llega vacio y el propio nombre ya dice lo que paso. |
 | `public boolean isTerminal()` |  |
+| `public boolean isHeld()` | Retenido por cumplimiento: ni acreditado ni fallido, y detiene los pagos de la cuenta. |
 | `public boolean creditsBalance()` | Solo un deposito completado suma saldo disponible. |
 
-<sub>`domain/account/VirtualAccount.java` · 201 líneas</sub>
+<sub>`domain/account/VirtualAccount.java` · 200 líneas</sub>
 
 #### `VirtualAccount` · clase · `@Getter`
 
@@ -1770,14 +1957,10 @@ Agregado VirtualAccount: la cuenta bancaria virtual de la empresa cliente en Kir
 El saldo es una proyeccion local de GET /v1/virtual-accounts/{id}/balance y de los
 depositos recibidos por webhook. La autoridad es siempre Kira: aqui solo se refleja.
 
-| Campo | Descripción |
-|---|---|
-| `public static final Duration ACTIVATION_GRACE = Duration.ofMinutes(5)` | Pasado este tiempo sin activarse, deja de ser una espera normal. |
-
 | Método | Descripción |
 |---|---|
-| `public VirtualAccount(String id, TenantId tenantId, String currency, VirtualAccountMode mode, …)` |  |
-| `public static VirtualAccount rehydrate(String id, TenantId tenantId, String kiraAccountId, …)` |  |
+| `public VirtualAccount(String id, TenantId tenantId, String currency, VirtualAccountMode mode, String bank, String description)` |  |
+| `public static VirtualAccount rehydrate(String id, TenantId tenantId, String kiraAccountId, String bankName, String accountNumber, String routingNumber, String currency, VirtualAccountMode mode, String bank, String description, VirtualAccountStatus status, BigDecimal balanceAvailable, boolean activatedEventSeen, Instant balanceRefreshedAt, String openingIdempotencyKey, Instant createdAt, Instant updatedAt)` |  |
 | `public IdempotencyKey reserveOpeningKey()` | Reserva la clave de idempotencia de la apertura, antes de la primera llamada. Un timeout seguido de reintento no debe dejar dos cuentas abiertas. |
 | `public void linkKiraAccount(String kiraAccountId)` |  |
 | `public void describeBank(String bankName, String accountNumber, String routingNumber)` | Completa los datos bancarios. Solo sobrescribe lo que llega con valor: un evento que no trae el numero de cuenta no puede borrar el que ya conocemos, porque ese numero es justamente la senal de que la cuenta puede mover fondos. |
@@ -1792,7 +1975,7 @@ depositos recibidos por webhook. La autoridad es siempre Kira: aqui solo se refl
 | `public boolean isFundsReady()` |  |
 | `public void assertFundsReady()` | Ningun pago se prepara sobre una cuenta que todavia no puede mover fondos. |
 
-<sub>`domain/account/VirtualAccountMode.java` · 30 líneas</sub>
+<sub>`domain/account/VirtualAccountMode.java` · 29 líneas</sub>
 
 #### `VirtualAccountMode` · enum
 
@@ -1806,45 +1989,35 @@ Valores: `FIAT`, `CRYPTO`.
 | `public String wireValue()` |  |
 | `public static VirtualAccountMode from(String raw)` |  |
 
-<sub>`domain/account/VirtualAccountReadiness.java` · 31 líneas</sub>
+<sub>`domain/account/VirtualAccountReadiness.java` · 34 líneas</sub>
 
 #### `VirtualAccountReadiness` · clase
 
-En el pin 2026-04-14 la API colapsa activating/active en "approved", asi que 'approved'
-NO significa que la cuenta pueda mover fondos. La documentacion indica detectar la cuenta
-realmente operativa por un account_number real: no nulo y distinto del centinela
-"PENDING-ACT-ACCOUNT". El evento virtual_account.activated es la unica senal fondos-listos.
-
-| Campo | Descripción |
-|---|---|
-| `public static final String ACT_PENDING_SENTINEL = "PENDING-ACT-ACCOUNT"` |  |
+Cuando una cuenta puede mover fondos. En 2026-06-01 lo dice el estado 'active' (y el evento
+virtual_account.activated, que trae ese mismo estado). Se conserva la deteccion por un
+account_number real, no nulo y distinto del centinela "PENDING-ACT-ACCOUNT", para las filas
+que se proyectaron con la version anterior.
 
 | Método | Descripción |
 |---|---|
 | `public static boolean isFundsReady(String status, String accountNumber, boolean activatedEventSeen)` |  |
 
-<sub>`domain/account/VirtualAccountRepository.java` · 18 líneas</sub>
+<sub>`domain/account/VirtualAccountRepository.java` · 17 líneas</sub>
 
 #### `VirtualAccountRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `VirtualAccount save(VirtualAccount account)` |  |
-| `Optional<VirtualAccount> findByIdAndTenant(String id, TenantId tenantId)` |  |
-| `Optional<VirtualAccount> findByKiraAccountId(String kiraAccountId)` |  |
-| `List<VirtualAccount> findByTenant(TenantId tenantId)` |  |
-
-<sub>`domain/account/VirtualAccountStatus.java` · 36 líneas</sub>
+<sub>`domain/account/VirtualAccountStatus.java` · 38 líneas</sub>
 
 #### `VirtualAccountStatus` · enum
 
-Estado local de la cuenta virtual.
+Estado local de la cuenta virtual, sobre los valores de 2026-06-01:
+pending, activating, active, failed, deactivated (y frozen).
 
-Ojo: en el pin 2026-04-14 la API colapsa activating/active en "approved", asi que
-ACTIVE aqui NO implica que la cuenta pueda mover fondos. Esa pregunta la responde
-`VirtualAccountReadiness`, no este enum.
+ACTIVE solo sale de 'active', que Kira define como "la cuenta puede recibir depositos".
+'activating' es PENDING: el banco aun la esta abriendo. Si llegara un 'approved' de la
+version anterior tampoco se da por activa; VirtualAccountReadiness decide.
 
-Valores: `PENDING`, `ACTIVE`, `INACTIVE`, `FAILED`.
+Valores: `PENDING`, `ACTIVE`, `INACTIVE`, `FAILED`, `FROZEN`.
 
 | Método | Descripción |
 |---|---|
@@ -1852,7 +2025,7 @@ Valores: `PENDING`, `ACTIVE`, `INACTIVE`, `FAILED`.
 
 ### A.5 Dominio — treasury
 
-<sub>`domain/treasury/BankAccountKind.java` · 27 líneas</sub>
+<sub>`domain/treasury/BankAccountKind.java` · 26 líneas</sub>
 
 #### `BankAccountKind` · enum
 
@@ -1865,7 +2038,7 @@ Valores: `CHECKING`, `SAVINGS`.
 | `public String wireValue()` |  |
 | `public static BankAccountKind from(String raw)` |  |
 
-<sub>`domain/treasury/FeeBreakdown.java` · 72 líneas</sub>
+<sub>`domain/treasury/FeeBreakdown.java` · 71 líneas</sub>
 
 #### `FeeBreakdown` · record
 
@@ -1882,11 +2055,6 @@ obligaria a asumir para siempre que la tarifa de Kira no cambia.
 | `BigDecimal platformFee` |
 | `BigDecimal totalFee` |
 
-| Campo | Descripción |
-|---|---|
-| `public static final BigDecimal DEFAULT_KIRA_FEE = new BigDecimal("15.0000")` |  |
-| `public static final BigDecimal DEFAULT_PLATFORM_FEE = new BigDecimal("15.0000")` |  |
-
 | Método | Descripción |
 |---|---|
 | `public static FeeBreakdown standard()` | El desglose de referencia: 15 + 15 = 30 USD. Es una estimacion, no un hecho: la tarifa de Kira depende del riel y lleva un tramo porcentual, asi que la cifra real solo se conoce cuando la cotizacion vuelve. Se usa mientras no haya cotizacion. |
@@ -1895,7 +2063,7 @@ obligaria a asumir para siempre que la tarifa de Kira no cambia.
 | `public static FeeBreakdown of(BigDecimal kiraFee, BigDecimal platformFee)` |  |
 | `public BigDecimal totalDebitFor(BigDecimal originAmount)` | Lo que se debita de la cuenta virtual: el importe enviado mas el cobro total. |
 
-<sub>`domain/treasury/NatureOfPayment.java` · 37 líneas</sub>
+<sub>`domain/treasury/NatureOfPayment.java` · 36 líneas</sub>
 
 #### `NatureOfPayment` · enum
 
@@ -1909,27 +2077,25 @@ Valores: `VENDOR`, `POBO`, `FIRST_PARTY`, `SPOT_3P`, `SPOT_1P`, `RELATED_ENTITIE
 | `public static NatureOfPayment from(String raw)` |  |
 | `public boolean requiresSupportingDocuments()` | Un pago a uno mismo no necesita justificar el destino con documentos. |
 
-<sub>`domain/treasury/Payout.java` · 249 líneas</sub>
+<sub>`domain/treasury/Payout.java` · 293 líneas</sub>
 
 #### `Payout` · clase · `@Getter`
 
 Agregado Payout. Entidad de dominio pura: sin anotaciones de JPA ni dependencias de framework.
 Concentra el control interno (maker-checker) que la API de Kira no ofrece a los integradores.
 
-| Campo | Descripción |
-|---|---|
-| `private String referenceNumber` | IMAD / ACH trace / UETR: el comprobante que el cliente final reclama. |
-
 | Método | Descripción |
 |---|---|
-| `public Payout(String id, TenantId tenantId, String kiraUserId, String virtualAccountId, …)` |  |
-| `public static Payout rehydrate(String id, TenantId tenantId, String kiraUserId, String virtualAccountId, …)` | Rehidratacion desde persistencia. |
+| `public Payout(String id, TenantId tenantId, String kiraUserId, String virtualAccountId, String recipientId, Money amount, FeeBreakdown fees, IdempotencyKey idempotencyKey, String makerUserId)` |  |
+| `public static Payout rehydrate(String id, TenantId tenantId, String kiraUserId, String virtualAccountId, String recipientId, Money amount, FeeBreakdown fees, IdempotencyKey idempotencyKey, String makerUserId, Instant createdAt, String quotationId, Instant quotationExpiresAt, PayoutApprovalState approvalState, PayoutStatus status, String approverUserId, String firstApproverUserId, String rejectionReason, String kiraPayoutId, String errorCode, String referenceNumber, String paymentMethod, Instant updatedAt)` | Rehidratacion desde persistencia. |
 | `public Money totalDebit()` | Lo que se debita de la cuenta virtual: importe enviado mas el cobro total al cliente. |
 | `public BigDecimal platformMargin()` |  |
 | `public void attachQuotation(String quotationId, Instant expiresAt)` |  |
 | `public void attachQuotation(Quotation quotation, Instant now)` | Ata el pago a una cotizacion vigente. NO la consume: la cotizacion se marca como ejecutada al enviar el pago a Kira, no al prepararlo, porque entre preparar y aprobar puede pasar de todo (incluido que venza y haya que recotizar). |
+| `public void replaceQuotation(Quotation quotation, Instant now)` | Cambia la cotizacion de un pago pendiente por una nueva (la anterior vencio mientras esperaba aprobacion). El precio puede cambiar, asi que una primera firma ya dada no vale. |
 | `public boolean isQuotationExpired(Instant now)` |  |
-| `public void approve(String approverId, Instant now)` | Segregacion de funciones: quien crea la solicitud no puede autorizar su envio. |
+| `public void approve(String approverId, Instant now)` | Aprobacion de una sola firma y sin autor de destinatario conocido. |
+| `public boolean approve(String approverId, Instant now, int requiredApprovals, String recipientCreatorId)` | Segregacion de funciones (arquitectura §7): - quien crea la solicitud no puede autorizar su envio; - quien registro el destinatario no puede aprobar pagos hacia el; - con dos firmas requeridas, la segunda es de otra persona. primera de dos firmas. |
 | `public void reject(String approverId, String reason)` |  |
 | `public void markAsSubmitted(String kiraPayoutId, String wireStatus)` | Se invoca tras un 201 de POST /v1/virtual-accounts/{id}/payout. |
 | `public void applyRemoteStatus(PayoutStatus incoming, String errorCode)` | Aplica una transicion recibida por webhook o por reconciliacion. No retrocede desde un estado terminal: los eventos llegan una sola vez y sin orden garantizado. |
@@ -1940,7 +2106,7 @@ Concentra el control interno (maker-checker) que la API de Kira no ofrece a los 
 | `public void assertSubmittable(Instant now)` |  |
 | `public void describeRemote(String referenceNumber, String paymentMethod)` | Se completa desde el 201 del envio y desde GET /v1/payouts/{id}. |
 
-<sub>`domain/treasury/PayoutApprovalState.java` · 10 líneas</sub>
+<sub>`domain/treasury/PayoutApprovalState.java` · 9 líneas</sub>
 
 #### `PayoutApprovalState` · enum
 
@@ -1948,32 +2114,20 @@ Estado del control interno maker-checker. Vive solo en el BFF; Kira no lo conoce
 
 Valores: `PENDING_APPROVAL`, `APPROVED`, `REJECTED`, `SUBMITTED`.
 
-<sub>`domain/treasury/PayoutRepository.java` · 25 líneas</sub>
+<sub>`domain/treasury/PayoutRepository.java` · 24 líneas</sub>
 
 #### `PayoutRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Payout save(Payout payout)` |  |
-| `Optional<Payout> findByIdAndTenant(String id, TenantId tenantId)` | Toda lectura se filtra por tenant, aunque Kira trate el recurso como global del integrador. |
-| `Optional<Payout> findByIdempotencyKey(IdempotencyKey key)` |  |
-| `Optional<Payout> findByKiraPayoutId(String kiraPayoutId)` |  |
-| `List<Payout> findByTenant(TenantId tenantId, int limit)` |  |
-| `List<Payout> findInFlight(int limit)` | Pagos que Kira ya conoce y siguen sin estado terminal: material del reconciliador. |
-
-<sub>`domain/treasury/PayoutStatus.java` · 52 líneas</sub>
+<sub>`domain/treasury/PayoutStatus.java` · 60 líneas</sub>
 
 #### `PayoutStatus` · enum
 
 Estado del payout en Kira (vocabulario del recurso, en MAYUSCULAS segun GET /v1/payouts/{id}).
 KYT_PENDING e IN_REVIEW solo afloran via el evento payout.status_changed y son NO terminales.
-No existe RETURNED ni CANCELLED como estado de recurso: ambos resuelven en FAILED.
+CANCELLED (detenido antes de enviarse) es un estado final propio. RETURNED no existe como
+estado: una devolucion bancaria pasa el pago a FAILED, incluso desde COMPLETED.
 
-Valores: `NOT_SUBMITTED`, `CREATED`, `PENDING`, `PROCESSING`, `KYT_PENDING`, `IN_REVIEW`, `COMPLETED`, `FAILED`, `EXPIRED`, `UNKNOWN`.
-
-| Campo | Descripción |
-|---|---|
-| `private static final Set<PayoutStatus> TERMINAL = Set.of(COMPLETED, FAILED, EXPIRED)` |  |
+Valores: `NOT_SUBMITTED`, `CREATED`, `PENDING`, `PROCESSING`, `KYT_PENDING`, `IN_REVIEW`, `COMPLETED`, `FAILED`, `CANCELLED`, `EXPIRED`, `UNKNOWN`.
 
 | Método | Descripción |
 |---|---|
@@ -1981,7 +2135,7 @@ Valores: `NOT_SUBMITTED`, `CREATED`, `PENDING`, `PROCESSING`, `KYT_PENDING`, `IN
 | `public boolean isTerminal()` |  |
 | `public boolean isInFlight()` |  |
 
-<sub>`domain/treasury/Quotation.java` · 191 líneas</sub>
+<sub>`domain/treasury/Quotation.java` · 190 líneas</sub>
 
 #### `Quotation` · clase · `@Getter`
 
@@ -1996,15 +2150,11 @@ La cotizacion vive 900 segundos exactos (locked_at + 15 min). Un pago aprobado c
 cotizacion vencida se ejecutaria a una tasa distinta de la que vio el tesorero, asi que
 el vencimiento es parte del agregado y no un detalle de la respuesta HTTP.
 
-| Campo | Descripción |
-|---|---|
-| `public static final int TTL_SECONDS = 900` | TTL documentado de una cotizacion redimible. |
-
 | Método | Descripción |
 |---|---|
-| `public Quotation(String id, TenantId tenantId, String virtualAccountId, String recipientId, …)` |  |
-| `public static Quotation rehydrate(String id, TenantId tenantId, String virtualAccountId, …)` |  |
-| `public void applyKiraQuote(String kiraQuoteId, Instant expiresAt, BigDecimal totalDebit, …)` | Asienta lo que devolvio POST /v1/quotations. totalDebit es source.amount, el bruto que sale de la cuenta virtual; destination es recipient.amount, el neto que llega. Ninguno se recalcula aqui: el precio que se le muestra al tesorero tiene que ser exactamente el que Kira va a cobrar. |
+| `public Quotation(String id, TenantId tenantId, String virtualAccountId, String recipientId, QuotationRail rail, BigDecimal originAmount, FeeBreakdown fees, Instant expiresAt)` |  |
+| `public static Quotation rehydrate(String id, TenantId tenantId, String virtualAccountId, String recipientId, QuotationRail rail, String kiraQuoteId, BigDecimal originAmount, BigDecimal destinationAmount, String destinationCurrency, BigDecimal exchangeRate, FeeBreakdown fees, BigDecimal totalDebitAmount, boolean balanceSufficient, String rateSource, String feesSnapshot, Instant expiresAt, QuotationStatus status, Instant createdAt)` |  |
+| `public void applyKiraQuote(String kiraQuoteId, Instant expiresAt, BigDecimal totalDebit, BigDecimal destinationAmount, String destinationCurrency, BigDecimal exchangeRate, FeeBreakdown fees, boolean balanceSufficient, String rateSource, String feesSnapshot)` | Asienta lo que devolvio POST /v1/quotations. totalDebit es source.amount, el bruto que sale de la cuenta virtual; destination es recipient.amount, el neto que llega. Ninguno se recalcula aqui: el precio que se le muestra al tesorero tiene que ser exactamente el que Kira va a cobrar. |
 | `public boolean hasConsistentTotals()` | Comprueba que el bruto cuadra con lo prometido mas las comisiones. Un descuadre no es un error de Kira: es que el importe mostrado al tesorero y el debitado de la cuenta no son el mismo numero, y eso hay que verlo. |
 | `public boolean usesFallbackRate()` | La tasa no viene del mercado sino de una politica de contingencia. |
 | `public boolean isExpired(Instant now)` |  |
@@ -2015,7 +2165,7 @@ el vencimiento es parte del agregado y no un detalle de la respuesta HTTP.
 | `public void expire()` |  |
 | `public long secondsToExpiry(Instant now)` |  |
 
-<sub>`domain/treasury/QuotationRail.java` · 89 líneas</sub>
+<sub>`domain/treasury/QuotationRail.java` · 88 líneas</sub>
 
 #### `QuotationRail` · enum
 
@@ -2031,7 +2181,6 @@ Valores: `ACH_STANDARD`, `ACH_SAME_DAY`, `WIRE_DOMESTIC`, `TRON`, `SOLANA`, `POL
 
 | Método | Descripción |
 |---|---|
-| `QuotationRail(Rail accountType)` |  |
 | `public Rail accountType()` |  |
 | `public String network()` | El valor de 'network' en el destinatario cuando el riel es de wallet. |
 | `public static List<QuotationRail> validFor(Rail accountType)` |  |
@@ -2040,18 +2189,11 @@ Valores: `ACH_STANDARD`, `ACH_SAME_DAY`, `WIRE_DOMESTIC`, `TRON`, `SOLANA`, `POL
 | `public static QuotationRail from(String raw)` |  |
 | `public void assertMatches(Rail recipientAccountType)` | Se comprueba antes de cotizar: Kira solo lo detecta al ejecutar el pago. |
 
-<sub>`domain/treasury/QuotationRepository.java` · 20 líneas</sub>
+<sub>`domain/treasury/QuotationRepository.java` · 19 líneas</sub>
 
 #### `QuotationRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Quotation save(Quotation quotation)` |  |
-| `Optional<Quotation> findByIdAndTenant(String id, TenantId tenantId)` |  |
-| `List<Quotation> findByTenant(TenantId tenantId, int limit)` |  |
-| `List<Quotation> findActiveExpiredBefore(Instant cutoff)` | Cotizaciones ACTIVE cuyo TTL ya paso: el reconciliador las cierra. |
-
-<sub>`domain/treasury/QuotationStatus.java` · 9 líneas</sub>
+<sub>`domain/treasury/QuotationStatus.java` · 8 líneas</sub>
 
 #### `QuotationStatus` · enum
 
@@ -2059,7 +2201,7 @@ Ciclo de vida local de la cotizacion. El TTL de 15 minutos lo fija Kira.
 
 Valores: `ACTIVE`, `EXPIRED`, `EXECUTED`.
 
-<sub>`domain/treasury/Recipient.java` · 133 líneas</sub>
+<sub>`domain/treasury/Recipient.java` · 138 líneas</sub>
 
 #### `Recipient` · clase · `@Getter`
 
@@ -2075,8 +2217,9 @@ incluidos los campos que la API acepta y luego no devuelve.
 
 | Método | Descripción |
 |---|---|
-| `public Recipient(String id, TenantId tenantId, RecipientHolder holder, RecipientAccount account, …)` |  |
-| `public static Recipient rehydrate(String id, TenantId tenantId, RecipientHolder holder, …)` |  |
+| `public Recipient(String id, TenantId tenantId, RecipientHolder holder, RecipientAccount account, PostalAddress address)` |  |
+| `public static Recipient rehydrate(String id, TenantId tenantId, RecipientHolder holder, RecipientAccount account, PostalAddress address, String kiraRecipientId, RecipientStatus status, String replacedByRecipientId, Instant createdAt, Instant updatedAt)` |  |
+| `public void recordAuthor(String userId)` |  |
 | `public Rail getRail()` |  |
 | `public String getNetwork()` | Red de la wallet. Null para rieles bancarios. |
 | `public String getName()` |  |
@@ -2087,7 +2230,7 @@ incluidos los campos que la API acepta y luego no devuelve.
 | `public boolean isRegisteredInKira()` |  |
 | `public void assertUsable()` |  |
 
-<sub>`domain/treasury/RecipientAccount.java` · 115 líneas</sub>
+<sub>`domain/treasury/RecipientAccount.java` · 114 líneas</sub>
 
 #### `RecipientAccount` · interfaz
 
@@ -2099,12 +2242,9 @@ wallet con numero de cuenta: combinaciones que la API acepta enviar y rechaza al
 
 | Método | Descripción |
 |---|---|
-| `Rail rail()` |  |
-| `String destination()` | Numero de cuenta o direccion de wallet, segun el riel. |
-| `String docType()` |  |
-| `String docNumber()` |  |
-
-##### `RecipientAccount.Ach` · record
+| `public Rail rail()` |  |
+| `public String destination()` |  |
+#### `Ach` · record
 
 Cuenta ACH: bank_address viaja como texto plano.
 
@@ -2123,7 +2263,7 @@ Cuenta ACH: bank_address viaja como texto plano.
 | `public Rail rail()` |  |
 | `public String destination()` |  |
 
-##### `RecipientAccount.Wire` · record
+#### `Wire` · record
 
 Cuenta WIRE: bank_address viaja como OBJETO, no como texto.
 
@@ -2143,7 +2283,7 @@ Cuenta WIRE: bank_address viaja como OBJETO, no como texto.
 | `public Rail rail()` |  |
 | `public String destination()` |  |
 
-##### `RecipientAccount.Wallet` · record
+#### `Wallet` · record
 
 Wallet de stablecoin. El par token/red se valida al construirla.
 
@@ -2160,7 +2300,7 @@ Wallet de stablecoin. El par token/red se valida al construirla.
 | `public Rail rail()` |  |
 | `public String destination()` |  |
 
-<sub>`domain/treasury/RecipientHolder.java` · 53 líneas</sub>
+<sub>`domain/treasury/RecipientHolder.java` · 52 líneas</sub>
 
 #### `RecipientHolder` · record
 
@@ -2179,10 +2319,6 @@ destinatario sin nombre.
 | `String email` |
 | `String phone` |
 
-| Campo | Descripción |
-|---|---|
-| `public static final int MAX_PHONE_LENGTH = 16` |  |
-
 | Método | Descripción |
 |---|---|
 | `public static RecipientHolder company(String companyName, String email, String phone)` |  |
@@ -2191,18 +2327,11 @@ destinatario sin nombre.
 | `public String displayName()` | Nombre legible para el directorio local. |
 | `public String type()` |  |
 
-<sub>`domain/treasury/RecipientRepository.java` · 18 líneas</sub>
+<sub>`domain/treasury/RecipientRepository.java` · 17 líneas</sub>
 
 #### `RecipientRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Recipient save(Recipient recipient)` |  |
-| `Optional<Recipient> findByIdAndTenant(String id, TenantId tenantId)` |  |
-| `Optional<Recipient> findByKiraRecipientId(String kiraRecipientId)` |  |
-| `List<Recipient> findActiveByTenant(TenantId tenantId)` |  |
-
-<sub>`domain/treasury/RecipientStatus.java` · 11 líneas</sub>
+<sub>`domain/treasury/RecipientStatus.java` · 10 líneas</sub>
 
 #### `RecipientStatus` · enum
 
@@ -2211,7 +2340,7 @@ un reemplazo y el anterior se archiva: ARCHIVED es un estado puramente local.
 
 Valores: `ACTIVE`, `ARCHIVED`.
 
-<sub>`domain/treasury/SupportingDocument.java` · 55 líneas</sub>
+<sub>`domain/treasury/SupportingDocument.java` · 78 líneas</sub>
 
 #### `SupportingDocument` · record
 
@@ -2226,17 +2355,11 @@ original un tercio.
 | `String type` |
 | `String file` |
 
-| Campo | Descripción |
-|---|---|
-| `public static final int MAX_FILE_BYTES = 3 * 1024 * 1024` |  |
-| `public static final int MAX_DOCUMENTS = 2` |  |
-| `private static final List<String> TYPES = List.of("invoice", "other")` |  |
-
 | Método | Descripción |
 |---|---|
-| `public static void assertValid(List<SupportingDocument> documents, NatureOfPayment nature, …)` | Un array vacio se rechaza: o no va el campo, o van uno o dos documentos. |
+| `public static void assertValid(List<SupportingDocument> documents, NatureOfPayment nature, boolean cryptoFunded)` | Un array vacio se rechaza: o no va el campo, o van uno o dos documentos. |
 
-<sub>`domain/treasury/WalletToken.java` · 57 líneas</sub>
+<sub>`domain/treasury/WalletToken.java` · 56 líneas</sub>
 
 #### `WalletToken` · enum
 
@@ -2249,7 +2372,6 @@ Valores: `USDC`, `USDT`, `COPM`.
 
 | Método | Descripción |
 |---|---|
-| `WalletToken(String wireValue, List<String> networks)` |  |
 | `public String wireValue()` |  |
 | `public List<String> networks()` |  |
 | `public static WalletToken from(String raw)` |  |
@@ -2257,7 +2379,7 @@ Valores: `USDC`, `USDT`, `COPM`.
 
 ### A.6 Dominio — compliance
 
-<sub>`domain/compliance/AuditLog.java` · 46 líneas</sub>
+<sub>`domain/compliance/AuditLog.java` · 45 líneas</sub>
 
 #### `AuditLog` · record
 
@@ -2283,22 +2405,13 @@ proyeccion de webhooks) que no tienen persona detras.
 | `String ipAddress` |
 | `Instant createdAt` |
 
-| Campo | Descripción |
-|---|---|
-| `public static final int MAX_CHANGES_LENGTH = 4000` | Longitud maxima del JSON de cambios; el resto se recorta antes de persistir. |
-
-<sub>`domain/compliance/AuditLogRepository.java` · 14 líneas</sub>
+<sub>`domain/compliance/AuditLogRepository.java` · 13 líneas</sub>
 
 #### `AuditLogRepository` · interfaz
 
 Puerto de salida de la bitacora. Solo escritura y lectura: nunca actualizacion ni borrado.
 
-| Método | Descripción |
-|---|---|
-| `AuditLog append(AuditLog entry)` |  |
-| `List<AuditLog> findByTenant(TenantId tenantId, int limit)` |  |
-
-<sub>`domain/compliance/Rfi.java` · 107 líneas</sub>
+<sub>`domain/compliance/Rfi.java` · 125 líneas</sub>
 
 #### `Rfi` · clase · `@Getter`
 
@@ -2312,36 +2425,30 @@ nuevo. Lo que si es del dominio es el estado, el plazo y lo que el RFI tiene blo
 | Método | Descripción |
 |---|---|
 | `public Rfi(String id, TenantId tenantId, String kiraRfiId, String itemsPayload, Instant dueDate)` |  |
-| `public static Rfi rehydrate(String id, TenantId tenantId, String kiraRfiId, RfiStatus status, …)` |  |
+| `public static Rfi rehydrate(String id, TenantId tenantId, String kiraRfiId, RfiStatus status, String itemsPayload, Instant dueDate, String blockingType, String blockingResourceId, String resolutionReason, Instant createdAt, Instant updatedAt)` |  |
 | `public void assertAcceptsAnswers()` | Antes de llamar a Kira: responder un RFI cerrado solo gasta la llamada y devuelve 409. |
 | `public void applyRemoteStatus(RfiStatus incoming, String itemsPayload)` | Asienta lo que dice Kira. Kira es la fuente de verdad, con una excepcion: un RFI cerrado no se reabre. Los webhooks pueden llegar desordenados, y un 'answered' tardio no debe devolver a la bandeja algo ya resuelto. |
 | `public void describeDueDate(Instant dueDate)` | El plazo no se prorroga aunque Kira devuelva items para otra ronda. |
 | `public void describeBlocking(String type, String resourceId)` | blocking: { type: "transfer", transfer_uuid }. Lo bloqueado sigue bloqueado si el RFI vence. |
+| `public void describeResolutionReason(String reason)` |  |
+| `public void withdraw()` | Kira lo retiro: responde 404 y ya no hay nada que contestar. |
 | `public boolean isOverdue(Instant now)` |  |
 
-<sub>`domain/compliance/RfiRepository.java` · 23 líneas</sub>
+<sub>`domain/compliance/RfiRepository.java` · 22 líneas</sub>
 
 #### `RfiRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Rfi save(Rfi rfi)` |  |
-| `Optional<Rfi> findByIdAndTenant(String id, TenantId tenantId)` |  |
-| `Optional<Rfi> findByKiraRfiId(String kiraRfiId)` |  |
-| `List<Rfi> findByTenant(TenantId tenantId)` |  |
-| `List<Rfi> findOpenByTenant(TenantId tenantId)` |  |
-| `Optional<Rfi> findOpenBlocking(String kiraResourceId)` | RFI abierto que tiene detenido el recurso de Kira indicado (pago o deposito). |
-
-<sub>`domain/compliance/RfiStatus.java` · 46 líneas</sub>
+<sub>`domain/compliance/RfiStatus.java` · 47 líneas</sub>
 
 #### `RfiStatus` · enum
 
 Ciclo de vida de una solicitud de informacion (RFI) planteada por KiraFin.
 
-Son los cuatro estados de Kira y ninguno mas. Un item devuelto no crea un estado propio:
-el RFI vuelve a PENDING, que significa siempre "te toca responder".
+Los cuatro estados que Kira devuelve mas WITHDRAWN: Kira lo cuenta como cierre, pero un RFI
+retirado responde 404 en todas sus rutas y nunca aparece como estado, asi que lo asienta el BFF
+al recibir ese 404. Un item devuelto no crea un estado propio: el RFI vuelve a PENDING.
 
-Valores: `PENDING`, `ANSWERED`, `RESOLVED`, `NOT_RESOLVED`.
+Valores: `PENDING`, `ANSWERED`, `RESOLVED`, `NOT_RESOLVED`, `WITHDRAWN`.
 
 | Método | Descripción |
 |---|---|
@@ -2351,7 +2458,7 @@ Valores: `PENDING`, `ANSWERED`, `RESOLVED`, `NOT_RESOLVED`.
 
 ### A.7 Aplicación — auth
 
-<sub>`application/auth/LoginUseCase.java` · 51 líneas</sub>
+<sub>`application/auth/LoginUseCase.java` · 93 líneas</sub>
 
 #### `LoginUseCase` · clase · `@Service`
 
@@ -2359,10 +2466,13 @@ Sesion propia del BFF. Las credenciales de Kira nunca salen del servidor.
 
 | Método | Descripción |
 |---|---|
-| `public LoginUseCase(OperatorUserRepository users, TenantRepository tenants, …)` |  |
+| `public LoginUseCase(OperatorUserRepository users, TenantRepository tenants, PasswordEncoder passwordEncoder, JwtService jwtService, BffSecurityProperties security)` |  |
 | `public LoginResult login(String email, String rawPassword)` |  |
+| `public LoginResult sessionFor(OperatorUser user)` | Sesion completa para un usuario ya autenticado por todos sus factores. |
+#### `LoginResult` · record
 
-##### `LoginUseCase.LoginResult` · record
+Con MFA, la primera respuesta no trae accessToken sino mfaChallenge: mfaRequired pide el codigo
+y mfaSetupRequired pide configurar el segundo factor antes (entorno que lo exige).
 
 | Componente |
 |---|
@@ -2372,10 +2482,42 @@ Sesion propia del BFF. Las credenciales de Kira nunca salen del servidor.
 | `String role` |
 | `String tenantId` |
 | `String tenantName` |
+| `String mfaChallenge` |
+| `Boolean mfaRequired` |
+| `Boolean mfaSetupRequired` |
+
+<sub>`application/auth/MfaService.java` · 167 líneas</sub>
+
+#### `MfaService` · clase · `@Service`
+
+Segundo factor TOTP (arquitectura §7, "autenticacion fuerte propia").
+
+Tres garantias que no dependen del cliente:
+ - un reto admite como maximo 5 codigos erroneos y despues hay que volver a poner la contrasena;
+ - un codigo ya usado no vale otra vez dentro de su ventana de 30 s;
+ - el secreto se guarda cifrado, nunca en claro.
+Los contadores viven en memoria: con varias instancias del BFF el tope es por instancia.
+
+| Método | Descripción |
+|---|---|
+| `public MfaService(OperatorUserRepository users, JwtService jwt, MfaSecretCipher cipher, BffSecurityProperties properties, LoginUseCase login, AuditTrail audit)` |  |
+| `public LoginUseCase.LoginResult verify(String challengeToken, String code)` | Paso 2 del inicio de sesion: el reto de la contrasena mas un codigo valido dan la sesion. |
+| `public MfaSetup setup(AuthenticatedOperator operator, String challengeToken)` | Genera un secreto pendiente. Sirve con sesion (activacion voluntaria) o con el reto del login cuando el entorno exige MFA y la cuenta aun no lo tiene. |
+| `public LoginUseCase.LoginResult enable(AuthenticatedOperator operator, String challengeToken, String code)` | Confirma el secreto pendiente con un primer codigo y devuelve una sesion nueva. |
+| `public void disable(AuthenticatedOperator operator, String code)` | Solo si el entorno no lo exige, y con un codigo valido: robar la sesion no basta para quitarlo. |
+| `public boolean isEnforced()` |  |
+#### `MfaSetup` · record
+
+El secreto se muestra una sola vez, para escanearlo o escribirlo en la app autenticadora.
+
+| Componente |
+|---|
+| `String secret` |
+| `String otpauthUri` |
 
 ### A.8 Aplicación — tenant
 
-<sub>`application/tenant/KiraUserState.java` · 69 líneas</sub>
+<sub>`application/tenant/KiraUserState.java` · 68 líneas</sub>
 
 #### `KiraUserState` · record
 
@@ -2397,11 +2539,64 @@ igual y se deja que el agregado decida que conserva.
 |---|---|
 | `public static KiraUserState from(JsonNode response)` |  |
 
-<sub>`application/tenant/OnboardingCommands.java` · 36 líneas</sub>
+<sub>`application/tenant/KybDocumentCommands.java` · 35 líneas</sub>
+
+#### `KybDocumentCommands` · clase
+#### `UploadedFile` · record
+
+Archivo recibido del portal. Mismo contrato que el de los RFI.
+
+| Componente |
+|---|
+| `String fileName` |
+| `String contentType` |
+| `byte[] content` |
+
+#### `DocumentFile` · record
+
+Un archivo con el papel que cumple dentro del registro: front, back, selfie o file_*.
+
+| Componente |
+|---|
+| `String documentType` |
+| `UploadedFile file` |
+
+#### `AttachDocuments` · record
+
+Una entrada de identifying_information[] con sus archivos.
+
+Kira no tiene endpoint de subida: los documentos viajan dentro del PUT /v1/users,
+anidados en el registro al que pertenecen. Por eso una peticion cubre un registro
+(el pasaporte, o el acta de constitucion) y todos sus archivos a la vez.
+
+| Componente |
+|---|
+| `String informationType` |
+| `String issuingCountry` |
+| `String number` |
+| `String expiration` |
+| `List<DocumentFile> documents` |
+
+<sub>`application/tenant/KybDocuments.java` · 160 líneas</sub>
+
+#### `KybDocuments` · clase
+
+Construye la entrada de identifying_information[] que Kira espera dentro del PUT /v1/users.
+
+Kira admite dos formas de mandar un archivo: un data URI en base64, o una URL https que
+descarga despues. Aqui se usa base64 porque la URL exige un dominio preautorizado por Kira
+y un host publico. El precio es el tope de 10 MB del cuerpo entero, y base64 anade un tercio
+sobre el tamano real del archivo: por eso el limite se controla sobre los bytes crudos.
+
+Los documentos NUNCA se guardan en el BFF: Kira los custodia. Por eso
+#withoutFiles(List) limpia los archivos antes de persistir el payload de onboarding.
+Es seguro reenviar la entrada sin ellos, porque en un PUT "a missing file works differently:
+sending other fields will not clear it".
+
+<sub>`application/tenant/OnboardingCommands.java` · 49 líneas</sub>
 
 #### `OnboardingCommands` · clase
-
-##### `OnboardingCommands.RegisterBusiness` · record
+#### `RegisterBusiness` · record
 
 Alta minima viable en Kira. Crea el registro pero NO dispara la verificacion.
 
@@ -2409,7 +2604,13 @@ source_of_funds es obligatorio aqui aunque la API lo acepte vacio: sin el, el KY
 no arranca nunca por mucho que el resto del formulario este completo, y ese fallo
 es silencioso.
 
-##### `OnboardingCommands.CompleteProfile` · record · `@NotBlank String businessLegalName,` `@NotBlank @Email String email,` `@NotBlank String sourceOfFunds) {`
+| Componente |
+|---|
+| `String businessLegalName` |
+| `String email` |
+| `String sourceOfFunds` |
+
+#### `CompleteProfile` · record
 
 Campos del perfil KYB. Se envian tal cual los nombra Kira (business_type,
 formation_date, associated_persons...), porque el formulario se renderiza desde
@@ -2418,9 +2619,58 @@ cambia cada vez que Kira pide un campo nuevo.
 
 | Componente |
 |---|
-| `@NotEmpty Map<String, Object> profile` |
+| `Map<String, Object> profile` |
 
-<sub>`application/tenant/OnboardingView.java` · 41 líneas</sub>
+#### `AcceptTerms` · record
+
+Aceptacion de los terminos por el operador. La version debe ser la vigente
+(bff.terms.version): aceptar una anterior no vale.
+
+| Componente |
+|---|
+| `String version` |
+
+#### `SaveDraft` · record
+
+Borrador completo del formulario de vinculacion, con los nombres de campo de Kira.
+Reemplaza el anterior; un objeto vacio borra el borrador. Nunca se envia a Kira.
+
+| Componente |
+|---|
+| `Map<String, Object> draft` |
+
+<sub>`application/tenant/OnboardingDraftService.java` · 97 líneas</sub>
+
+#### `OnboardingDraftService` · clase · `@Service`
+
+Borrador del formulario de vinculacion.
+
+Kira no conoce borradores: un PUT escribe lo que se envia y la verificacion arranca sola
+cuando el expediente esta completo. Para poder dejar el formulario a medias y volver otro
+dia, el portal guarda aqui lo que lleva rellenado. Este servicio NUNCA llama a Kira: enviar
+sigue siendo POST/PUT /api/onboarding.
+
+Los documentos no caben en un borrador por la misma regla que en el resto del BFF: los
+archivos los custodia Kira y no se guardan aqui. Un data URI dentro del borrador se rechaza.
+
+| Método | Descripción |
+|---|---|
+| `public OnboardingDraftService(TenantRepository tenants, AuditTrail audit, ObjectMapper objectMapper)` |  |
+| `public OnboardingDraftView get(AuthenticatedOperator operator)` |  |
+| `public OnboardingDraftView save(AuthenticatedOperator operator, OnboardingCommands.SaveDraft command)` |  |
+
+<sub>`application/tenant/OnboardingDraftView.java` · 8 líneas</sub>
+
+#### `OnboardingDraftView` · record
+
+Borrador del formulario de vinculacion tal como lo dejo el portal. `updatedAt` es nulo si nunca se guardo.
+
+| Componente |
+|---|
+| `Map<String, Object> draft` |
+| `Instant updatedAt` |
+
+<sub>`application/tenant/OnboardingView.java` · 43 líneas</sub>
 
 #### `OnboardingView` · record
 
@@ -2435,6 +2685,7 @@ dibuja desde lo que Kira sigue pidiendo para el producto objetivo.
 | `String name` |
 | `String kiraUserId` |
 | `String status` |
+| `String rejectionReason` |
 | `boolean verificationTriggered` |
 | `List<String> pendingFields` |
 | `List<EligibleProduct> eligibleProducts` |
@@ -2445,7 +2696,7 @@ dibuja desde lo que Kira sigue pidiendo para el producto objetivo.
 |---|---|
 | `public static OnboardingView from(Tenant tenant)` |  |
 
-<sub>`application/tenant/SubmitOnboardingService.java` · 188 líneas</sub>
+<sub>`application/tenant/SubmitOnboardingService.java` · 385 líneas</sub>
 
 #### `SubmitOnboardingService` · clase · `@Service`
 
@@ -2456,42 +2707,56 @@ hasta que no falte nada para el producto objetivo. Este servicio implementa los 
 pasos por separado para que el portal pueda repetir el del medio tantas veces como haga
 falta sin volver a crear nada.
 
-| Campo | Descripción |
-|---|---|
-| `private static final TypeReference<Map<String, Object>> PAYLOAD` |  |
-
 | Método | Descripción |
 |---|---|
-| `public SubmitOnboardingService(TenantRepository tenants, KiraApiClient kira, AuditTrail audit, …)` |  |
-| `public OnboardingView status(AuthenticatedOperator operator)` `@Transactional(readOnly = true)` |  |
-| `public OnboardingView register(AuthenticatedOperator operator, …)` `@Transactional` | Paso 1: alta minima en Kira. Idempotente por dos vias: si la empresa ya tiene kiraUserId no se vuelve a llamar, y si la llamada se corta a medias el reintento reutiliza la misma clave de idempotencia ya persistida. |
-| `public OnboardingView completeProfile(AuthenticatedOperator operator, …)` `@Transactional` | Paso 2: completa el perfil. Se repite tantas veces como haga falta. Kira exige el objeto COMPLETO en cada PUT: lo que no viaje se borra en silencio. Por eso se envia la fusion de lo ya enviado con lo nuevo, y no solo los campos del formulario que el usuario acaba de tocar. |
-| `public OnboardingView refresh(AuthenticatedOperator operator)` `@Transactional` | Paso 3: el recurso es la autoridad. Tambien cubre el hueco de un webhook perdido. |
+| `public SubmitOnboardingService(TenantRepository tenants, KiraApiClient kira, AuditTrail audit, ObjectMapper objectMapper, IdempotencyKeyStore idempotencyKeys, KiraProperties properties, ("$` |  |
+| `public OnboardingView status(AuthenticatedOperator operator)` |  |
+| `public OnboardingView register(AuthenticatedOperator operator, OnboardingCommands.RegisterBusiness command)` | Paso 1: alta minima en Kira. Idempotente por dos vias: si la empresa ya tiene kiraUserId no se vuelve a llamar, y si la llamada se corta a medias el reintento reutiliza la misma clave de idempotencia ya persistida. |
+| `public OnboardingView completeProfile(AuthenticatedOperator operator, OnboardingCommands.CompleteProfile command)` | Paso 2: completa el perfil. Se repite tantas veces como haga falta. Kira solo escribe los campos que viajan, pero se reenvia la fusion de lo ya enviado con lo nuevo: el payload guardado es la unica copia de los campos que Kira no devuelve. |
+| `public OnboardingView attachDocuments(AuthenticatedOperator operator, KybDocumentCommands.AttachDocuments command)` | Adjunta un registro de identifying_information[] con sus archivos. Kira no tiene endpoint de subida: el documento viaja dentro del PUT /v1/users. Los archivos se mandan en base64 y NO se guardan aqui — se limpian del payload antes de persistirlo, porque reenviarlos en cada PUT posterior reventaria el tope de 10 MB. Reenviar la entrada sin archivos no los borra en Kira. |
+| `public TermsView terms(AuthenticatedOperator operator)` | Terminos vigentes y la version que la empresa acepto (arquitectura §2.1 y §7). |
+| `public TermsView acceptTerms(AuthenticatedOperator operator, OnboardingCommands.AcceptTerms command)` | Registra la aceptacion de los terminos vigentes y la manda a Kira como tos_accepted_version (Kira sella tos_accepted_at). Queda auditada con el operador y su IP. |
+| `public OnboardingView refresh(AuthenticatedOperator operator)` | Paso 3: el recurso es la autoridad. Tambien cubre el hueco de un webhook perdido. |
+| `public boolean reconcile(TenantId tenantId)` | Lo mismo que refresh, sin operador: lo usa el worker de reconciliacion. Recupera un user.status_changed que no llego (Kira reintenta ~80 min y despues lo da por perdido). Devuelve true si el estado cambio. |
+#### `TermsView` · record
 
-<sub>`application/tenant/SyncUbosService.java` · 256 líneas</sub>
+version y url son null si no hay terminos configurados; acceptedVersion, si nunca se aceptaron.
+
+| Componente |
+|---|
+| `String version` |
+| `String url` |
+| `String acceptedVersion` |
+
+<sub>`application/tenant/SyncUbosService.java` · 381 líneas</sub>
 
 #### `SyncUbosService` · clase · `@Service`
 
 Beneficiarios finales: registro local, sincronizacion con Kira y enlaces de prueba de vida.
 
-El registro local no es una copia por comodidad. Kira exige que 'associated_persons'
-viaje COMPLETO en cada PUT —lo que no va, se borra en silencio— asi que la unica forma
-de reconstruir el array es tenerlo entero de este lado.
+El registro local no es una copia por comodidad: Kira no devuelve todos los datos de
+cada persona, y fusiona associated_persons[] por email, asi que este lado es la unica
+fuente completa de quienes son y de lo que ya se le envio.
 
 | Método | Descripción |
 |---|---|
-| `public SyncUbosService(UboRepository ubos, TenantRepository tenants, …)` |  |
-| `public UboView.Roster list(AuthenticatedOperator operator)` `@Transactional(readOnly = true)` |  |
-| `public UboView save(AuthenticatedOperator operator, UboCommands.SaveUbo command)` `@Transactional` | Alta o edicion local. No toca Kira: eso lo hace `#syncToKira`. |
-| `public OnboardingView syncToKira(AuthenticatedOperator operator)` `@Transactional` | Envia el array completo de beneficiarios a Kira. Se valida el grupo antes de llamar: sin una persona con propiedad >= 5 %, Kira acepta el PUT y deja el KYB atascado pidiendo "associated_persons:beneficial_owner". Fallar aqui es mas barato que descubrirlo tres pantallas mas adelante. |
-| `public UboView.Roster requestLivenessLinks(AuthenticatedOperator operator, …)` `@Transactional` | Pide un enlace de prueba de vida por beneficiario final. Llamadas repetidas devuelven el mismo enlace salvo que cambien las URLs de redireccion, asi que reintentar es seguro. El enlace vive 7 dias y el resultado real NO llega por la landing de redireccion, sino por el webhook user.liveness_completed. |
-| `public void applyLivenessResult(String personReferenceId, …)` `@Transactional` | Asienta el resultado del webhook user.liveness_completed. Es la unica fuente de verdad del resultado y llega una sola vez, sin reintentos: si no se proyecta aqui, el dato no se recupera por GET. |
+| `public SyncUbosService(UboRepository ubos, TenantRepository tenants, SubmitOnboardingService onboarding, KiraApiClient kira, AuditTrail audit)` |  |
+| `public UboView.Roster list(AuthenticatedOperator operator)` |  |
+| `public UboView save(AuthenticatedOperator operator, UboCommands.SaveUbo command)` | Alta o edicion local. No toca Kira: eso lo hace #syncToKira. |
+| `public UboView.Roster delete(AuthenticatedOperator operator, String uboId)` | Quita un beneficiario cargado por error. Solo antes de que Kira lo conozca: alli las personas se fusionan por email y quitar una del array no la borra, asi que borrarla aqui dejaria las dos listas descuadradas. |
+| `public OnboardingView syncToKira(AuthenticatedOperator operator)` | Envia el array completo de beneficiarios a Kira. Se valida el grupo antes de llamar: sin una persona con propiedad >= 5 %, Kira acepta el PUT y deja el KYB atascado pidiendo "associated_persons:beneficial_owner". Fallar aqui es mas barato que descubrirlo tres pantallas mas adelante. |
+| `public UboView attachDocuments(AuthenticatedOperator operator, String uboId, KybDocumentCommands.AttachDocuments command, boolean biometricConsent)` | Adjunta un documento de identidad a UNA persona. El documento va anidado en la entrada de esa persona dentro de associated_persons[], que Kira empareja por email: de ahi que el beneficiario necesite uno antes de subir nada. La persona viaja con sus datos conocidos para que la fusion no la deje a medias. Mandar la selfie junto al documento le basta a Kira para el face match, sin sesion interactiva: no sustituye al enlace de liveness, pero adelanta esa parte. |
+| `public UboView.Roster requestLivenessLinks(AuthenticatedOperator operator, UboCommands.RequestLivenessLinks command)` | Pide un enlace de prueba de vida por beneficiario final. Llamadas repetidas devuelven el mismo enlace salvo que cambien las URLs de redireccion, asi que reintentar es seguro. El enlace vive 7 dias y el resultado real NO llega por la landing de redireccion, sino por el webhook user.liveness_completed. |
+| `public void applyLivenessResult(String personReferenceId, com.example.autransactional.domain.tenant.LivenessStatus status)` | Asienta el resultado del webhook user.liveness_completed. Es la unica fuente de verdad del resultado: si no se proyecta aqui, el dato no se recupera por GET. Kira reintenta la entrega 4 veces y despues lo da por perdido. |
 
-<sub>`application/tenant/UboCommands.java` · 45 líneas</sub>
+<sub>`application/tenant/UboCommands.java` · 78 líneas</sub>
 
 #### `UboCommands` · clase
 
-##### `UboCommands.SaveUbo` · record
+| Método | Descripción |
+|---|---|
+| `public PostalAddress toDomain()` |  |
+#### `SaveUbo` · record
 
 Alta o edicion de un beneficiario final.
 
@@ -2499,26 +2764,34 @@ hasOwnership es obligatorio y explicito: el cargo no identifica al beneficiario,
 si se omite, Kira bloquea el KYB pidiendo "associated_persons:has_ownership" sin mas
 pistas. pepStatus y countryOfBirth son igual de obligatorios para Kira.
 
+#### `ResidentialAddress` · record
+
+Direccion de residencia. Pais en ISO-3, como el resto de datos de persona en Kira.
+
 | Componente |
 |---|
-| `String id` |
-| `String documentType` |
-| `String documentNumber` |
-| `@NotNull @DecimalMin("0.00") @DecimalMax("100.00") BigDecimal ownershipPercentage` |
-| `@NotBlank @Size(min = 3, max = 3) String countryOfBirth` |
-| `String roleInCompany` |
+| `String streetName` |
+| `String city` |
+| `String state` |
+| `String postalCode` |
+| `String country` |
 
-##### `UboCommands.RequestLivenessLinks` · record
+| Método | Descripción |
+|---|---|
+| `public PostalAddress toDomain()` |  |
 
-URLs a las que Kira devuelve a la persona tras la prueba de vida. Deben estar
-preautorizadas por Kira; la landing NO es fuente de verdad del resultado.
+#### `RequestLivenessLinks` · record
+
+biometricConsent: el operador declara que cada persona consintio el tratamiento biometrico
+antes de recibir su enlace (arquitectura §7). Sin esa declaracion no se piden enlaces.
 
 | Componente |
 |---|
 | `String successUrl` |
 | `String rejectUrl` |
+| `Boolean biometricConsent` |
 
-<sub>`application/tenant/UboView.java` · 61 líneas</sub>
+<sub>`application/tenant/UboView.java` · 93 líneas</sub>
 
 #### `UboView` · record
 
@@ -2527,6 +2800,9 @@ preautorizadas por Kira; la landing NO es fuente de verdad del resultado.
 | `String id` |
 | `String personReferenceId` |
 | `String fullName` |
+| `String firstName` |
+| `String lastName` |
+| `String email` |
 | `String documentType` |
 | `String documentNumber` |
 | `boolean hasOwnership` |
@@ -2537,6 +2813,14 @@ preautorizadas por Kira; la landing NO es fuente de verdad del resultado.
 | `boolean politicallyExposed` |
 | `String countryOfBirth` |
 | `String roleInCompany` |
+| `LocalDate birthDate` |
+| `String nationality` |
+| `String occupation` |
+| `String gender` |
+| `String phoneNumber` |
+| `String documentCountry` |
+| `Address address` |
+| `boolean knownToKira` |
 | `String livenessStatus` |
 | `String livenessLink` |
 | `Instant livenessExpiresAt` |
@@ -2544,8 +2828,20 @@ preautorizadas por Kira; la landing NO es fuente de verdad del resultado.
 | Método | Descripción |
 |---|---|
 | `public static UboView from(Ubo u)` |  |
+| `public static Roster from(UboRoster roster)` |  |
+#### `Address` · record
 
-##### `UboView.Roster` · record
+Direccion de residencia tal como la ve el portal (pais ISO-3).
+
+| Componente |
+|---|
+| `String streetName` |
+| `String city` |
+| `String state` |
+| `String postalCode` |
+| `String country` |
+
+#### `Roster` · record
 
 Vista del grupo: lo que Kira valida sobre el conjunto, no sobre cada persona.
 
@@ -2562,7 +2858,7 @@ Vista del grupo: lo que Kira valida sobre el conjunto, no sobre cada persona.
 
 ### A.9 Aplicación — account
 
-<sub>`application/account/DepositView.java` · 50 líneas</sub>
+<sub>`application/account/DepositView.java` · 62 líneas</sub>
 
 #### `DepositView` · record
 
@@ -2586,6 +2882,7 @@ ordenante, lo que cobro el banco y lo que quedo disponible.
 | `String status` |
 | `boolean microdeposit` |
 | `boolean creditsBalance` |
+| `boolean held` |
 | `Instant createdAt` |
 | `Instant updatedAt` |
 
@@ -2593,7 +2890,7 @@ ordenante, lo que cobro el banco y lo que quedo disponible.
 |---|---|
 | `public static DepositView from(Deposit d)` |  |
 
-<sub>`application/account/KiraDepositEvent.java` · 103 líneas</sub>
+<sub>`application/account/KiraDepositEvent.java` · 106 líneas</sub>
 
 #### `KiraDepositEvent` · record
 
@@ -2624,7 +2921,7 @@ las cotizaciones.
 | `public static KiraDepositEvent fromResource(JsonNode resource, String fallbackKiraAccountId)` | Deposito tal como lo devuelve GET /v1/virtual-accounts/{id}/deposits. No es la forma del webhook: el ordenante va anidado en 'sender', la comision en 'fees.total_fees' y el riel en 'payment_rail'. |
 | `public boolean isIdentifiable()` |  |
 
-<sub>`application/account/OpenVirtualAccountService.java` · 254 líneas</sub>
+<sub>`application/account/OpenVirtualAccountService.java` · 270 líneas</sub>
 
 #### `OpenVirtualAccountService` · clase · `@Service`
 
@@ -2634,21 +2931,18 @@ Abrir una cuenta exige que el KYB este VERIFIED Y que el producto este elegible:
 condiciones, no una. Y una vez abierta, 'aprobada' no significa que pueda mover fondos:
 eso lo dice un numero de cuenta real o el evento virtual_account.activated.
 
-| Campo | Descripción |
-|---|---|
-| `private static final String ACCOUNT_TYPE = "US_BANK"` | Unico valor admitido por el campo 'type'. |
-
 | Método | Descripción |
 |---|---|
-| `public OpenVirtualAccountService(VirtualAccountRepository accounts, TenantRepository tenants, …)` |  |
-| `public List<VirtualAccountView> list(AuthenticatedOperator operator)` `@Transactional(readOnly = true)` |  |
-| `public VirtualAccountView get(AuthenticatedOperator operator, String accountId)` `@Transactional(readOnly = true)` |  |
-| `public VirtualAccountView open(AuthenticatedOperator operator, …)` `@Transactional` |  |
-| `public VirtualAccountView refresh(AuthenticatedOperator operator, String accountId)` `@Transactional` | El recurso es la autoridad. Tambien cubre el hueco de un evento de activacion perdido. |
-| `public VirtualAccountView refreshBalance(AuthenticatedOperator operator, String accountId)` `@Transactional` | Refresca el saldo. Durante la activacion, GET /balance puede responder 400: eso no es un fallo sino "todavia calculando", y se devuelve el ultimo saldo conocido en lugar de un error. |
-| `public VirtualAccountView simulateDeposit(AuthenticatedOperator operator, String accountId, …)` `@Transactional` | Simulacion de deposito. Solo existe en el sandbox; en produccion Kira responde 403. |
+| `public OpenVirtualAccountService(VirtualAccountRepository accounts, TenantRepository tenants, KiraApiClient kira, KiraProperties properties, AuditTrail audit, IdempotencyKeyStore idempotencyKeys)` |  |
+| `public List<VirtualAccountView> list(AuthenticatedOperator operator)` |  |
+| `public VirtualAccountView get(AuthenticatedOperator operator, String accountId)` |  |
+| `public VirtualAccountView open(AuthenticatedOperator operator, VirtualAccountCommands.OpenAccount command)` |  |
+| `public VirtualAccountView refresh(AuthenticatedOperator operator, String accountId)` | El recurso es la autoridad. Tambien cubre el hueco de un evento de activacion perdido. |
+| `public boolean reconcile(VirtualAccount account)` | Relee la cuenta sin operador, para el worker de reconciliacion: failed y deactivated no tienen webhook propio y frozen tampoco, asi que solo se ven consultando el recurso. Devuelve true si cambio el estado o la disponibilidad de fondos. |
+| `public VirtualAccountView refreshBalance(AuthenticatedOperator operator, String accountId)` | Refresca el saldo. Durante la activacion, GET /balance puede responder 400: eso no es un fallo sino "todavia calculando", y se devuelve el ultimo saldo conocido en lugar de un error. |
+| `public VirtualAccountView simulateDeposit(AuthenticatedOperator operator, String accountId, VirtualAccountCommands.SimulateDeposit command)` | Simulacion de deposito. Solo existe en el sandbox; en produccion Kira responde 403. |
 
-<sub>`application/account/RecordDepositService.java` · 179 líneas</sub>
+<sub>`application/account/RecordDepositService.java` · 178 líneas</sub>
 
 #### `RecordDepositService` · clase · `@Service`
 
@@ -2658,25 +2952,19 @@ El espejo local no es una comodidad: en el sandbox un deposito entrante NO apare
 GET /deposits, asi que el webhook es la unica constancia que va a existir de que ese
 dinero llego.
 
-| Campo | Descripción |
-|---|---|
-| `private static final int PAGE_SIZE = 100` | Tope de Kira por pagina en el listado de depositos de una cuenta. |
-| `private static final int MAX_PAGES = 20` |  |
-
 | Método | Descripción |
 |---|---|
 | `public RecordDepositService(DepositRepository deposits, VirtualAccountRepository accounts, KiraApiClient kira)` |  |
-| `public List<DepositView> syncFromKira(AuthenticatedOperator operator, String accountId)` `@Transactional` | Trae de Kira los depositos de una cuenta y los asienta con la misma proyeccion que los webhooks, asi que converge en las mismas filas. Es la red de seguridad de un evento perdido (entrega unica, sin reintentos). En el sandbox Kira no devuelve nada aqui. |
-| `public List<DepositView> list(AuthenticatedOperator operator, int limit)` `@Transactional(readOnly = true)` |  |
-| `public List<DepositView> listByAccount(AuthenticatedOperator operator, String accountId, int limit)` `@Transactional(readOnly = true)` |  |
-| `public void apply(KiraDepositEvent event)` `@Transactional` | Proyecta un evento de deposito. Es idempotente por kira_deposit_id: la familia tiene seis eventos que describen el mismo deposito en distintos momentos, y todos deben converger en una sola fila. |
-| `public List<DepositView> listForTenant(TenantId tenantId, int limit)` `@Transactional(readOnly = true)` | Solo para lecturas internas del reconciliador. |
+| `public List<DepositView> syncFromKira(AuthenticatedOperator operator, String accountId)` | Trae de Kira los depositos de una cuenta y los asienta con la misma proyeccion que los webhooks, asi que converge en las mismas filas. Es la red de seguridad de un evento perdido (entrega unica, sin reintentos). En el sandbox Kira no devuelve nada aqui. |
+| `public List<DepositView> list(AuthenticatedOperator operator, int limit)` |  |
+| `public List<DepositView> listByAccount(AuthenticatedOperator operator, String accountId, int limit)` |  |
+| `public void apply(KiraDepositEvent event)` | Proyecta un evento de deposito. Es idempotente por kira_deposit_id: la familia tiene seis eventos que describen el mismo deposito en distintos momentos, y todos deben converger en una sola fila. |
+| `public List<DepositView> listForTenant(TenantId tenantId, int limit)` | Solo para lecturas internas del reconciliador. |
 
-<sub>`application/account/VirtualAccountCommands.java` · 35 líneas</sub>
+<sub>`application/account/VirtualAccountCommands.java` · 34 líneas</sub>
 
 #### `VirtualAccountCommands` · clase
-
-##### `VirtualAccountCommands.OpenAccount` · record
+#### `OpenAccount` · record
 
 Apertura de cuenta virtual.
 
@@ -2686,20 +2974,20 @@ depende de si se apunta al sandbox o a produccion y equivocarlo devuelve
 
 | Componente |
 |---|
-| `@Size(max = 255) String description` |
+| `String description` |
 | `String mode` |
-| `@Size(max = 10) String currency` |
+| `String currency` |
 
-##### `VirtualAccountCommands.SimulateDeposit` · record
+#### `SimulateDeposit` · record
 
 Solo sandbox. En produccion, Kira responde 403.
 
 | Componente |
 |---|
-| `@NotNull @DecimalMin("0.01") BigDecimal amount` |
-| `@Pattern(regexp = "wire\|ach") String paymentType` |
+| `BigDecimal amount` |
+| `String paymentType` |
 
-<sub>`application/account/VirtualAccountView.java` · 55 líneas</sub>
+<sub>`application/account/VirtualAccountView.java` · 54 líneas</sub>
 
 #### `VirtualAccountView` · record
 
@@ -2734,7 +3022,7 @@ poder mover fondos. Manda el numero de cuenta real o el evento de activacion.
 
 ### A.10 Aplicación — treasury
 
-<sub>`application/treasury/CreateQuoteService.java` · 194 líneas</sub>
+<sub>`application/treasury/CreateQuoteService.java` · 209 líneas</sub>
 
 #### `CreateQuoteService` · clase · `@Service`
 
@@ -2744,18 +3032,15 @@ Se cotiza en modo redimible (con virtual_account_id) y con inverse=true: el impo
 teclea el operador es lo que recibe el destinatario, y las comisiones se suman por
 encima. El modo preview (quote_for) devuelve quote_id nulo y no sirve para pagar.
 
-| Campo | Descripción |
-|---|---|
-| `private static final int PLATFORM_MARKUP_BPS = 0` | Markup porcentual de la plataforma. Hoy el margen es solo fijo. |
-
 | Método | Descripción |
 |---|---|
-| `public CreateQuoteService(QuotationRepository quotations, RecipientRepository recipients, …)` |  |
-| `public List<QuotationView> list(AuthenticatedOperator operator, int limit)` `@Transactional(readOnly = true)` |  |
-| `public QuotationView get(AuthenticatedOperator operator, String quotationId)` `@Transactional(readOnly = true)` |  |
-| `public QuotationView create(AuthenticatedOperator operator, QuotationCommands.CreateQuote command)` `@Transactional` |  |
+| `public CreateQuoteService(QuotationRepository quotations, RecipientRepository recipients, VirtualAccountRepository accounts, TenantRepository tenants, KiraApiClient kira, AuditTrail audit)` |  |
+| `public List<QuotationView> list(AuthenticatedOperator operator, int limit)` |  |
+| `public QuotationView get(AuthenticatedOperator operator, String quotationId)` |  |
+| `public QuotationView create(AuthenticatedOperator operator, QuotationCommands.CreateQuote command)` |  |
+| `public Quotation requote(AuthenticatedOperator operator, Quotation expired, BigDecimal amount)` | Cotizacion nueva para un pago pendiente cuya cotizacion vencio (D9). La llama ExecutePayoutService, que ya comprobo que el operador puede preparar o aprobar pagos. |
 
-<sub>`application/treasury/ExecutePayoutService.java` · 456 líneas</sub>
+<sub>`application/treasury/ExecutePayoutService.java` · 521 líneas</sub>
 
 #### `ExecutePayoutService` · clase · `@Service`
 
@@ -2764,24 +3049,22 @@ Preparacion, aprobacion y ejecucion de pagos.
 El maker-checker vive aqui porque la API de Kira no lo ofrece a los integradores:
 el pago solo sale hacia Kira despues de que un segundo operador lo autoriza.
 
-| Campo | Descripción |
-|---|---|
-| `private static final Set<String> KIRA_PAYOUT_STATUSES = Set.of( ...` | Filtros que acepta GET /v1/payouts: cualquier otro parametro lo rechaza con 400. |
-
 | Método | Descripción |
 |---|---|
-| `public ExecutePayoutService(PayoutRepository payouts, QuotationRepository quotations, …)` |  |
-| `public PayoutPreviewView preview(AuthenticatedOperator operator, PayoutCommands.PreviewPayout command)` `@Transactional(readOnly = true)` | Vista previa de comisiones contra POST /v1/virtual-accounts/{id}/payout/preview. No reserva precio ni crea nada: sirve para mostrar el coste mientras el operador teclea. El margen de la plataforma viaja igual que en el pago sin cotizacion, para que lo que se muestra aqui sea lo que se cobraria. |
-| `public List<PayoutEventView> events(AuthenticatedOperator operator, String payoutId)` `@Transactional(readOnly = true)` | Linea de tiempo del pago (events[] de GET /v1/payouts/{id}). Vacia si aun no se envio. |
-| `public KiraPayoutPage kiraHistory(AuthenticatedOperator operator, String status, int page, int limit, …)` `@Transactional(readOnly = true)` | Historial de pagos de la empresa en Kira (GET /v1/payouts?user_id=...). Kira trata los pagos como globales del integrador: ademas del filtro user_id, se descarta cualquier fila de otro user. Solo se envian los filtros que Kira documenta, porque un parametro desconocido es un 400. |
-| `public PayoutView create(AuthenticatedOperator operator, PayoutCommands.CreatePayout command)` `@Transactional` |  |
-| `public PayoutView approveAndSubmit(AuthenticatedOperator operator, String payoutId, …)` `@Transactional` |  |
-| `public PayoutView reject(AuthenticatedOperator operator, String payoutId, String reason)` `@Transactional` |  |
-| `public PayoutView refreshFromKira(AuthenticatedOperator operator, String payoutId)` `@Transactional` | Reconciliacion puntual: los eventos llegan una sola vez, el recurso es la autoridad final. |
-| `public List<PayoutView> list(AuthenticatedOperator operator, int limit)` `@Transactional(readOnly = true)` |  |
-| `public PayoutView get(AuthenticatedOperator operator, String payoutId)` `@Transactional(readOnly = true)` |  |
+| `public ExecutePayoutService(PayoutRepository payouts, QuotationRepository quotations, VirtualAccountRepository accounts, RecipientRepository recipients, TenantRepository tenants, RfiRepository rfis, KiraApiClient kira, AuditTrail audit, ObjectMapper objectMapper, PayoutApprovalPolicy approvalPolicy, CreateQuoteService quotes)` |  |
+| `public PayoutPreviewView preview(AuthenticatedOperator operator, PayoutCommands.PreviewPayout command)` | Vista previa de comisiones contra POST /v1/virtual-accounts/{id}/payout/preview. No reserva precio ni crea nada: sirve para mostrar el coste mientras el operador teclea. El margen de la plataforma viaja igual que en el pago sin cotizacion, para que lo que se muestra aqui sea lo que se cobraria. |
+| `public List<PayoutEventView> events(AuthenticatedOperator operator, String payoutId)` | Linea de tiempo del pago (events[] de GET /v1/payouts/{id}). Vacia si aun no se envio. |
+| `public KiraPayoutPage kiraHistory(AuthenticatedOperator operator, String status, int page, int limit, String fromDate, String toDate)` | Historial de pagos de la empresa en Kira (GET /v1/payouts?user_id=...). Kira trata los pagos como globales del integrador: ademas del filtro user_id, se descarta cualquier fila de otro user. Solo se envian los filtros que Kira documenta, porque un parametro desconocido es un 400. |
+| `public PayoutView create(AuthenticatedOperator operator, PayoutCommands.CreatePayout command)` |  |
+| `public PayoutView create(AuthenticatedOperator operator, PayoutCommands.CreatePayout command, String clientIdempotencyKey)` | Con la clave del portal, repetir la peticion devuelve el pago ya creado en lugar de crear otro (G-07). La clave es la misma que viaja despues a Kira al aprobar. |
+| `public PayoutView approveAndSubmit(AuthenticatedOperator operator, String payoutId, PayoutCommands.ApprovePayout command)` |  |
+| `public PayoutView requote(AuthenticatedOperator operator, String payoutId)` | D9: la cotizacion vence a los 15 min y la aprobacion puede llegar mas tarde. Se pide una nueva a Kira con la misma cuenta, destinatario, riel e importe, y el pago muestra el precio nuevo antes de aprobarlo (arquitectura §7). Lo pueden pedir quien prepara y quien aprueba. |
+| `public PayoutView reject(AuthenticatedOperator operator, String payoutId, String reason)` |  |
+| `public PayoutView refreshFromKira(AuthenticatedOperator operator, String payoutId)` | Reconciliacion puntual: los eventos llegan una sola vez, el recurso es la autoridad final. |
+| `public List<PayoutView> list(AuthenticatedOperator operator, int limit)` |  |
+| `public PayoutView get(AuthenticatedOperator operator, String payoutId)` |  |
 
-<sub>`application/treasury/KiraPayoutPage.java` · 32 líneas</sub>
+<sub>`application/treasury/KiraPayoutPage.java` · 31 líneas</sub>
 
 #### `KiraPayoutPage` · record
 
@@ -2797,8 +3080,7 @@ pago si nacio aqui, localPayoutId enlaza con /api/payouts/{id}.
 | `int limit` |
 | `int total` |
 | `int totalPages` |
-
-##### `KiraPayoutPage.Item` · record
+#### `Item` · record
 
 | Componente |
 |---|
@@ -2819,7 +3101,7 @@ pago si nacio aqui, localPayoutId enlaza con /api/payouts/{id}.
 | `String memo` |
 | `String createdAt` |
 
-<sub>`application/treasury/KiraQuoteResponse.java` · 100 líneas</sub>
+<sub>`application/treasury/KiraQuoteResponse.java` · 99 líneas</sub>
 
 #### `KiraQuoteResponse` · record
 
@@ -2847,7 +3129,7 @@ importes decimales.
 |---|---|
 | `public static KiraQuoteResponse from(JsonNode response)` |  |
 
-<sub>`application/treasury/KiraRecipientView.java` · 20 líneas</sub>
+<sub>`application/treasury/KiraRecipientView.java` · 19 líneas</sub>
 
 #### `KiraRecipientView` · record
 
@@ -2868,30 +3150,51 @@ en el directorio local.
 | `String email` |
 | `String createdAt` |
 
-<sub>`application/treasury/PayoutCommands.java` · 57 líneas</sub>
+<sub>`application/treasury/PayoutApprovalPolicy.java` · 32 líneas</sub>
+
+#### `PayoutApprovalPolicy` · record · `@ConfigurationProperties(prefix = "bff.payouts.approval")`
+
+Limites internos de aprobacion (arquitectura §5 y §8), fijos en configuracion por decision del
+15-sep. A partir del umbral un pago necesita dos aprobadores distintos, ninguno el que lo creo.
+
+| Componente |
+|---|
+| `BigDecimal dualApprovalThreshold` |
+| `Map<String, BigDecimal> tenantThresholds` |
+
+| Método | Descripción |
+|---|---|
+| `public BigDecimal thresholdFor(TenantId tenantId)` |  |
+| `public int requiredApprovals(TenantId tenantId, Money amount)` |  |
+
+<sub>`application/treasury/PayoutCommands.java` · 56 líneas</sub>
 
 #### `PayoutCommands` · clase
-
-##### `PayoutCommands.CreatePayout` · record
+#### `CreatePayout` · record
 
 Ids del portal (los de /api/virtual-accounts y /api/recipients), no los de Kira.
 
 | Componente |
 |---|
-| `@NotNull @DecimalMin(value = "0.00000001") BigDecimal amount` |
+| `String virtualAccountId` |
+| `String recipientId` |
+| `BigDecimal amount` |
+| `String currency` |
 | `String quotationId` |
 
-##### `PayoutCommands.PreviewPayout` · record
+#### `PreviewPayout` · record
 
 Vista previa de comisiones. Por defecto 'amount' es lo que RECIBE el destinatario, igual
 que al cotizar; con recipientReceivesAmount=false es lo que sale de la cuenta.
 
 | Componente |
 |---|
-| `@NotNull @DecimalMin(value = "0.01") BigDecimal amount` |
+| `String virtualAccountId` |
+| `String recipientId` |
+| `BigDecimal amount` |
 | `Boolean recipientReceivesAmount` |
 
-##### `PayoutCommands.ApprovePayout` · record
+#### `ApprovePayout` · record
 
 Datos que solo se conocen al autorizar.
 
@@ -2902,16 +3205,16 @@ los documentos de soporte van como data URI base64, maximo dos y 3 MB cada uno.
 |---|
 | `String comment` |
 | `String natureOfPayment` |
-| `@Size(max = 255) String memo` |
-| `@Size(max = SupportingDocument.MAX_DOCUMENTS) List<SupportingDocument> documents` |
+| `String memo` |
+| `List<SupportingDocument> documents` |
 
-##### `PayoutCommands.RejectPayout` · record
+#### `RejectPayout` · record
 
 | Componente |
 |---|
-| `@NotBlank String reason` |
+| `String reason` |
 
-<sub>`application/treasury/PayoutEventView.java` · 6 líneas</sub>
+<sub>`application/treasury/PayoutEventView.java` · 5 líneas</sub>
 
 #### `PayoutEventView` · record
 
@@ -2924,7 +3227,7 @@ Un paso de la linea de tiempo de un pago (events[] de GET /v1/payouts/{id}).
 | `String message` |
 | `String createdAt` |
 
-<sub>`application/treasury/PayoutPreviewView.java` · 18 líneas</sub>
+<sub>`application/treasury/PayoutPreviewView.java` · 17 líneas</sub>
 
 #### `PayoutPreviewView` · record
 
@@ -2941,7 +3244,7 @@ fees va tal cual lo desglosa Kira: su forma depende del riel.
 | `String recipientCurrency` |
 | `Map<String, Object> fees` |
 
-<sub>`application/treasury/PayoutView.java` · 72 líneas</sub>
+<sub>`application/treasury/PayoutView.java` · 73 líneas</sub>
 
 #### `PayoutView` · record
 
@@ -2969,6 +3272,8 @@ lo muestra como "detenido" y enlaza al RFI.
 | `boolean terminal` |
 | `String makerUserId` |
 | `String approverUserId` |
+| `String firstApproverUserId` |
+| `int requiredApprovals` |
 | `boolean priceLocked` |
 | `String kiraPayoutId` |
 | `String referenceNumber` |
@@ -2980,14 +3285,12 @@ lo muestra como "detenido" y enlaza al RFI.
 
 | Método | Descripción |
 |---|---|
-| `public static PayoutView from(Payout p)` |  |
-| `public static PayoutView from(Payout p, String blockedByRfiId)` |  |
+| `public static PayoutView from(Payout p, String blockedByRfiId, int requiredApprovals)` |  |
 
-<sub>`application/treasury/QuotationCommands.java` · 31 líneas</sub>
+<sub>`application/treasury/QuotationCommands.java` · 30 líneas</sub>
 
 #### `QuotationCommands` · clase
-
-##### `QuotationCommands.CreateQuote` · record
+#### `CreateQuote` · record
 
 Peticion de cotizacion.
 
@@ -2999,11 +3302,13 @@ valida. Enviarlo sirve para elegir entre ACH_STANDARD y ACH_SAME_DAY.
 
 | Componente |
 |---|
-| `@NotNull @DecimalMin(value = "0.01") BigDecimal amount` |
+| `String virtualAccountId` |
+| `String recipientId` |
+| `BigDecimal amount` |
 | `String rail` |
 | `String targetCurrency` |
 
-<sub>`application/treasury/QuotationView.java` · 56 líneas</sub>
+<sub>`application/treasury/QuotationView.java` · 55 líneas</sub>
 
 #### `QuotationView` · record
 
@@ -3037,11 +3342,10 @@ porque una cotizacion vencida ejecuta a otra tasa.
 |---|---|
 | `public static QuotationView from(Quotation q)` |  |
 
-<sub>`application/treasury/RecipientCommands.java` · 63 líneas</sub>
+<sub>`application/treasury/RecipientCommands.java` · 62 líneas</sub>
 
 #### `RecipientCommands` · clase
-
-##### `RecipientCommands.Address` · record
+#### `Address` · record
 
 Direccion postal. El pais del destinatario va en ISO-2 ("US"), no en ISO-3.
 
@@ -3051,37 +3355,16 @@ Direccion postal. El pais del destinatario va en ISO-2 ("US"), no en ISO-3.
 | `String city` |
 | `String state` |
 | `String postalCode` |
-| `@Size(min = 2, max = 2) String country` |
+| `String country` |
 
-##### `RecipientCommands.RegisterRecipient` · record
+#### `RegisterRecipient` · record
 
 Alta de un destinatario. El bloque que se rellena depende del riel:
 ACH y WIRE llevan datos bancarios, WALLET lleva token, red y direccion.
 
 Un destinatario = un riel. Enviar campos de dos rieles a la vez se rechaza.
 
-| Componente |
-|---|
-| `boolean business` |
-| `String firstName` |
-| `String lastName` |
-| `String companyName` |
-| `@Size(max = 16) String phone` |
-| `Address address` |
-| `String routingNumber` |
-| `String swiftCode` |
-| `String accountNumber` |
-| `String accountKind` |
-| `String bankName` |
-| `String bankAddressText` |
-| `Address bankAddress` |
-| `String token` |
-| `String network` |
-| `String walletAddress` |
-| `String docType` |
-| `String docNumber` |
-
-##### `RecipientCommands.ArchiveRecipient` · record
+#### `ArchiveRecipient` · record
 
 Motivo del archivado. Kira no borra: se archiva local y se crea un reemplazo.
 
@@ -3089,7 +3372,7 @@ Motivo del archivado. Kira no borra: se archiva local y se crea un reemplazo.
 |---|
 | `String replacedByRecipientId` |
 
-<sub>`application/treasury/RecipientView.java` · 60 líneas</sub>
+<sub>`application/treasury/RecipientView.java` · 59 líneas</sub>
 
 #### `RecipientView` · record
 
@@ -3119,7 +3402,7 @@ pantalla que lo muestre es una copia mas de un dato bancario.
 | `public static RecipientView from(Recipient r)` |  |
 | `public static RecipientView from(Recipient r, boolean alreadyExisted)` |  |
 
-<sub>`application/treasury/RegisterRecipientService.java` · 308 líneas</sub>
+<sub>`application/treasury/RegisterRecipientService.java` · 326 líneas</sub>
 
 #### `RegisterRecipientService` · clase · `@Service`
 
@@ -3131,17 +3414,18 @@ anterior, asi que aqui no hay un metodo 'update'.
 
 | Método | Descripción |
 |---|---|
-| `public RegisterRecipientService(RecipientRepository recipients, TenantRepository tenants, …)` |  |
-| `public List<RecipientView> list(AuthenticatedOperator operator)` `@Transactional(readOnly = true)` |  |
-| `public RecipientView get(AuthenticatedOperator operator, String recipientId)` `@Transactional(readOnly = true)` |  |
-| `public List<KiraRecipientView> listInKira(AuthenticatedOperator operator)` `@Transactional(readOnly = true)` | Destinatarios de la empresa en Kira (GET /v1/recipients?user_id=...). Kira no pagina esta lista. Se descarta cualquier destinatario que no pueda confirmarse como de esta empresa. |
-| `public KiraRecipientView getInKira(AuthenticatedOperator operator, String recipientId)` `@Transactional(readOnly = true)` | Un destinatario del directorio, leido de Kira. |
-| `public RecipientView register(AuthenticatedOperator operator, …)` `@Transactional` |  |
-| `public RecipientView archive(AuthenticatedOperator operator, String recipientId, …)` `@Transactional` | Archiva un destinatario. Es un reemplazo logico: Kira no borra, asi que el registro remoto sigue existiendo y lo que cambia es que aqui deja de ofrecerse para pagos. |
+| `public RegisterRecipientService(RecipientRepository recipients, TenantRepository tenants, KiraApiClient kira, AuditTrail audit)` |  |
+| `public List<RecipientView> list(AuthenticatedOperator operator)` |  |
+| `public RecipientView get(AuthenticatedOperator operator, String recipientId)` |  |
+| `public List<KiraRecipientView> listInKira(AuthenticatedOperator operator)` | Destinatarios de la empresa en Kira (GET /v1/recipients?user_id=...). Kira no pagina esta lista. Se descarta cualquier destinatario que no pueda confirmarse como de esta empresa. |
+| `public KiraRecipientView getInKira(AuthenticatedOperator operator, String recipientId)` | Un destinatario del directorio, leido de Kira. |
+| `public RecipientView register(AuthenticatedOperator operator, RecipientCommands.RegisterRecipient command)` |  |
+| `public RecipientView register(AuthenticatedOperator operator, RecipientCommands.RegisterRecipient command, String clientIdempotencyKey)` | Con la clave del portal, un reintento devuelve el mismo destinatario (G-07). |
+| `public RecipientView archive(AuthenticatedOperator operator, String recipientId, RecipientCommands.ArchiveRecipient command)` | Archiva un destinatario. Es un reemplazo logico: Kira no borra, asi que el registro remoto sigue existiendo y lo que cambia es que aqui deja de ofrecerse para pagos. |
 
 ### A.11 Aplicación — compliance
 
-<sub>`application/compliance/AnswerRfiService.java` · 586 líneas</sub>
+<sub>`application/compliance/AnswerRfiService.java` · 682 líneas</sub>
 
 #### `AnswerRfiService` · clase · `@Service`
 
@@ -3154,29 +3438,22 @@ en not_resolved y lo bloqueado sigue bloqueado. Por eso la bandeja importa.
 Kira trata los RFIs como globales del integrador; el aislamiento por organizacion lo
 imponemos aqui atribuyendo cada RFI a su empresa por user_id.
 
-| Campo | Descripción |
-|---|---|
-| `private static final int PAGE_SIZE = 100` | Tope de Kira por pagina. |
-| `private static final int MAX_PAGES = 20` | Corte de seguridad: 2.000 RFIs abiertos de una empresa no es un caso, es un bucle. |
-| `static final int MAX_FILES = 20` | Limites de Kira para los archivos de un item documento. |
-| `static final long MAX_FILE_BYTES = 30L * 1024 * 1024` |  |
-| `static final List<String> DEFAULT_MIME_TYPES = ...` | MIME aceptados por Kira; el answer_spec de cada item puede estrecharlos. |
-
 | Método | Descripción |
 |---|---|
-| `public AnswerRfiService(RfiRepository rfis, TenantRepository tenants, PayoutRepository payouts, …)` |  |
-| `public List<RfiView> list(AuthenticatedOperator operator, boolean onlyOpen)` `@Transactional(readOnly = true)` |  |
-| `public RfiView get(AuthenticatedOperator operator, String rfiId)` `@Transactional(readOnly = true)` |  |
-| `public List<RfiView> sync(AuthenticatedOperator operator)` `@Transactional` | Trae de Kira los RFIs de la empresa y los asienta. Es la red de seguridad del webhook: rfi.* exige suscripcion explicita en Kira y, como todo webhook, se entrega una sola vez. |
-| `public int syncForTenant(TenantId tenantId)` `@Transactional` | Lo mismo, sin operador: lo usa el worker de reconciliacion, que no actua en nombre de nadie. Devuelve cuantos RFIs quedaron asentados. |
-| `public RfiView refresh(AuthenticatedOperator operator, String rfiId)` `@Transactional` |  |
-| `public RfiView answer(AuthenticatedOperator operator, String rfiId, RfiCommands.AnswerItems command)` `@Transactional(noRollbackFor = DomainException.class)` | Responde items de texto con PATCH /v1/rfis/{id}/items. Se valida todo antes de llamar, y lo que Kira rechace se devuelve por item_id. Tras un PATCH aceptado se relee el RFI: el estado del RFI (answered o sigue pending, si la respuesta fue parcial) lo decide Kira, no la respuesta del PATCH. noRollbackFor: ante un 409 se asienta el cierre antes de avisar al operador. |
-| `public RfiView uploadDocuments(AuthenticatedOperator operator, String rfiId, String itemId, …)` `@Transactional(noRollbackFor = DomainException.class)` | Sube archivos a un item de tipo documento (POST /v1/rfis/{id}/items/{item}/documents). Se valida contra los limites de Kira y el answer_spec del item antes de enviar nada: un archivo rechazado por Kira significa haber subido hasta 20 x 30 MB para nada. |
-| `public RfiView removeDocument(AuthenticatedOperator operator, String rfiId, String itemId, String documentId)` `@Transactional(noRollbackFor = DomainException.class)` | Elimina un archivo. Kira no deja borrar el ultimo de un item ya respondido. |
-| `public RfiDocumentLink documentLink(AuthenticatedOperator operator, String rfiId, String itemId, …)` `@Transactional(readOnly = true)` | Enlace temporal de descarga. La URL no se registra: es una credencial al portador. |
+| `public AnswerRfiService(RfiRepository rfis, TenantRepository tenants, PayoutRepository payouts, DepositRepository deposits, KiraApiClient kira, AuditTrail audit, ObjectMapper objectMapper)` |  |
+| `public List<RfiView> list(AuthenticatedOperator operator, boolean onlyOpen)` |  |
+| `public RfiView get(AuthenticatedOperator operator, String rfiId)` |  |
+| `public List<RfiView> sync(AuthenticatedOperator operator)` | Trae de Kira los RFIs de la empresa y los asienta. Es la red de seguridad del webhook: rfi.* exige suscripcion explicita en Kira y, como todo webhook, se entrega una sola vez. |
+| `public int syncForTenant(TenantId tenantId)` | Lo mismo, sin operador: lo usa el worker de reconciliacion, que no actua en nombre de nadie. Devuelve cuantos RFIs quedaron asentados. |
+| `public RfiView refresh(AuthenticatedOperator operator, String rfiId)` |  |
+| `public RfiUboLink mintUboLink(AuthenticatedOperator operator, String rfiId, String itemId)` | Enlace de verificacion de un beneficiario para un item ubo_link sin url ya hecha. No se persiste: caduca en una hora y es una credencial de esa persona. Un 409 asienta el cierre del RFI; un 404 que fue retirado. |
+| `public RfiView answer(AuthenticatedOperator operator, String rfiId, RfiCommands.AnswerItems command)` | Responde items de texto con PATCH /v1/rfis/{id}/items. Se valida todo antes de llamar, y lo que Kira rechace se devuelve por item_id. Tras un PATCH aceptado se relee el RFI: el estado del RFI (answered o sigue pending, si la respuesta fue parcial) lo decide Kira, no la respuesta del PATCH. noRollbackFor: ante un 409 se asienta el cierre antes de avisar al operador. |
+| `public RfiView uploadDocuments(AuthenticatedOperator operator, String rfiId, String itemId, List<RfiCommands.UploadedFile> files)` | Sube archivos a un item de tipo documento (POST /v1/rfis/{id}/items/{item}/documents). Se valida contra los limites de Kira y el answer_spec del item antes de enviar nada: un archivo rechazado por Kira significa haber subido hasta 20 x 30 MB para nada. |
+| `public RfiView removeDocument(AuthenticatedOperator operator, String rfiId, String itemId, String documentId)` | Elimina un archivo. Kira no deja borrar el ultimo de un item ya respondido. |
+| `public RfiDocumentLink documentLink(AuthenticatedOperator operator, String rfiId, String itemId, String documentId)` | Enlace temporal de descarga. La URL no se registra: es una credencial al portador. Si se registra quién la pidió (arquitectura §7: descargas sensibles auditadas). |
 | `public void applyWebhook(String kiraRfiId, String rawStatus)` | Proyeccion de la familia rfi.* de webhooks. Sin @Transactional a proposito: corre dentro de la transaccion del procesador de webhooks, y un fallo al consultar Kira debe quedar como processing_error del evento, no marcar la transaccion entera para rollback y perder la fila del evento. |
 
-<sub>`application/compliance/RfiAnswerRejectedException.java` · 25 líneas</sub>
+<sub>`application/compliance/RfiAnswerRejectedException.java` · 24 líneas</sub>
 
 #### `RfiAnswerRejectedException` · clase
 
@@ -3189,11 +3466,10 @@ como respondido.
 | `public RfiAnswerRejectedException(String message, Map<String, String> itemErrors)` |  |
 | `public Map<String, String> itemErrors()` |  |
 
-<sub>`application/compliance/RfiCommands.java` · 35 líneas</sub>
+<sub>`application/compliance/RfiCommands.java` · 34 líneas</sub>
 
 #### `RfiCommands` · clase
-
-##### `RfiCommands.AnswerItems` · record
+#### `AnswerItems` · record
 
 Respuesta a uno o varios items. Responder un subconjunto es valido.
 
@@ -3202,19 +3478,19 @@ aqui se rechaza antes de llamar a Kira.
 
 | Componente |
 |---|
-| `@NotEmpty @Valid List<ItemAnswer> items` |
+| `List<ItemAnswer> items` |
 
-##### `RfiCommands.ItemAnswer` · record
+#### `ItemAnswer` · record
 
 answerValue es texto, numero o booleano segun el answer_type del item (text_short,
 number, boolean, choice, date, identifier...). Kira lo valida contra el answer_spec.
 
 | Componente |
 |---|
-| `@NotBlank String itemId` |
-| `@NotNull Object answerValue` |
+| `String itemId` |
+| `Object answerValue` |
 
-##### `RfiCommands.UploadedFile` · record
+#### `UploadedFile` · record
 
 Archivo recibido del portal para un item de tipo documento.
 
@@ -3224,7 +3500,7 @@ Archivo recibido del portal para un item de tipo documento.
 | `String contentType` |
 | `byte[] content` |
 
-<sub>`application/compliance/RfiDocumentLink.java` · 13 líneas</sub>
+<sub>`application/compliance/RfiDocumentLink.java` · 12 líneas</sub>
 
 #### `RfiDocumentLink` · record
 
@@ -3238,7 +3514,21 @@ pide otra si caduca. No se guarda ni se registra en ningun log.
 | `String downloadUrl` |
 | `Instant expiresAt` |
 
-<sub>`application/compliance/RfiView.java` · 71 líneas</sub>
+<sub>`application/compliance/RfiUboLink.java` · 12 líneas</sub>
+
+#### `RfiUboLink` · record
+
+Enlace de verificacion de identidad de un beneficiario pedido por un RFI (item ubo_link).
+
+Caduca en torno a una hora y es de un solo uso para esa persona: se acuna cuando la persona
+pulsa, no se guarda ni se registra en ningun log.
+
+| Componente |
+|---|
+| `String url` |
+| `Instant expiresAt` |
+
+<sub>`application/compliance/RfiView.java` · 73 líneas</sub>
 
 #### `RfiView` · record
 
@@ -3252,6 +3542,7 @@ cada tipo nuevo de requerimiento debe poder mostrarse sin desplegar el BFF.
 | `String id` |
 | `String kiraRfiId` |
 | `String status` |
+| `String resolutionReason` |
 | `boolean open` |
 | `boolean overdue` |
 | `Instant dueDate` |
@@ -3264,9 +3555,8 @@ cada tipo nuevo de requerimiento debe poder mostrarse sin desplegar el BFF.
 
 | Método | Descripción |
 |---|---|
-| `public static RfiView from(Rfi rfi, List<Map<String, Object>> items, Payout blockedPayout, …)` |  |
-
-##### `RfiView.Blocking` · record
+| `public static RfiView from(Rfi rfi, List<Map<String, Object>> items, Payout blockedPayout, Deposit blockedDeposit)` |  |
+#### `Blocking` · record
 
 Lo que el RFI tiene detenido: una transferencia (type "transfer") o un deposito
 (type "virtual_account_deposit"). payoutId / depositId son los ids del portal; van nulos
@@ -3281,9 +3571,186 @@ si Kira bloquea algo que este portal no conoce.
 | `String depositId` |
 | `String depositStatus` |
 
-### A.12 Aplicación — reference
+### A.12 Aplicación — platform
 
-<sub>`application/reference/CountryView.java` · 15 líneas</sub>
+<sub>`application/platform/PlatformConsoleService.java` · 224 líneas</sub>
+
+#### `PlatformConsoleService` · clase · `@Service`
+
+Consola de operaciones y cumplimiento de AU (arquitectura §2.2): todas las organizaciones, de
+solo lectura, mas "Actualizar desde el proveedor". Cada consulta a una ficha queda en la
+bitacora: ver datos de otra empresa es un acceso que tiene que poder rendirse cuentas.
+
+| Método | Descripción |
+|---|---|
+| `public PlatformConsoleService(TenantRepository tenants, UboRepository ubos, VirtualAccountRepository accounts, PayoutRepository payouts, DepositRepository deposits, RfiRepository rfis, SubmitOnboardingService onboarding, OpenVirtualAccountService accountService, AuditTrail audit, PayoutApprovalPolicy approvalPolicy)` |  |
+| `public List<TenantSummary> tenants(AuthenticatedOperator operator)` |  |
+| `public Tenant360 tenant(AuthenticatedOperator operator, String tenantId)` |  |
+| `public Tenant360 refresh(AuthenticatedOperator operator, String tenantId)` | Relee en Kira la empresa y sus cuentas: el mismo trabajo que los workers, a demanda. |
+| `public List<ReviewItem> reviewQueue(AuthenticatedOperator operator)` | Lo que pide atencion humana en todas las organizaciones, lo mas grave primero. |
+#### `TenantSummary` · record
+
+| Componente |
+|---|
+| `String id` |
+| `String name` |
+| `String kiraUserId` |
+| `String status` |
+| `boolean verificationTriggered` |
+| `boolean readyForVirtualAccounts` |
+| `int pendingFields` |
+| `String rejectionReason` |
+| `int beneficialOwners` |
+| `int virtualAccounts` |
+| `int openRfis` |
+| `int overdueRfis` |
+| `int heldPayouts` |
+| `Instant createdAt` |
+| `Instant updatedAt` |
+
+#### `RfiSummary` · record
+
+| Componente |
+|---|
+| `String id` |
+| `String kiraRfiId` |
+| `String status` |
+| `String resolutionReason` |
+| `Instant dueDate` |
+| `boolean overdue` |
+| `String blockingType` |
+
+#### `Tenant360` · record
+
+| Componente |
+|---|
+| `TenantSummary summary` |
+| `OnboardingView onboarding` |
+| `UboView.Roster beneficialOwners` |
+| `List<VirtualAccountView> accounts` |
+| `List<PayoutView> payouts` |
+| `List<DepositView> deposits` |
+| `List<RfiSummary> rfis` |
+
+#### `ReviewItem` · record
+
+| Componente |
+|---|
+| `String tenantId` |
+| `String tenantName` |
+| `String kind` |
+| `String severity` |
+| `String title` |
+| `String detail` |
+| `Instant since` |
+
+### A.13 Aplicación — notification
+
+<sub>`application/notification/Notification.java` · 24 líneas</sub>
+
+#### `Notification` · record
+
+Aviso de negocio para las personas de una organizacion (arquitectura §2.6).
+
+Nace de un evento de Kira ya proyectado: el aviso dice que algo cambio, pero lo que manda es
+el recurso, que la pantalla vuelve a leer. No lleva datos personales ni importes completos.
+
+| Componente |
+|---|
+| `String id` |
+| `TenantId tenantId` |
+| `String kind` |
+| `String severity` |
+| `String title` |
+| `String message` |
+| `String resourceType` |
+| `String resourceId` |
+| `Instant createdAt` |
+
+<sub>`application/notification/NotificationRepository.java` · 20 líneas</sub>
+
+#### `NotificationRepository` · interfaz
+
+<sub>`application/notification/NotificationService.java` · 72 líneas</sub>
+
+#### `NotificationService` · clase · `@Service`
+
+Centro de avisos dentro de la aplicacion. Los leidos se calculan por usuario con una marca de
+"visto hasta": marcar todo como leido es mover esa marca, no tocar cada aviso.
+
+| Método | Descripción |
+|---|---|
+| `public NotificationService(NotificationRepository notifications)` |  |
+| `public void notify(TenantId tenantId, String kind, String severity, String title, String message, String resourceType, String resourceId)` |  |
+| `public NotificationFeed feed(AuthenticatedOperator operator, int limit)` |  |
+| `public long unreadCount(AuthenticatedOperator operator)` |  |
+| `public void markAllRead(AuthenticatedOperator operator)` |  |
+#### `NotificationView` · record
+
+| Componente |
+|---|
+| `String id` |
+| `String kind` |
+| `String severity` |
+| `String title` |
+| `String message` |
+| `String resourceType` |
+| `String resourceId` |
+| `Instant createdAt` |
+| `boolean unread` |
+
+#### `NotificationFeed` · record
+
+| Componente |
+|---|
+| `List<NotificationView> items` |
+| `long unread` |
+
+### A.14 Aplicación — audit
+
+<sub>`application/audit/AuditQueryService.java` · 81 líneas</sub>
+
+#### `AuditQueryService` · clase · `@Service`
+
+Lectura de la trazabilidad propia (arquitectura §2.2 y §2.6): la bitacora de acciones y el
+centro de eventos de Kira. Siempre filtrado por la organizacion del operador.
+
+| Método | Descripción |
+|---|---|
+| `public AuditQueryService(AuditLogRepository audit, OperatorUserRepository users, WebhookEventJpaRepository events)` |  |
+| `public List<AuditEntryView> auditTrail(AuthenticatedOperator operator, int limit)` |  |
+| `public List<EventView> events(AuthenticatedOperator operator, int limit)` | Sin payload: puede traer datos personales y aqui solo interesa que paso y si se proceso. |
+#### `AuditEntryView` · record
+
+| Componente |
+|---|
+| `String id` |
+| `String action` |
+| `String resourceType` |
+| `String resourceId` |
+| `String actorName` |
+| `String actorEmail` |
+| `String actorRole` |
+| `String detail` |
+| `Instant createdAt` |
+
+#### `EventView` · record
+
+| Componente |
+|---|
+| `String eventId` |
+| `String eventType` |
+| `String resourceId` |
+| `String status` |
+| `boolean processed` |
+| `String processingError` |
+| `int retryCount` |
+| `Instant receivedAt` |
+| `Instant processedAt` |
+
+### A.15 Aplicación — reference
+
+<sub>`application/reference/CountryView.java` · 14 líneas</sub>
 
 #### `CountryView` · record
 
@@ -3297,15 +3764,14 @@ expresion regular (sintaxis Ruby, \A...\Z) con la que Kira valida el codigo post
 | `String alpha3` |
 | `String postalCodeFormat` |
 | `List<Subdivision> subdivisions` |
-
-##### `CountryView.Subdivision` · record
+#### `Subdivision` · record
 
 | Componente |
 |---|
 | `String name` |
 | `String code` |
 
-<sub>`application/reference/ReferenceCatalogService.java` · 57 líneas</sub>
+<sub>`application/reference/ReferenceCatalogService.java` · 56 líneas</sub>
 
 #### `ReferenceCatalogService` · clase · `@Service`
 
@@ -3315,26 +3781,46 @@ El de paises es estable (sin cambios desde 2025-01-01) y lo usan todos los formu
 direccion: se cachea 24 h para no gastar una llamada autenticada cada vez que se pinta uno.
 Un fallo no se cachea: la siguiente peticion vuelve a intentarlo.
 
-| Campo | Descripción |
-|---|---|
-| `private static final String COUNTRIES = "countries"` |  |
-
 | Método | Descripción |
 |---|---|
 | `public ReferenceCatalogService(KiraApiClient kira)` |  |
 | `public List<CountryView> countries()` |  |
 
-### A.13 Aplicación — webhook
+### A.16 Aplicación — shared
 
-<sub>`application/webhook/KiraWebhookEnvelope.java` · 40 líneas</sub>
+<sub>`application/shared/IdempotencyKeyStore.java` · 46 líneas</sub>
+
+#### `IdempotencyKeyStore` · clase · `@Service`
+
+Consolida en base de datos la clave de idempotencia ANTES de llamar a Kira.
+
+El caso de uso que abre la empresa o la cuenta corre dentro de una transaccion y relanza la
+excepcion si Kira falla: ese rollback tambien deshacia el guardado de la clave, justo lo que
+no debe perderse. Si Kira llego a crear el recurso y la respuesta se perdio, el reintento
+tiene que viajar con LA MISMA clave o se crea un duplicado.
+
+Por eso cada metodo abre su propia transaccion (REQUIRES_NEW) y confirma antes de volver:
+pase lo que pase despues, la clave ya esta en MySQL. Vive en una clase aparte a proposito,
+porque una llamada interna al propio servicio no pasa por el proxy de Spring y la propagacion
+no se aplicaria.
+
+| Método | Descripción |
+|---|---|
+| `public IdempotencyKeyStore(TenantRepository tenants, VirtualAccountRepository accounts)` |  |
+| `public void persistNow(Tenant tenant)` | Guarda la empresa con su clave de alta reservada, en una transaccion propia. |
+| `public void persistNow(VirtualAccount account)` | Guarda la cuenta virtual con su clave de apertura reservada, en una transaccion propia. |
+
+### A.17 Aplicación — webhook
+
+<sub>`application/webhook/KiraWebhookEnvelope.java` · 39 líneas</sub>
 
 #### `KiraWebhookEnvelope` · record
 
 Normaliza las dos envolturas activas de Kira.
 
-- Plana:  { event, data { event_id, status, ... } }
-- V2 de payout.status_changed: { event, data { event_id, event_type, created_at,
-data { status EN MAYUSCULAS, previous_status, ... } } }
+ - Plana:  { event, data { event_id, status, ... } }
+ - V2 de payout.status_changed: { event, data { event_id, event_type, created_at,
+                                  data { status EN MAYUSCULAS, previous_status, ... } } }
 
 En ambas el identificador para deduplicar esta en data.event_id; no existe a nivel raiz.
 
@@ -3351,25 +3837,27 @@ En ambas el identificador para deduplicar esta en data.event_id; no existe a niv
 | `public String rawStatus()` | Estado tal como lo trae el evento. Siempre debe compararse sin distinguir mayusculas. |
 | `public String text(String field)` |  |
 
-<sub>`application/webhook/ProcessWebhookUseCase.java` · 304 líneas</sub>
+<sub>`application/webhook/ProcessWebhookUseCase.java` · 496 líneas</sub>
 
 #### `ProcessWebhookUseCase` · clase · `@Service`
 
 Procesamiento asincrono de los eventos de Kira.
 
-El ingress ya respondio 2xx: aqui no se puede pedir un reintento al emisor porque no lo hay.
-La idempotencia se apoya en la unicidad de data.event_id en base de datos.
+Dos pasos: record() guarda el evento dentro de la peticion de Kira (si falla, 5xx y Kira
+reintenta) y projectLater() lo proyecta despues de responder. La idempotencia se apoya en la
+unicidad de data.event_id en base de datos.
 
 | Método | Descripción |
 |---|---|
-| `public ProcessWebhookUseCase(WebhookEventJpaRepository events, PayoutRepository payouts, …)` |  |
-| `public void enqueue(String rawPayload)` `@Async(AsyncConfig.WEBHOOK_EXECUTOR)` |  |
-| `public void process(String rawPayload) throws Exception` `@Transactional` |  |
-| `public void reproject(WebhookEventEntity stored) throws Exception` `@Transactional` | Reintenta la proyeccion de un evento ya almacenado que nunca se proyecto. No se puede reutilizar `#process(String)`: ese metodo empieza deduplicando por event_id y, como la fila ya existe, saldria sin proyectar nada, que es justo lo contrario de lo que se busca aqui. Deja que la excepcion suba: quien llama decide si la fila queda marcada con el error o si el lote entero se corta (por ejemplo, cuando faltan las credenciales de Kira). |
+| `public ProcessWebhookUseCase(WebhookEventJpaRepository events, PayoutRepository payouts, TenantRepository tenants, VirtualAccountRepository accounts, RecordDepositService deposits, SyncUbosService ubos, AnswerRfiService rfis, ObjectMapper objectMapper, NotificationService notifications)` |  |
+| `public Optional<String> record(String rawPayload)` | Paso 1, dentro de la peticion de Kira: guarda el evento y confirma la escritura. Se hace ANTES de responder 2xx (webhooks/best-practices: "write the event to your own queue or table, answer 2xx, process from there"). Si la base falla, la excepcion llega al controlador como 5xx y Kira reintenta (1, 5, 15 y 60 min). Devuelve el id de la fila, o vacio si el evento ya estaba registrado. |
+| `public void projectLater(String storedId)` | Paso 2, despues de responder: proyecta el evento ya guardado. Nunca propaga: Kira ya tiene su 2xx. Si falla, la fila queda con processed = false y processing_error, y la recoge WebhookReprojectionWorker. |
+| `public void process(String rawPayload) throws Exception` | Guardar y proyectar en el mismo hilo. Lo usan las pruebas y quien no pasa por HTTP. |
+| `public void reproject(WebhookEventEntity stored) throws Exception` | Reintenta la proyeccion de un evento ya almacenado que nunca se proyecto. No se puede reutilizar #process(String): ese metodo empieza deduplicando por event_id y, como la fila ya existe, saldria sin proyectar nada, que es justo lo contrario de lo que se busca aqui. Deja que la excepcion suba: quien llama decide si la fila queda marcada con el error o si el lote entero se corta (por ejemplo, cuando faltan las credenciales de Kira). |
 
-### A.14 Infraestructura — security
+### A.18 Infraestructura — security
 
-<sub>`infrastructure/security/AuthenticatedOperator.java` · 9 líneas</sub>
+<sub>`infrastructure/security/AuthenticatedOperator.java` · 8 líneas</sub>
 
 #### `AuthenticatedOperator` · record
 
@@ -3382,35 +3870,43 @@ Principal autenticado. Se expone como principal de Spring Security.
 | `TenantId tenantId` |
 | `Role role` |
 
-<sub>`infrastructure/security/BffSecurityProperties.java` · 12 líneas</sub>
+<sub>`infrastructure/security/BffSecurityProperties.java` · 19 líneas</sub>
 
-#### `BffSecurityProperties` · record · `@ConfigurationProperties`
+#### `BffSecurityProperties` · record · `@ConfigurationProperties(prefix = "bff.security")`
 
 | Componente |
 |---|
 | `String jwtSecret` |
-| `@DefaultValue("autransactional-bff"` |
+| `String jwtIssuer` |
+| `long tokenExpirationMs` |
+| `String mfaEncryptionKey` |
+| `boolean mfaEnforced` |
+| `long mfaChallengeTtlMs` |
+| `String mfaIssuer` |
 
-<sub>`infrastructure/security/JwtService.java` · 61 líneas</sub>
+<sub>`infrastructure/security/JwtService.java` · 97 líneas</sub>
 
 #### `JwtService` · clase · `@Service`
 
 Emite y verifica el JWT propio del BFF. Nada de esto viaja a Kira.
 
-| Campo | Descripción |
-|---|---|
-| `private static final String CLAIM_TENANT = "tenant_id"` |  |
-| `private static final String CLAIM_ROLE = "role"` |  |
-| `private static final String CLAIM_USER_ID = "uid"` |  |
-
 | Método | Descripción |
 |---|---|
 | `public JwtService(BffSecurityProperties properties)` |  |
 | `public String issue(OperatorUser user)` |  |
+| `public String issueMfaChallenge(OperatorUser user)` | Reto entre la contrasena y el codigo TOTP. No autentica ninguna ruta de negocio. |
+| `public long mfaChallengeExpiresInSeconds()` |  |
+| `public MfaChallenge verifyMfaChallenge(String token)` | Devuelve el id del usuario y el identificador del reto. Lanza si no es un reto valido. |
 | `public long expiresInSeconds()` |  |
 | `public AuthenticatedOperator verify(String token)` | Lanza JWTVerificationException si la firma, el emisor o la vigencia no cuadran. |
+#### `MfaChallenge` · record
 
-<sub>`infrastructure/security/JwtTenantFilter.java` · 72 líneas</sub>
+| Componente |
+|---|
+| `String userId` |
+| `String challengeId` |
+
+<sub>`infrastructure/security/JwtTenantFilter.java` · 71 líneas</sub>
 
 #### `JwtTenantFilter` · clase · `@Component`
 
@@ -3418,36 +3914,43 @@ Autentica la peticion con el JWT propio del BFF y fija la organizacion en el con
 Un token invalido no autentica y no fija tenant: la peticion sigue como anonima y es
 la cadena de autorizacion la que decide si el recurso exige sesion.
 
-| Campo | Descripción |
-|---|---|
-| `private static final String BEARER = "Bearer "` |  |
-
 | Método | Descripción |
 |---|---|
 | `public JwtTenantFilter(JwtService jwtService)` |  |
 | `protected boolean shouldNotFilter(HttpServletRequest request)` |  |
-| `protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, …)` |  |
+| `protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException` |  |
 
-<sub>`infrastructure/security/SecurityConfig.java` · 43 líneas</sub>
+<sub>`infrastructure/security/MfaSecretCipher.java` · 77 líneas</sub>
 
-#### `SecurityConfig` · clase · `@Configuration` `@EnableMethodSecurity` `@EnableConfigurationProperties`
+#### `MfaSecretCipher` · clase · `@Component`
+
+Cifra el secreto TOTP en reposo (AES-256-GCM). Con la base de datos sola no se pueden generar
+codigos: hace falta tambien BFF_MFA_ENCRYPTION_KEY, que vive en el gestor de secretos.
+
+Formato: base64(iv de 12 bytes || texto cifrado con etiqueta).
 
 | Método | Descripción |
 |---|---|
-| `public SecurityFilterChain filterChain(HttpSecurity http, JwtTenantFilter jwtTenantFilter) throws Exception` `@Bean` |  |
-| `public PasswordEncoder passwordEncoder()` `@Bean` |  |
+| `public MfaSecretCipher(BffSecurityProperties properties)` |  |
+| `public String encrypt(String plain)` |  |
+| `public String decrypt(String stored)` |  |
 
-<sub>`infrastructure/security/TenantContext.java` · 38 líneas</sub>
+<sub>`infrastructure/security/SecurityConfig.java` · 47 líneas</sub>
+
+#### `SecurityConfig` · clase · `@Configuration` `@EnableMethodSecurity` `@EnableConfigurationProperties(BffSecurityProperties.class)`
+
+| Método | Descripción |
+|---|---|
+| `public SecurityFilterChain filterChain(HttpSecurity http, JwtTenantFilter jwtTenantFilter) throws Exception` |  |
+| `public PasswordEncoder passwordEncoder()` |  |
+
+<sub>`infrastructure/security/TenantContext.java` · 37 líneas</sub>
 
 #### `TenantContext` · clase
 
 Contexto de la organizacion activa para el hilo que atiende la peticion.
 Regla de oro: siempre limpiar en un finally, o el siguiente request reutiliza el hilo
 del pool y hereda el tenant equivocado.
-
-| Campo | Descripción |
-|---|---|
-| `private static final ThreadLocal<TenantId> CURRENT = new ThreadLocal<>()` |  |
 
 | Método | Descripción |
 |---|---|
@@ -3456,9 +3959,24 @@ del pool y hereda el tenant equivocado.
 | `public static TenantId require()` |  |
 | `public static void clear()` |  |
 
-### A.15 Infraestructura — kira
+<sub>`infrastructure/security/Totp.java` · 119 líneas</sub>
 
-<sub>`infrastructure/kira/KiraAmounts.java` · 107 líneas</sub>
+#### `Totp` · clase
+
+Codigos de un solo uso por tiempo (RFC 6238): HMAC-SHA1, pasos de 30 s y 6 digitos, lo que
+entienden Google Authenticator, Microsoft Authenticator y compania.
+
+Sin dependencias: el algoritmo es corto y una libreria para esto es superficie de mas.
+
+| Método | Descripción |
+|---|---|
+| `public static String newSecret()` | 160 bits, el tamano que recomienda la RFC 4226 para SHA-1, en base32 sin relleno. |
+| `public static String otpauthUri(String issuer, String account, String secret)` |  |
+| `public static OptionalLong verify(String secret, String code, Instant now)` | Devuelve el paso de tiempo que valida el codigo, para que quien llama pueda rechazar su reutilizacion dentro de la misma ventana. Vacio si el codigo no vale. |
+
+### A.19 Infraestructura — kira
+
+<sub>`infrastructure/kira/KiraAmounts.java` · 106 líneas</sub>
 
 #### `KiraAmounts` · clase
 
@@ -3475,12 +3993,6 @@ cliente viaja como entero en unidades menores + puntos basicos en POST /v1/quota
 pero como cadena decimal en POST /payout. Convertirlo en dos sitios distintos es
 garantizar que un dia dejen de coincidir.
 
-| Campo | Descripción |
-|---|---|
-| `public static final int FIAT_PRECISION = 2` | Precision de las monedas fiat en la API. |
-| `public static final int STABLECOIN_PRECISION = 6` | Precision de las stablecoins (USDC, USDT). |
-| `public static final int MAX_PERCENTAGE_BPS = 10000` | Tope de los puntos basicos admitidos por Kira. |
-
 | Método | Descripción |
 |---|---|
 | `public static BigDecimal fromMinor(long amount, int precision)` | amount / 10^precision, con BigDecimal. Es la formula G5 del documento de integracion. |
@@ -3490,30 +4002,25 @@ garantizar que un dia dejen de coincidir.
 | `public static Map<String, Object> markupForPayout(BigDecimal fixedFee, int percentageBps)` | El MISMO markup para POST /payout y /payout/preview, donde la API lo espera como cadenas decimales. Misma cifra, otra forma de onda: por eso las dos funciones estan juntas. percentage_fee es una FRACCION entre 0 y 1 ("0.01" = 1 %), no un porcentaje ni puntos basicos. Por eso se divide entre 10.000 y no entre 100: con 100, 50 bps viajaban como "0.50" y Kira cobraria un 50 %. Cuatro decimales representan exacto cualquier bps. |
 | `public static int precisionOf(String currency)` | Precision por defecto de una moneda cuando la respuesta no la trae. |
 
-<sub>`infrastructure/kira/KiraApiClient.java` · 310 líneas</sub>
+<sub>`infrastructure/kira/KiraApiClient.java` · 320 líneas</sub>
 
 #### `KiraApiClient` · clase · `@Component`
 
 Adaptador HTTP unico hacia KiraFin.
 
 Responsabilidades que la documentacion exige y que ningun caso de uso debe repetir:
-- x-api-key en TODA peticion, incluida POST /auth.
-- Authorization: Bearer en toda peticion salvo POST /auth.
-- X-Api-Version en cada peticion mientras la cuenta no este fijada. Los RFIs la
-sobrescriben: solo existen en 2026-06-01, y la cabecera por peticion gana al pin.
-- Idempotency-Key (UUID v4) en POST /v1/users, /v1/recipients, /v1/virtual-accounts
-y /v1/virtual-accounts/{id}/payout.
-- Reautenticar y reintentar una vez ante un 401.
-- Normalizar las varias formas de error que conviven hoy en la API.
-
-| Campo | Descripción |
-|---|---|
-| `static final String RFI_API_VERSION = "2026-06-01"` | Las seis rutas de RFI solo existen en esta version; con 2026-04-14 no se encuentran. |
-| `static final String QUOTATION_API_VERSION = "2026-06-01"` | La cotizacion desglosada (fees[], totals, pricing_context) solo existe desde esta version; con 2026-04-14 la respuesta es una forma simple sin totals, y de ahi salen las comisiones reales que hereda el pago. |
+ - x-api-key en TODA peticion, incluida POST /auth.
+ - Authorization: Bearer en toda peticion salvo POST /auth.
+ - X-Api-Version en cada peticion, siempre la misma (KiraProperties.API_VERSION): la
+   cabecera gana al pin de la cuenta y el go-live checklist exige una sola version.
+ - Idempotency-Key (UUID v4) en POST /v1/users, /v1/recipients, /v1/virtual-accounts
+   y /v1/virtual-accounts/{id}/payout.
+ - Reautenticar y reintentar una vez ante un 401.
+ - Normalizar las varias formas de error que conviven hoy en la API.
 
 | Método | Descripción |
 |---|---|
-| `public KiraApiClient(RestClient kiraRestClient, …)` |  |
+| `public KiraApiClient(RestClient kiraRestClient, KiraCredentialManager credentialManager, KiraProperties properties, KiraErrorParser errorParser, ObjectMapper objectMapper, IntegrationMetrics metrics)` |  |
 | `public JsonNode getUser(String userId)` |  |
 | `public JsonNode createUser(Object body, IdempotencyKey key)` |  |
 | `public JsonNode updateUser(String userId, Object body)` | PUT, no PATCH: PATCH no esta soportado en esta ruta. Solo se escriben los campos enviados. |
@@ -3536,13 +4043,15 @@ y /v1/virtual-accounts/{id}/payout.
 | `public JsonNode getRfi(String rfiId)` |  |
 | `public JsonNode answerRfiItems(String rfiId, Object body)` | All-or-nothing: si un item no cumple su answer_spec, 422 y no se guarda ninguno. 409 si esta cerrado. |
 | `public JsonNode uploadRfiDocuments(String rfiId, String itemId, List<KiraFile> files)` | Sube archivos a un item de tipo documento. Multipart con la parte 'files' repetida; maximo 20 archivos y 30 MB cada uno. 409 si el RFI esta cerrado, 422 si un archivo no cumple el answer_spec del item. |
+| `public String getFilename()` |  |
 | `public JsonNode removeRfiDocument(String rfiId, String itemId, String documentId)` | 422 "The last file cannot be removed": un item respondido necesita al menos un archivo. |
 | `public JsonNode getRfiDocumentLink(String rfiId, String itemId, String documentId)` | La URL es una credencial al portador que caduca en minutos: no se guarda ni se registra. |
+| `public JsonNode mintRfiUboLink(String rfiId, String itemId)` | Acuna el enlace de verificacion de un beneficiario para un item ubo_link cuyo answer_spec trae applicant_id y person_id en vez de url. 409 si el RFI esta cerrado; 422 si el item ya trae url; 404 si el RFI fue retirado. |
 | `public JsonNode listCountries()` | Ruta verificada: /v1/countries. /countries o /api/countries responden 403. |
 | `public JsonNode exchange(HttpMethod method, String path, Object body, IdempotencyKey idempotencyKey)` |  |
-| `public KiraResponse exchangeWithStatus(HttpMethod method, String path, Object body, …)` |  |
+| `public KiraResponse exchangeWithStatus(HttpMethod method, String path, Object body, IdempotencyKey idempotencyKey)` |  |
 
-<sub>`infrastructure/kira/KiraApiException.java` · 24 líneas</sub>
+<sub>`infrastructure/kira/KiraApiException.java` · 23 líneas</sub>
 
 #### `KiraApiException` · clase · `@Getter`
 
@@ -3553,9 +4062,9 @@ Error devuelto por Kira, ya normalizado.
 | `public KiraApiException(int statusCode, String code, String message, String rawBody)` |  |
 | `public boolean isUnauthorized()` |  |
 
-<sub>`infrastructure/kira/KiraAuthResponse.java` · 17 líneas</sub>
+<sub>`infrastructure/kira/KiraAuthResponse.java` · 16 líneas</sub>
 
-#### `KiraAuthResponse` · record · `@JsonIgnoreProperties`
+#### `KiraAuthResponse` · record · `@JsonIgnoreProperties(ignoreUnknown = true)`
 
 Envoltura estandar { message, data } de POST /auth.
 
@@ -3563,25 +4072,24 @@ Envoltura estandar { message, data } de POST /auth.
 |---|
 | `String message` |
 | `Data data` |
-
-##### `KiraAuthResponse.Data` · record · `@JsonIgnoreProperties`
+#### `Data` · record · `@JsonIgnoreProperties(ignoreUnknown = true)`
 
 | Componente |
 |---|
-| `@JsonProperty("access_token") String accessToken` |
-| `@JsonProperty("expires_in") Long expiresIn` |
-| `@JsonProperty("token_type") String tokenType` |
+| `String accessToken` |
+| `Long expiresIn` |
+| `String tokenType` |
 
-<sub>`infrastructure/kira/KiraClientConfig.java` · 47 líneas</sub>
+<sub>`infrastructure/kira/KiraClientConfig.java` · 46 líneas</sub>
 
-#### `KiraClientConfig` · clase · `@Configuration` `@EnableConfigurationProperties`
+#### `KiraClientConfig` · clase · `@Configuration` `@EnableConfigurationProperties(KiraProperties.class)`
 
 | Método | Descripción |
 |---|---|
-| `public RestClient kiraRestClient(KiraProperties properties)` `@Bean` |  |
-| `public Cache<String, String> kiraTokenCache(KiraProperties properties)` `@Bean` | Cache del bearer token de Kira. Vive 3600s; expiramos antes por el margen configurado para no usar nunca un token a punto de vencer. |
+| `public RestClient kiraRestClient(KiraProperties properties)` |  |
+| `public Cache<String, String> kiraTokenCache(KiraProperties properties)` | Cache del bearer token de Kira. Vive 3600s; expiramos antes por el margen configurado para no usar nunca un token a punto de vencer. |
 
-<sub>`infrastructure/kira/KiraCredentialManager.java` · 97 líneas</sub>
+<sub>`infrastructure/kira/KiraCredentialManager.java` · 96 líneas</sub>
 
 #### `KiraCredentialManager` · clase · `@Service`
 
@@ -3591,17 +4099,13 @@ POST /auth es el unico endpoint que se autentica solo con x-api-key; el cuerpo l
 client_id y password. El token vive 3600s y no hay refresh token: se vuelve a autenticar.
 Cacheamos con margen para no llamar en cada peticion, e invalidamos ante cualquier 401.
 
-| Campo | Descripción |
-|---|---|
-| `public static final String CACHE_KEY = "kira-access-token"` |  |
-
 | Método | Descripción |
 |---|---|
-| `public KiraCredentialManager(RestClient kiraRestClient, …)` |  |
+| `public KiraCredentialManager(RestClient kiraRestClient, KiraProperties properties, KiraErrorParser errorParser, Cache<String, String> kiraTokenCache, ObjectMapper objectMapper)` |  |
 | `public String getAccessToken()` |  |
 | `public void invalidate()` | Se invoca cuando una llamada responde 401: el siguiente getAccessToken reautentica. |
 
-<sub>`infrastructure/kira/KiraErrorParser.java` · 58 líneas</sub>
+<sub>`infrastructure/kira/KiraErrorParser.java` · 57 líneas</sub>
 
 #### `KiraErrorParser` · clase · `@Component`
 
@@ -3614,7 +4118,7 @@ explicitamente de no escribir un parser que asuma una sola forma.
 | `public KiraErrorParser(ObjectMapper objectMapper)` |  |
 | `public KiraApiException parse(int statusCode, String body)` |  |
 
-<sub>`infrastructure/kira/KiraFile.java` · 6 líneas</sub>
+<sub>`infrastructure/kira/KiraFile.java` · 5 líneas</sub>
 
 #### `KiraFile` · record
 
@@ -3626,7 +4130,7 @@ Archivo que se reenvia a Kira en una peticion multipart.
 | `String contentType` |
 | `byte[] content` |
 
-<sub>`infrastructure/kira/KiraNotConfiguredException.java` · 13 líneas</sub>
+<sub>`infrastructure/kira/KiraNotConfiguredException.java` · 12 líneas</sub>
 
 #### `KiraNotConfiguredException` · clase
 
@@ -3637,21 +4141,27 @@ la integracion no esta configurada, y el portal debe decirlo asi en vez de "erro
 |---|---|
 | `public KiraNotConfiguredException(String message)` |  |
 
-<sub>`infrastructure/kira/KiraProperties.java` · 27 líneas</sub>
+<sub>`infrastructure/kira/KiraProperties.java` · 55 líneas</sub>
 
-#### `KiraProperties` · record · `@ConfigurationProperties`
+#### `KiraProperties` · record · `@ConfigurationProperties(prefix = "kira")`
 
 | Componente |
 |---|
-| `@DefaultValue("https://api.balampay.com/sandbox") String baseUrl` |
+| `String baseUrl` |
 | `String apiKey` |
 | `String clientId` |
 | `String password` |
-| `@DefaultValue("2026-04-14") String apiVersion` |
+| `String apiVersion` |
 | `String webhookSecret` |
-| `@DefaultValue("slovak_savings_bank"` |
+| `String webhookSecretPrevious` |
+| `long tokenTtlSeconds` |
+| `long tokenRefreshMarginSeconds` |
+| `int connectTimeoutMs` |
+| `int readTimeoutMs` |
+| `String bank` |
+| `boolean sandbox` |
 
-<sub>`infrastructure/kira/KiraResponse.java` · 22 líneas</sub>
+<sub>`infrastructure/kira/KiraResponse.java` · 21 líneas</sub>
 
 #### `KiraResponse` · record
 
@@ -3671,7 +4181,7 @@ distinguirlo de un alta nueva, y el portal debe decir "destino ya registrado".
 | `public boolean alreadyExisted()` |  |
 | `public JsonNode data()` |  |
 
-<sub>`infrastructure/kira/KiraWebhookVerifier.java` · 56 líneas</sub>
+<sub>`infrastructure/kira/KiraWebhookVerifier.java` · 66 líneas</sub>
 
 #### `KiraWebhookVerifier` · clase · `@Component`
 
@@ -3679,63 +4189,39 @@ Verifica la cabecera x-signature-sha256: HMAC-SHA256 en hexadecimal sobre los BY
 del cuerpo, con el secreto de firma de la URL a la que llego la entrega.
 
 Dos reglas que la documentacion subraya:
-- no re-serializar el JSON antes de firmar (cambian espacios y orden de claves);
-- comparar en tiempo constante.
-
-| Campo | Descripción |
-|---|---|
-| `public static final String SIGNATURE_HEADER = "x-signature-sha256"` |  |
-| `private static final String ALGORITHM = "HmacSHA256"` |  |
+ - no re-serializar el JSON antes de firmar (cambian espacios y orden de claves);
+ - comparar en tiempo constante.
 
 | Método | Descripción |
 |---|---|
 | `public KiraWebhookVerifier(KiraProperties properties)` |  |
 | `public boolean isConfigured()` |  |
-| `public boolean verify(byte[] rawBody, String signatureHeader)` |  |
+| `public boolean verify(byte[] rawBody, String signatureHeader)` | Acepta la firma del secreto vigente o, si esta configurado, la del anterior: al rotar el secreto, Kira sigue firmando con el viejo durante cerca de un minuto y no hay ventana en la que acepte ambos (webhooks/overview). Tras la rotacion se borra KIRA_WEBHOOK_SECRET_PREVIOUS. |
 
-### A.16 Infraestructura — persistence
+### A.20 Infraestructura — persistence
 
-<sub>`infrastructure/persistence/AuditLogEntity.java` · 58 líneas</sub>
+<sub>`infrastructure/persistence/AuditLogEntity.java` · 57 líneas</sub>
 
-#### `AuditLogEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `AuditLogEntity` · clase · `@Entity` `@Table(name = "audit_logs", indexes = @Index(name = "idx_audit_tenant", columnList = "tenant_id, created_at"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Bitacora de auditoria B2B. Tabla `audit_logs`.
 Kira no ofrece historial de cambios al integrador, asi que el registro es propio.
 
-| Campo | Descripción |
-|---|---|
-| `private String userRole` | tesoreria_maker, tesoreria_approver, compliance_internal, admin, read_only. |
-| `private String changes` | Detalle del cambio en JSON. Nunca secretos, biometria ni datos personales. |
-
-<sub>`infrastructure/persistence/AuditLogJpaRepository.java` · 11 líneas</sub>
+<sub>`infrastructure/persistence/AuditLogJpaRepository.java` · 10 líneas</sub>
 
 #### `AuditLogJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `List<AuditLogEntity> findByTenantIdOrderByCreatedAtDesc(String tenantId)` |  |
+<sub>`infrastructure/persistence/DepositEntity.java` · 75 líneas</sub>
 
-<sub>`infrastructure/persistence/DepositEntity.java` · 76 líneas</sub>
-
-#### `DepositEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `DepositEntity` · clase · `@Entity` `@Table(name = "deposits", uniqueConstraints = @UniqueConstraint(name = "uk_deposits_kira_id", columnNames = "kira_deposit_id"), indexes = @Index(name = "idx_deposits_tenant", columnList = "tenant_id"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Historial de depositos entrantes. Tabla `deposits`.
 
-| Campo | Descripción |
-|---|---|
-| `private boolean microdeposit = false` | Deposito de verificacion de cuenta: no es un ingreso real y no suma saldo. |
-
-<sub>`infrastructure/persistence/DepositJpaRepository.java` · 16 líneas</sub>
+<sub>`infrastructure/persistence/DepositJpaRepository.java` · 15 líneas</sub>
 
 #### `DepositJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<DepositEntity> findByKiraDepositId(String kiraDepositId)` |  |
-| `List<DepositEntity> findByTenantIdOrderByCreatedAtDesc(String tenantId)` |  |
-| `List<DepositEntity> findByVirtualAccountIdOrderByCreatedAtDesc(String virtualAccountId)` |  |
-
-<sub>`infrastructure/persistence/JpaAuditLogRepository.java` · 54 líneas</sub>
+<sub>`infrastructure/persistence/JpaAuditLogRepository.java` · 53 líneas</sub>
 
 #### `JpaAuditLogRepository` · clase · `@Repository`
 
@@ -3745,7 +4231,7 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public AuditLog append(AuditLog entry)` |  |
 | `public List<AuditLog> findByTenant(TenantId tenantId, int limit)` |  |
 
-<sub>`infrastructure/persistence/JpaDepositRepository.java` · 70 líneas</sub>
+<sub>`infrastructure/persistence/JpaDepositRepository.java` · 69 líneas</sub>
 
 #### `JpaDepositRepository` · clase · `@Repository`
 
@@ -3757,7 +4243,20 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public List<Deposit> findByTenant(TenantId tenantId, int limit)` |  |
 | `public List<Deposit> findByVirtualAccount(String virtualAccountId, int limit)` |  |
 
-<sub>`infrastructure/persistence/JpaOperatorUserRepository.java` · 44 líneas</sub>
+<sub>`infrastructure/persistence/JpaNotificationRepository.java` · 68 líneas</sub>
+
+#### `JpaNotificationRepository` · clase · `@Repository`
+
+| Método | Descripción |
+|---|---|
+| `public JpaNotificationRepository(NotificationJpaRepository jpa, OperatorUserJpaRepository users)` |  |
+| `public Notification save(Notification n)` |  |
+| `public List<Notification> findByTenant(TenantId tenantId, int limit)` |  |
+| `public long countByTenantSince(TenantId tenantId, Instant since)` |  |
+| `public Instant seenAt(String userId)` |  |
+| `public void markSeen(String userId, Instant at)` |  |
+
+<sub>`infrastructure/persistence/JpaOperatorUserRepository.java` · 56 líneas</sub>
 
 #### `JpaOperatorUserRepository` · clase · `@Repository`
 
@@ -3767,14 +4266,11 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public Optional<OperatorUser> findByEmail(String email)` |  |
 | `public Optional<OperatorUser> findById(String id)` |  |
 | `public List<OperatorUser> findByTenant(TenantId tenantId)` |  |
+| `public void updateMfa(String userId, String encryptedSecret, boolean enabled)` |  |
 
-<sub>`infrastructure/persistence/JpaPayoutRepository.java` · 68 líneas</sub>
+<sub>`infrastructure/persistence/JpaPayoutRepository.java` · 67 líneas</sub>
 
 #### `JpaPayoutRepository` · clase · `@Repository`
-
-| Campo | Descripción |
-|---|---|
-| `private static final Set<PayoutStatus> IN_FLIGHT = Set.of( ...` | Estados no terminales que Kira ya conoce: son los que el reconciliador vuelve a preguntar. |
 
 | Método | Descripción |
 |---|---|
@@ -3786,7 +4282,7 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public List<Payout> findByTenant(TenantId tenantId, int limit)` |  |
 | `public List<Payout> findInFlight(int limit)` |  |
 
-<sub>`infrastructure/persistence/JpaQuotationRepository.java` · 79 líneas</sub>
+<sub>`infrastructure/persistence/JpaQuotationRepository.java` · 78 líneas</sub>
 
 #### `JpaQuotationRepository` · clase · `@Repository`
 
@@ -3798,7 +4294,7 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public List<Quotation> findByTenant(TenantId tenantId, int limit)` |  |
 | `public List<Quotation> findActiveExpiredBefore(Instant cutoff)` |  |
 
-<sub>`infrastructure/persistence/JpaRecipientRepository.java` · 49 líneas</sub>
+<sub>`infrastructure/persistence/JpaRecipientRepository.java` · 48 líneas</sub>
 
 #### `JpaRecipientRepository` · clase · `@Repository`
 
@@ -3814,10 +4310,6 @@ Historial de depositos entrantes. Tabla `deposits`.
 
 #### `JpaRfiRepository` · clase · `@Repository`
 
-| Campo | Descripción |
-|---|---|
-| `private static final Set<RfiStatus> OPEN = Set.of(RfiStatus.PENDING, RfiStatus.ANSWERED)` |  |
-
 | Método | Descripción |
 |---|---|
 | `public JpaRfiRepository(RfiJpaRepository jpa)` |  |
@@ -3828,14 +4320,9 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public List<Rfi> findOpenByTenant(TenantId tenantId)` |  |
 | `public Optional<Rfi> findOpenBlocking(String kiraResourceId)` |  |
 
-<sub>`infrastructure/persistence/JpaTenantRepository.java` · 95 líneas</sub>
+<sub>`infrastructure/persistence/JpaTenantRepository.java` · 98 líneas</sub>
 
 #### `JpaTenantRepository` · clase · `@Repository`
-
-| Campo | Descripción |
-|---|---|
-| `private static final TypeReference<List<EligibleProduct>> PRODUCTS` |  |
-| `private static final TypeReference<Map<String, List<String>>> FIELDS` |  |
 
 | Método | Descripción |
 |---|---|
@@ -3845,7 +4332,7 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public Optional<Tenant> findByKiraUserId(String kiraUserId)` |  |
 | `public List<Tenant> findAll()` |  |
 
-<sub>`infrastructure/persistence/JpaUboRepository.java` · 84 líneas</sub>
+<sub>`infrastructure/persistence/JpaUboRepository.java` · 111 líneas</sub>
 
 #### `JpaUboRepository` · clase · `@Repository`
 
@@ -3858,8 +4345,9 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public List<Ubo> findByTenant(TenantId tenantId)` |  |
 | `public UboRoster rosterOf(TenantId tenantId)` |  |
 | `public List<Ubo> findPendingLivenessExpiredBefore(Instant cutoff)` |  |
+| `public void delete(Ubo ubo)` |  |
 
-<sub>`infrastructure/persistence/JpaVirtualAccountRepository.java` · 69 líneas</sub>
+<sub>`infrastructure/persistence/JpaVirtualAccountRepository.java` · 68 líneas</sub>
 
 #### `JpaVirtualAccountRepository` · clase · `@Repository`
 
@@ -3871,28 +4359,29 @@ Historial de depositos entrantes. Tabla `deposits`.
 | `public Optional<VirtualAccount> findByKiraAccountId(String kiraAccountId)` |  |
 | `public List<VirtualAccount> findByTenant(TenantId tenantId)` |  |
 
-<sub>`infrastructure/persistence/OperatorUserEntity.java` · 63 líneas</sub>
+<sub>`infrastructure/persistence/NotificationEntity.java` · 46 líneas</sub>
 
-#### `OperatorUserEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `NotificationEntity` · clase · `@Entity` `@Table(name = "notifications", indexes = @Index(name = "idx_notifications_tenant", columnList = "tenant_id, created_at"))` `@Getter` `@Setter` `@NoArgsConstructor`
+
+Avisos de negocio por organizacion. Tabla `notifications`.
+
+<sub>`infrastructure/persistence/NotificationJpaRepository.java` · 14 líneas</sub>
+
+#### `NotificationJpaRepository` · interfaz
+
+<sub>`infrastructure/persistence/OperatorUserEntity.java` · 71 líneas</sub>
+
+#### `OperatorUserEntity` · clase · `@Entity` `@Table(name = "users", uniqueConstraints = @UniqueConstraint(name = "uk_users_email", columnNames = "email"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Usuarios de cada empresa cliente. Tabla `users` del esquema v2.
 
-| Campo | Descripción |
-|---|---|
-| `private String tenantId` | NULL cuando el usuario es de soporte de la plataforma (rol de scope 'system'). |
-
-<sub>`infrastructure/persistence/OperatorUserJpaRepository.java` · 14 líneas</sub>
+<sub>`infrastructure/persistence/OperatorUserJpaRepository.java` · 13 líneas</sub>
 
 #### `OperatorUserJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<OperatorUserEntity> findByEmailIgnoreCase(String email)` |  |
-| `List<OperatorUserEntity> findByTenantId(String tenantId)` |  |
+<sub>`infrastructure/persistence/PayoutEntity.java` · 128 líneas</sub>
 
-<sub>`infrastructure/persistence/PayoutEntity.java` · 125 líneas</sub>
-
-#### `PayoutEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `PayoutEntity` · clase · `@Entity` `@Table(name = "payouts", uniqueConstraints = { @UniqueConstraint(name = "uk_payouts_idempotency", columnNames = "idempotency_key"), @UniqueConstraint(name = "uk_payouts_kira_id", columnNames = "kira_payout_id") }, indexes = { @Index(name = "idx_payouts_tenant", columnList = "tenant_id, created_at"), @Index(name = "idx_payouts_idempotency", columnList = "idempotency_key") })` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Pagos con segregacion maker-checker. Tabla `payouts`.
 
@@ -3900,64 +4389,28 @@ Las columnas approval_state, quotation_expires_at, rejection_reason y error_code
 existen en la API de Kira: son el control interno del BFF, que es justamente lo que
 Kira no ofrece a los integradores.
 
-| Campo | Descripción |
-|---|---|
-| `private String quotationId` | Nulo mientras el pago es un borrador. El DDL de referencia lo declara NOT NULL; aqui se permite nulo porque el operador prepara la orden antes de cotizar, y el envio a Kira si exige cotizacion vigente. |
-| `private String idempotencyKey` | UUID v4 obligatorio para Kira. |
-| `private String makerUserId` | Operador (tesoreria_maker) que creo la solicitud. |
-| `private String approverUserId` | Tesorero (tesoreria_approver) que autorizo la ejecucion. |
-| `private String referenceNumber` | IMAD / ACH trace / UETR. Es el comprobante que el cliente final reclama. |
-
-<sub>`infrastructure/persistence/PayoutJpaRepository.java` · 23 líneas</sub>
+<sub>`infrastructure/persistence/PayoutJpaRepository.java` · 22 líneas</sub>
 
 #### `PayoutJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<PayoutEntity> findByIdAndTenantId(String id, String tenantId)` |  |
-| `Optional<PayoutEntity> findByIdempotencyKey(String idempotencyKey)` |  |
-| `Optional<PayoutEntity> findByKiraPayoutId(String kiraPayoutId)` |  |
-| `List<PayoutEntity> findByTenantIdOrderByCreatedAtDesc(String tenantId)` |  |
-| `List<PayoutEntity> findByKiraPayoutIdIsNotNullAndStatusInOrderByUpdatedAtAsc(` |  |
-
-<sub>`infrastructure/persistence/PayoutMapper.java` · 68 líneas</sub>
+<sub>`infrastructure/persistence/PayoutMapper.java` · 69 líneas</sub>
 
 #### `PayoutMapper` · clase
 
-| Método | Descripción |
-|---|---|
-| `static Payout toDomain(PayoutEntity e)` |  |
-| `static PayoutEntity toEntity(Payout p, PayoutEntity target)` |  |
+<sub>`infrastructure/persistence/QuotationEntity.java` · 101 líneas</sub>
 
-<sub>`infrastructure/persistence/QuotationEntity.java` · 102 líneas</sub>
-
-#### `QuotationEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `QuotationEntity` · clase · `@Entity` `@Table(name = "quotations", indexes = @Index(name = "idx_quotations_tenant", columnList = "tenant_id"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Cotizaciones con desglose comisional 15 USD (Kira) + 15 USD (plataforma) = 30 USD.
 Tabla `quotations`.
 
-| Campo | Descripción |
-|---|---|
-| `private QuotationRail rail` | Riel cotizado. Debe corresponder al account_type del destinatario. |
-| `private BigDecimal totalDebitAmount` | origin_amount + total_fee. |
-| `private boolean balanceSufficient = false` | Se valida antes de habilitar el pago: Kira no encola ni cancela por saldo. |
-| `private String rateSource` | kraken, fallback_at_peg, stale_at_peg... Si no es kraken, es tasa de contingencia. |
-| `private String feesSnapshot` | Copia de fees[] y totals tal como los devolvio Kira. Es la unica prueba de que el precio mostrado al tesorero es el que se cobro. |
-| `private Instant quoteExpiresAt` | TTL de 15 minutos devuelto por Kira. |
-
-<sub>`infrastructure/persistence/QuotationJpaRepository.java` · 18 líneas</sub>
+<sub>`infrastructure/persistence/QuotationJpaRepository.java` · 17 líneas</sub>
 
 #### `QuotationJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<QuotationEntity> findByIdAndTenantId(String id, String tenantId)` |  |
-| `List<QuotationEntity> findByTenantIdOrderByCreatedAtDesc(String tenantId)` |  |
-| `List<QuotationEntity> findByStatusAndQuoteExpiresAtBefore(QuotationStatus status, Instant cutoff)` |  |
+<sub>`infrastructure/persistence/RecipientEntity.java` · 145 líneas</sub>
 
-<sub>`infrastructure/persistence/RecipientEntity.java` · 142 líneas</sub>
-
-#### `RecipientEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `RecipientEntity` · clase · `@Entity` `@Table(name = "recipients", uniqueConstraints = @UniqueConstraint(name = "uk_recipients_kira_id", columnNames = "kira_recipient_id"), indexes = @Index(name = "idx_recipients_tenant", columnList = "tenant_id"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Directorio de destinatarios de pagos. Tabla `recipients`.
 
@@ -3966,160 +4419,72 @@ corregir un destinatario obliga a reconstruir el alta entera; y ademas devuelve
 bank_address.state y postal_code VACIOS aunque se hayan enviado. Sin esta copia, esos
 datos se pierden en cuanto se guardan.
 
-| Campo | Descripción |
-|---|---|
-| `private String kiraRecipientId` | La respuesta de Kira lo llama recipient_id, no id. |
-| `private String name` | Alias legible: razon social o nombre completo, segun el tipo de titular. |
-| `private String replacedByRecipientId` | Reemplazo logico: apunta al destinatario que corrige a este. |
-| `private String holderAddress` | Direccion del titular. Pais en ISO-2, a diferencia del KYB de la empresa. |
-| `private String bankAddressText` | ACH: la direccion del banco viaja como texto plano. |
-| `private String bankAddress` | WIRE: la direccion del banco viaja como objeto. Se guarda entera porque Kira devuelve state y postal_code vacios aunque se hayan enviado. |
-| `private String network` | solana, polygon o tron. Determina el riel de la cotizacion. |
-
-<sub>`infrastructure/persistence/RecipientJpaRepository.java` · 17 líneas</sub>
+<sub>`infrastructure/persistence/RecipientJpaRepository.java` · 16 líneas</sub>
 
 #### `RecipientJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<RecipientEntity> findByIdAndTenantId(String id, String tenantId)` |  |
-| `Optional<RecipientEntity> findByKiraRecipientId(String kiraRecipientId)` |  |
-| `List<RecipientEntity> findByTenantIdAndStatusOrderByNameAsc(String tenantId, RecipientStatus status)` |  |
-
-<sub>`infrastructure/persistence/RecipientMapper.java` · 110 líneas</sub>
+<sub>`infrastructure/persistence/RecipientMapper.java` · 112 líneas</sub>
 
 #### `RecipientMapper` · clase
 
 Aplana el oneOf del destinatario sobre la tabla y lo reconstruye.
 El riel decide que bloque de columnas se usa; el resto quedan nulas.
 
-| Método | Descripción |
-|---|---|
-| `RecipientMapper(ObjectMapper objectMapper)` |  |
-| `RecipientEntity toEntity(Recipient r, RecipientEntity target)` |  |
-| `Recipient toDomain(RecipientEntity e)` |  |
+<sub>`infrastructure/persistence/RfiEntity.java` · 64 líneas</sub>
 
-<sub>`infrastructure/persistence/RfiEntity.java` · 62 líneas</sub>
-
-#### `RfiEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `RfiEntity` · clase · `@Entity` `@Table(name = "rfis", uniqueConstraints = @UniqueConstraint(name = "uk_rfis_kira_id", columnNames = "kira_rfi_id"), indexes = { @Index(name = "idx_rfis_tenant", columnList = "tenant_id"), @Index(name = "idx_rfis_blocking", columnList = "blocking_resource_id")})` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Solicitudes de informacion de compliance. Tabla `rfis`.
 
-| Campo | Descripción |
-|---|---|
-| `private String itemsPayload` | Array de items requeridos, tal como lo entrega Kira. |
-| `private String blockingType` | blocking.type de Kira ("transfer", ...). Desviacion del DDL v2: enlaza el RFI con lo que detiene. |
-| `private String blockingResourceId` | blocking.transfer_uuid: identificador de Kira del recurso bloqueado. |
-
-<sub>`infrastructure/persistence/RfiJpaRepository.java` · 24 líneas</sub>
+<sub>`infrastructure/persistence/RfiJpaRepository.java` · 23 líneas</sub>
 
 #### `RfiJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<RfiEntity> findByIdAndTenantId(String id, String tenantId)` |  |
-| `Optional<RfiEntity> findByKiraRfiId(String kiraRfiId)` |  |
-| `List<RfiEntity> findByTenantIdOrderByCreatedAtDesc(String tenantId)` |  |
-| `List<RfiEntity> findByTenantIdAndStatusInOrderByCreatedAtDesc(String tenantId, …)` |  |
-| `Optional<RfiEntity> findFirstByBlockingResourceIdAndStatusInOrderByCreatedAtDesc(String blockingResourceId, …)` |  |
+<sub>`infrastructure/persistence/RoleEntity.java` · 44 líneas</sub>
 
-<sub>`infrastructure/persistence/RoleEntity.java` · 45 líneas</sub>
-
-#### `RoleEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `RoleEntity` · clase · `@Entity` `@Table(name = "roles", uniqueConstraints = @UniqueConstraint(name = "uk_roles_name", columnNames = "name"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Catalogo RBAC de la plataforma. La fila es la autoridad para la FK de `users`;
-el enum `com.example.autransactional.domain.tenant.Role` es la autoridad
+el enum com.example.autransactional.domain.tenant.Role es la autoridad
 para las reglas de negocio y para @PreAuthorize.
 
-| Campo | Descripción |
-|---|---|
-| `private String name` | tesoreria_maker, tesoreria_approver, compliance_internal, admin, read_only. |
-
-<sub>`infrastructure/persistence/RoleJpaRepository.java` · 11 líneas</sub>
+<sub>`infrastructure/persistence/RoleJpaRepository.java` · 10 líneas</sub>
 
 #### `RoleJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<RoleEntity> findByName(String name)` |  |
+<sub>`infrastructure/persistence/TenantEntity.java` · 95 líneas</sub>
 
-<sub>`infrastructure/persistence/TenantEntity.java` · 88 líneas</sub>
-
-#### `TenantEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `TenantEntity` · clase · `@Entity` `@Table(name = "tenants", uniqueConstraints = { @UniqueConstraint(name = "uk_tenants_name", columnNames = "name"), @UniqueConstraint(name = "uk_tenants_kira_user", columnNames = "kira_user_id") })` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Empresas clientes: Juriscop, Bankvision, AU Colombia. Tabla `tenants` del esquema v2.
 
-| Campo | Descripción |
-|---|---|
-| `private String taxId` | NIT / identificador fiscal. |
-| `private String kiraUserId` | Id devuelto por POST /v1/users de Kira. |
-| `private String eligibleProducts` | Array de productos bancarios habilitados por Kira, con su elegibilidad. |
-| `private String missingFields` | Fuente de verdad del formulario de KYB: lo que Kira sigue exigiendo, por producto. |
-| `private boolean verificationTriggered = false` | El GET no lo devuelve; sin este dato, pedir los enlaces de liveness da 422. |
-| `private String onboardingPayload` | Objeto completo enviado a Kira. El GET no devuelve el cuestionario y un PUT parcial borra en silencio lo que no viaje en el: sin esta copia, el siguiente PUT es una perdida de datos garantizada. |
-| `private String onboardingIdempotencyKey` | Se persiste ANTES del primer POST /v1/users: un reintento no debe crear dos empresas. |
-| `private String rejectionReason` | Unica fuente del motivo: llega solo por el webhook user.verification.failed. |
-
-<sub>`infrastructure/persistence/TenantJpaRepository.java` · 13 líneas</sub>
+<sub>`infrastructure/persistence/TenantJpaRepository.java` · 12 líneas</sub>
 
 #### `TenantJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<TenantEntity> findByKiraUserId(String kiraUserId)` |  |
-| `Optional<TenantEntity> findByNameIgnoreCase(String name)` |  |
+<sub>`infrastructure/persistence/UboEntity.java` · 134 líneas</sub>
 
-<sub>`infrastructure/persistence/UboEntity.java` · 94 líneas</sub>
-
-#### `UboEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `UboEntity` · clase · `@Entity` `@Table(name = "ubos", indexes = @Index(name = "idx_ubos_tenant", columnList = "tenant_id"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Beneficiarios finales, directores y liveness por empresa. Tabla `ubos`.
 
-| Campo | Descripción |
-|---|---|
-| `private String personReferenceId` | Referencia del sujeto en Kira. |
-| `private String roleInCompany` | Director, Accionista, Firmante, Beneficiario Final. Etiqueta legible, no regla. |
-| `private boolean politicallyExposed = false` | pep_status: obligatorio para Kira, sin excepciones. |
-| `private String countryOfBirth` | ISO-3. Kira no admite vacio. |
-| `private String livenessLink` | Enlace de prueba biometrica alojada. Vigencia de 7 dias. TEXT y no VARCHAR(255): la URL viene firmada y desborda el tamano por defecto. |
-
-<sub>`infrastructure/persistence/UboJpaRepository.java` · 20 líneas</sub>
+<sub>`infrastructure/persistence/UboJpaRepository.java` · 19 líneas</sub>
 
 #### `UboJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<UboEntity> findByIdAndTenantId(String id, String tenantId)` |  |
-| `Optional<UboEntity> findByPersonReferenceId(String personReferenceId)` |  |
-| `List<UboEntity> findByTenantId(String tenantId)` |  |
-| `List<UboEntity> findByLivenessStatusAndLivenessExpiresAtBefore(LivenessStatus status, Instant cutoff)` |  |
+<sub>`infrastructure/persistence/VirtualAccountEntity.java` · 87 líneas</sub>
 
-<sub>`infrastructure/persistence/VirtualAccountEntity.java` · 89 líneas</sub>
-
-#### `VirtualAccountEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `VirtualAccountEntity` · clase · `@Entity` `@Table(name = "virtual_accounts", uniqueConstraints = @UniqueConstraint(name = "uk_va_kira_account", columnNames = "kira_account_id"), indexes = @Index(name = "idx_virtual_accounts_tenant", columnList = "tenant_id"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Cuentas virtuales B2B. Tabla `virtual_accounts`.
 
-| Campo | Descripción |
-|---|---|
-| `private VirtualAccountMode mode = VirtualAccountMode.FIAT` | fiat o crypto. INMUTABLE tras crearse: cambiarlo obliga a abrir otra cuenta. |
-| `private String bank` | slovak_savings_bank (sandbox), portage (prod), austin_capital_trust. Depende del entorno. |
-| `private boolean activatedEventSeen = false` | Columna propia del BFF: 'approved' colapsa activating/active en el pin 2026-04-14, asi que el evento virtual_account.activated es la unica senal fondos-listos fiable y hay que recordar haberlo visto. |
-| `private String openingIdempotencyKey` | Se persiste ANTES del primer POST: un reintento no debe abrir dos cuentas. |
-
-<sub>`infrastructure/persistence/VirtualAccountJpaRepository.java` · 16 líneas</sub>
+<sub>`infrastructure/persistence/VirtualAccountJpaRepository.java` · 15 líneas</sub>
 
 #### `VirtualAccountJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `Optional<VirtualAccountEntity> findByIdAndTenantId(String id, String tenantId)` |  |
-| `Optional<VirtualAccountEntity> findByKiraAccountId(String kiraAccountId)` |  |
-| `List<VirtualAccountEntity> findByTenantId(String tenantId)` |  |
+<sub>`infrastructure/persistence/WebhookEventEntity.java` · 74 líneas</sub>
 
-<sub>`infrastructure/persistence/WebhookEventEntity.java` · 71 líneas</sub>
-
-#### `WebhookEventEntity` · clase · `@Entity` `@Table` `@Getter` `@Setter` `@NoArgsConstructor`
+#### `WebhookEventEntity` · clase · `@Entity` `@Table(name = "webhooks_log", uniqueConstraints = @UniqueConstraint(name = "uk_webhooks_event_id", columnNames = "event_id"), indexes = @Index(name = "idx_webhooks_event", columnList = "event_id"))` `@Getter` `@Setter` `@NoArgsConstructor`
 
 Bitacora inmutable de eventos de Kira. Tabla `webhooks_log`.
 
@@ -4127,24 +4492,13 @@ La unicidad de event_id es lo que hace idempotente el procesamiento: Kira entreg
 sola vez y sin reintento, y el mismo evento puede llegar por dos familias distintas
 (payout.* y payout.status_changed).
 
-| Campo | Descripción |
-|---|---|
-| `private String eventId` | data.event_id. Nunca existe a nivel raiz en ninguna de las dos envolturas. |
-| `private int retryCount = 0` | Intentos de proyeccion fallidos. Corta dos problemas del reconciliador: la fila envenenada (un evento que nunca va a proyectarse y se reintenta para siempre) y la inanicion de los eventos nuevos, que quedaban detras de las filas viejas y rotas. |
-
-<sub>`infrastructure/persistence/WebhookEventJpaRepository.java` · 24 líneas</sub>
+<sub>`infrastructure/persistence/WebhookEventJpaRepository.java` · 26 líneas</sub>
 
 #### `WebhookEventJpaRepository` · interfaz
 
-| Método | Descripción |
-|---|---|
-| `boolean existsByEventId(String eventId)` |  |
-| `Optional<WebhookEventEntity> findByEventId(String eventId)` |  |
-| `List<WebhookEventEntity> findByProcessedFalseAndRetryCountLessThanOrderByCreatedAtAsc(int maxRetries)` | Eventos almacenados que nunca llegaron a proyectarse y que aun tienen reintentos. Kira no reintenta, asi que esta fila es el unico rastro que queda de ese cambio de estado. Mas antiguo primero: el evento perdido mas viejo es el que lleva mas tiempo desalineando el modelo de lectura. El filtro por retry_count es lo que evita que las filas agotadas ocupen el lote para siempre y dejen sin sitio a los eventos nuevos. |
+### A.21 Infraestructura — audit
 
-### A.17 Infraestructura — audit
-
-<sub>`infrastructure/audit/AuditTrail.java` · 79 líneas</sub>
+<sub>`infrastructure/audit/AuditTrail.java` · 85 líneas</sub>
 
 #### `AuditTrail` · clase · `@Component`
 
@@ -4158,13 +4512,43 @@ una accion nueva quiera anotar algo distinto.
 | Método | Descripción |
 |---|---|
 | `public AuditTrail(AuditLogRepository repository, ObjectMapper objectMapper)` |  |
-| `public void record(AuthenticatedOperator operator, String action, String resourceType, …)` |  |
+| `public void record(AuthenticatedOperator operator, String action, String resourceType, String resourceId, String idempotencyKey, String result, String detail)` |  |
 
-### A.18 Infraestructura — bootstrap
+### A.22 Infraestructura — observability
 
-<sub>`infrastructure/bootstrap/DevDataSeeder.java` · 143 líneas</sub>
+<sub>`infrastructure/observability/IntegrationMetrics.java` · 62 líneas</sub>
 
-#### `DevDataSeeder` · clase · `@Component` `@Profile` `@ConditionalOnProperty` `@EnableConfigurationProperties`
+#### `IntegrationMetrics` · clase · `@Component`
+
+Metricas de la integracion con Kira (arquitectura §5): latencia y errores del proveedor, y
+webhooks recibidos, rechazados y sin proyectar. Las etiquetas nunca llevan ids ni datos de
+una empresa: todo segmento de ruta que no sea fijo se sustituye por {id}.
+
+| Método | Descripción |
+|---|---|
+| `public IntegrationMetrics(MeterRegistry registry)` |  |
+| `public void recordKiraCall(String method, String path, String outcome, long nanos)` | kira.api.requests: duracion por metodo, ruta normalizada y resultado (codigo HTTP o io_error). |
+| `public void webhookReceived(String result)` | kira.webhooks.received: received, duplicate, invalid_signature, invalid_json o not_configured. |
+| `public void webhookProjectionFailed(String eventType)` | kira.webhooks.projection.failures: eventos guardados cuya proyeccion fallo (quedan para reintento). |
+
+<sub>`infrastructure/observability/RequestIdFilter.java` · 45 líneas</sub>
+
+#### `RequestIdFilter` · clase · `@Component` `@Order(Ordered.HIGHEST_PRECEDENCE)`
+
+Correlacion de una peticion (arquitectura §5, observabilidad): el id viaja en X-Request-Id, se
+escribe en cada linea de log (MDC) y en la auditoria, y vuelve en la respuesta para que soporte
+pueda buscarlo. Uno recibido que no tenga forma de id se sustituye: no se escribe texto ajeno
+en los logs.
+
+| Método | Descripción |
+|---|---|
+| `protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException` |  |
+
+### A.23 Infraestructura — bootstrap
+
+<sub>`infrastructure/bootstrap/DevDataSeeder.java` · 163 líneas</sub>
+
+#### `DevDataSeeder` · clase · `@Component` `@Profile("dev")` `@ConditionalOnProperty(prefix = "bff.dev", name = "seed", havingValue = "true")` `@EnableConfigurationProperties(DevSeedProperties.class)`
 
 Datos de arranque para desarrollo local.
 
@@ -4174,19 +4558,11 @@ Es idempotente: si la organizacion, el rol o el correo ya existen, no los toca.
 Crea un operador por rol y por organizacion para poder probar de verdad el maker-checker:
 hacen falta dos personas distintas para que un pago salga hacia Kira.
 
-| Campo | Descripción |
-|---|---|
-| `private static final List<SeedTenant> TENANTS = List.of( ...` |  |
-
 | Método | Descripción |
 |---|---|
-| `new SeedTenant("juriscop", "Juriscop", "900123456-1"), …)` |  |
-| `new SeedTenant("bankvision", "Bankvision", "900234567-2"), …)` |  |
-| `new SeedTenant("au-colombia", "AU Colombia", "900345678-3"))` |  |
-| `public DevDataSeeder(TenantJpaRepository tenants, RoleJpaRepository roles, …)` |  |
-| `public void run(org.springframework.boot.ApplicationArguments args)` `@Transactional` |  |
-
-##### `DevDataSeeder.SeedTenant` · record
+| `public DevDataSeeder(TenantJpaRepository tenants, RoleJpaRepository roles, OperatorUserJpaRepository operators, PasswordEncoder passwordEncoder, DevSeedProperties properties)` |  |
+| `public void run(org.springframework.boot.ApplicationArguments args)` |  |
+#### `SeedTenant` · record
 
 | Componente |
 |---|
@@ -4194,17 +4570,18 @@ hacen falta dos personas distintas para que un pago salga hacia Kira.
 | `String name` |
 | `String taxId` |
 
-<sub>`infrastructure/bootstrap/DevSeedProperties.java` · 11 líneas</sub>
+<sub>`infrastructure/bootstrap/DevSeedProperties.java` · 10 líneas</sub>
 
-#### `DevSeedProperties` · record · `@ConfigurationProperties`
+#### `DevSeedProperties` · record · `@ConfigurationProperties(prefix = "bff.dev")`
 
 | Componente |
 |---|
-| `@DefaultValue("Dev12345!") String seedPassword` |
+| `boolean seed` |
+| `String seedPassword` |
 
 <sub>`infrastructure/bootstrap/RequiredSecretsValidator.java` · 56 líneas</sub>
 
-#### `RequiredSecretsValidator` · clase · `@Component` `@Profile`
+#### `RequiredSecretsValidator` · clase · `@Component` `@Profile({"cert", "prod"})`
 
 En cert y prod el arranque falla si falta un secreto, en vez de descubrirlo con la primera
 llamada a Kira o con un token firmado con una clave de ejemplo.
@@ -4215,24 +4592,20 @@ En dev no se aplica: alli hay valores por defecto deliberados.
 | `public RequiredSecretsValidator(KiraProperties kira, BffSecurityProperties security)` |  |
 | `public void afterPropertiesSet()` |  |
 
-### A.19 Infraestructura — config
+### A.24 Infraestructura — config
 
-<sub>`infrastructure/config/AsyncConfig.java` · 32 líneas</sub>
+<sub>`infrastructure/config/AsyncConfig.java` · 31 líneas</sub>
 
 #### `AsyncConfig` · clase · `@Configuration` `@EnableAsync` `@EnableScheduling`
 
 Kira entrega cada webhook UNA sola vez, sin reintentos, y aborta a los 30 segundos.
 Por eso el ingress responde 2xx de inmediato y el procesamiento ocurre en este pool.
 
-| Campo | Descripción |
-|---|---|
-| `public static final String WEBHOOK_EXECUTOR = "webhookExecutor"` |  |
-
 | Método | Descripción |
 |---|---|
-| `public ThreadPoolTaskExecutor webhookExecutor()` `@Bean(name = WEBHOOK_EXECUTOR)` |  |
+| `public ThreadPoolTaskExecutor webhookExecutor()` |  |
 
-<sub>`infrastructure/config/OpenApiConfig.java` · 55 líneas</sub>
+<sub>`infrastructure/config/OpenApiConfig.java` · 54 líneas</sub>
 
 #### `OpenApiConfig` · clase · `@Configuration`
 
@@ -4244,13 +4617,13 @@ los invoca la persona que se esta vinculando, que todavia no tiene sesion.
 
 | Método | Descripción |
 |---|---|
-| `public OpenAPI bffOpenApi()` `@Bean` |  |
+| `public OpenAPI bffOpenApi()` |  |
 
-### A.20 Infraestructura — reconciliation
+### A.25 Infraestructura — reconciliation
 
-<sub>`infrastructure/reconciliation/LivenessReconciliationWorker.java` · 52 líneas</sub>
+<sub>`infrastructure/reconciliation/LivenessReconciliationWorker.java` · 51 líneas</sub>
 
-#### `LivenessReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty`
+#### `LivenessReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty(prefix = "bff.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)`
 
 Cierra los enlaces de prueba de vida vencidos.
 
@@ -4264,9 +4637,9 @@ unico que funciona (Kira no prorroga el enlace).
 | `public LivenessReconciliationWorker(UboRepository ubos)` |  |
 | `public void expireStaleLivenessLinks()` |  |
 
-<sub>`infrastructure/reconciliation/PayoutReconciliationWorker.java` · 96 líneas</sub>
+<sub>`infrastructure/reconciliation/PayoutReconciliationWorker.java` · 95 líneas</sub>
 
-#### `PayoutReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty`
+#### `PayoutReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty(prefix = "bff.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)`
 
 Pagos en vuelo: pregunta por el recurso, que es la autoridad final.
 
@@ -4279,12 +4652,12 @@ medias los anteriores.
 
 | Método | Descripción |
 |---|---|
-| `public PayoutReconciliationWorker(PayoutRepository payouts, KiraApiClient kira, …)` |  |
+| `public PayoutReconciliationWorker(PayoutRepository payouts, KiraApiClient kira, ( "$` |  |
 | `public void reconcile()` |  |
 
-<sub>`infrastructure/reconciliation/QuotationReconciliationWorker.java` · 52 líneas</sub>
+<sub>`infrastructure/reconciliation/QuotationReconciliationWorker.java` · 51 líneas</sub>
 
-#### `QuotationReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty`
+#### `QuotationReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty(prefix = "bff.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)`
 
 Cierra las cotizaciones cuyo TTL de 15 minutos ya paso.
 
@@ -4297,9 +4670,9 @@ vencimiento antes de enviar nada.
 | `public QuotationReconciliationWorker(QuotationRepository quotations)` |  |
 | `public void expireStaleQuotations()` |  |
 
-<sub>`infrastructure/reconciliation/RfiReconciliationWorker.java` · 61 líneas</sub>
+<sub>`infrastructure/reconciliation/RfiReconciliationWorker.java` · 60 líneas</sub>
 
-#### `RfiReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty`
+#### `RfiReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty(prefix = "bff.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)`
 
 Trae de Kira los RFIs de cada empresa registrada.
 
@@ -4313,9 +4686,39 @@ importa de las cuatro.
 | `public RfiReconciliationWorker(TenantRepository tenants, AnswerRfiService rfis)` |  |
 | `public void syncOpenRfis()` |  |
 
-<sub>`infrastructure/reconciliation/WebhookReprojectionWorker.java` · 101 líneas</sub>
+<sub>`infrastructure/reconciliation/TenantReconciliationWorker.java` · 62 líneas</sub>
 
-#### `WebhookReprojectionWorker` · clase · `@Component` `@ConditionalOnProperty`
+#### `TenantReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty(prefix = "bff.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)`
+
+Estado KYB de las empresas que aun no pueden operar.
+
+user.status_changed es la unica senal de cada transicion, y Kira deja de reintentar una entrega
+a los ~80 minutos. Si se pierde, una empresa verificada seguiria viendose en revision hasta que
+alguien pulse "Actualizar". Las empresas ya verificadas y listas no se consultan.
+
+| Método | Descripción |
+|---|---|
+| `public TenantReconciliationWorker(TenantRepository tenants, SubmitOnboardingService onboarding)` |  |
+| `public void reconcile()` |  |
+
+<sub>`infrastructure/reconciliation/VirtualAccountReconciliationWorker.java` · 70 líneas</sub>
+
+#### `VirtualAccountReconciliationWorker` · clase · `@Component` `@ConditionalOnProperty(prefix = "bff.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)`
+
+Estado de las cuentas virtuales abiertas en Kira.
+
+virtual_account.activated es el unico evento de la cuenta: failed, deactivated y frozen no
+tienen webhook, asi que solo se descubren consultando el recurso. Una cuenta congelada que se
+sigue mostrando operativa es un pago que falla sin explicacion.
+
+| Método | Descripción |
+|---|---|
+| `public VirtualAccountReconciliationWorker(TenantRepository tenants, VirtualAccountRepository accounts, OpenVirtualAccountService service)` |  |
+| `public void reconcile()` |  |
+
+<sub>`infrastructure/reconciliation/WebhookReprojectionWorker.java` · 100 líneas</sub>
+
+#### `WebhookReprojectionWorker` · clase · `@Component` `@ConditionalOnProperty(prefix = "bff.reconciliation", name = "enabled", havingValue = "true", matchIfMissing = true)`
 
 Eventos almacenados y nunca proyectados: las filas de webhooks_log con processed = false.
 
@@ -4327,148 +4730,182 @@ Es el complemento de los otros cuatro workers: aquellos preguntan por el recurso
 eventos cuyo dato NO esta en ningun GET (el motivo del rechazo del KYB y el resultado real de la
 prueba de vida sólo viajan en el webhook).
 
-| Campo | Descripción |
-|---|---|
-| `static final int MAX_RETRIES = 5` | Intentos antes de dar un evento por perdido. Sin este tope, un evento que nunca va a proyectarse se reintenta indefinidamente y, al ir el lote de mas antiguo a mas nuevo, acaba desplazando a los eventos recientes. |
-| `private static final String AGOTADO = "Max retries reached"` |  |
-
 | Método | Descripción |
 |---|---|
-| `public WebhookReprojectionWorker(WebhookEventJpaRepository events, ProcessWebhookUseCase webhooks, …)` |  |
+| `public WebhookReprojectionWorker(WebhookEventJpaRepository events, ProcessWebhookUseCase webhooks, ("$` |  |
 | `public void reprojectPendingEvents()` |  |
 
-#### `infrastructure/reconciliation/package-info.java` (25 líneas)
+### A.26 Interfaces — rest
 
-Sólo documentación de paquete (sin tipos). Ver §12.6.
+<sub>`interfaces/rest/ActivityController.java` · 63 líneas</sub>
 
-### A.21 Interfaces — rest
+#### `ActivityController` · clase · `@Tag(name = "7. Actividad", description = "Avisos de negocio, eventos de Kira recibidos y bitacora de auditoria.")` `@RestController` `@RequestMapping("/api")`
 
-<sub>`interfaces/rest/AuthController.java` · 43 líneas</sub>
-
-#### `AuthController` · clase · `@RestController` `@RequestMapping`
-
-Grupo en Swagger: **1. Sesion**.
+Avisos, centro de eventos y auditoria de la organizacion.
 
 | Método | Descripción |
 |---|---|
-| `public AuthController(LoginUseCase loginUseCase)` |  |
-| `public ResponseEntity<LoginUseCase.LoginResult> login(@Valid @RequestBody LoginRequest request)` `@PostMapping("/login")` |  |
-| `public ResponseEntity<Map<String, String>> me(@AuthenticationPrincipal AuthenticatedOperator operator)` `@GetMapping("/me")` |  |
+| `public ActivityController(NotificationService notifications, AuditQueryService audit)` |  |
+| `public Map<String, Long> unreadCount(AuthenticatedOperator operator)` | Para el contador de la campana: barato de consultar a menudo. |
+| `public ResponseEntity<Void> markAllRead(AuthenticatedOperator operator)` |  |
 
-##### `AuthController.LoginRequest` · record
+<sub>`interfaces/rest/AuthController.java` · 97 líneas</sub>
+
+#### `AuthController` · clase · `@Tag(name = "1. Sesion", description = "Login del BFF y perfil del operador. El token de Kira nunca sale del servidor.")` `@RestController` `@RequestMapping("/api/auth")`
+
+| Método | Descripción |
+|---|---|
+| `public AuthController(LoginUseCase loginUseCase, MfaService mfa, OperatorUserRepository users, TenantRepository tenants)` |  |
+| `public ResponseEntity<LoginUseCase.LoginResult> login(LoginRequest request)` |  |
+| `public LoginUseCase.LoginResult verifyMfa(MfaCodeRequest request)` | Paso 2 del inicio de sesion con segundo factor. |
+| `public LoginUseCase.LoginResult enableMfa(AuthenticatedOperator operator, MfaEnableRequest request)` | Confirma el secreto con el primer codigo y devuelve una sesion. |
+| `public ResponseEntity<Void> disableMfa(AuthenticatedOperator operator, MfaEnableRequest request)` |  |
+| `public ResponseEntity<Map<String, Object>> me(AuthenticatedOperator operator)` |  |
+#### `LoginRequest` · record
 
 | Componente |
 |---|
-| `@NotBlank @Email String email` |
-| `@NotBlank String password` |
+| `String email` |
+| `String password` |
 
-<sub>`interfaces/rest/DepositController.java` · 50 líneas</sub>
+#### `MfaCodeRequest` · record
 
-#### `DepositController` · clase · `@RestController` `@RequestMapping`
+| Componente |
+|---|
+| `String challenge` |
+| `String code` |
+
+#### `MfaChallengeRequest` · record
+
+| Componente |
+|---|
+| `String challenge` |
+
+#### `MfaEnableRequest` · record
+
+`challenge` solo cuando se configura durante el inicio de sesion.
+
+| Componente |
+|---|
+| `String challenge` |
+| `String code` |
+
+<sub>`interfaces/rest/DepositController.java` · 51 líneas</sub>
+
+#### `DepositController` · clase · `@Tag(name = "2.4 Depositos", description = "Historial de fondeos de las cuentas virtuales, proyectado desde los webhooks.")` `@RestController` `@RequestMapping("/api")`
 
 Depositos entrantes.
 
 Los depositos no se crean desde aqui: llegan por webhook y, como red de seguridad, se
 sincronizan desde Kira. En el sandbox el webhook es la unica constancia que existe de ellos.
 
-Grupo en Swagger: **2.4 Depositos**.
-
 | Método | Descripción |
 |---|---|
 | `public DepositController(RecordDepositService deposits)` |  |
-| `public List<DepositView> list(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/deposits")` |  |
-| `public List<DepositView> syncFromKira(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping("/virtual-accounts/{id}/deposits/sync")` | Trae de Kira los depositos de la cuenta y los asienta. Idempotente por id de deposito. |
-| `public List<DepositView> listByAccount(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/virtual-accounts/{id}/deposits")` |  |
+| `public List<DepositView> syncFromKira(AuthenticatedOperator operator, String id)` | Trae de Kira los depositos de la cuenta y los asienta. Idempotente por id de deposito. |
 
-<sub>`interfaces/rest/OnboardingController.java` · 62 líneas</sub>
+<sub>`interfaces/rest/OnboardingController.java` · 135 líneas</sub>
 
-#### `OnboardingController` · clase · `@RestController` `@RequestMapping`
+#### `OnboardingController` · clase · `@Tag(name = "1.1 Onboarding KYB", description = "Alta de la empresa en Kira y bucle de campos pendientes hasta VERIFIED.")` `@RestController` `@RequestMapping("/api/onboarding")`
 
 Onboarding KYB de la empresa cliente.
 
 El portal no debe tener un formulario estatico: GET devuelve 'pendingFields' y esa es
 la lista de campos que hay que pintar. PUT se repite hasta que quede vacia.
 
-Grupo en Swagger: **1.1 Onboarding KYB**.
-
 | Método | Descripción |
 |---|---|
 | `public OnboardingController(SubmitOnboardingService onboarding)` |  |
-| `public OnboardingView status(@AuthenticationPrincipal AuthenticatedOperator operator)` `@GetMapping` | Estado local, sin llamar a Kira. |
-| `public ResponseEntity<OnboardingView> register(` `@PostMapping` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` |  |
-| `public OnboardingView completeProfile(` `@PutMapping` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` | Envia el perfil completo. Se puede repetir; cada llamada reenvia el objeto entero. |
-| `public OnboardingView refresh(@AuthenticationPrincipal AuthenticatedOperator operator)` `@PostMapping("/refresh")` | Relee el recurso en Kira. Cubre el hueco de un webhook que nunca llego. |
+| `public OnboardingView status(AuthenticatedOperator operator)` | Estado local, sin llamar a Kira. |
+| `public ResponseEntity<OnboardingView> register( AuthenticatedOperator operator, OnboardingCommands.RegisterBusiness command)` |  |
+| `public OnboardingView completeProfile( AuthenticatedOperator operator, OnboardingCommands.CompleteProfile command)` | Envia el perfil completo. Se puede repetir; cada llamada reenvia el objeto entero. |
+| `public SubmitOnboardingService.TermsView terms(AuthenticatedOperator operator)` | Terminos vigentes y la version aceptada por la empresa. |
+| `public SubmitOnboardingService.TermsView acceptTerms( AuthenticatedOperator operator, OnboardingCommands.AcceptTerms command)` | Acepta los terminos vigentes; exige el expediente creado en Kira. |
+| `public OnboardingView refresh(AuthenticatedOperator operator)` |  |
 
-<sub>`interfaces/rest/PayoutController.java` · 108 líneas</sub>
+<sub>`interfaces/rest/OnboardingDraftController.java` · 40 líneas</sub>
 
-#### `PayoutController` · clase · `@RestController` `@RequestMapping`
+#### `OnboardingDraftController` · clase · `@Tag(name = "1.1 Onboarding KYB", description = "Alta de la empresa en Kira y bucle de campos pendientes hasta VERIFIED.")` `@RestController` `@RequestMapping("/api/onboarding/draft")`
 
-Grupo en Swagger: **2. Pagos**.
+Borrador del formulario de vinculacion: permite dejar el KYB a medias y retomarlo.
+Local al BFF; enviar a Kira sigue siendo POST/PUT /api/onboarding.
+
+| Método | Descripción |
+|---|---|
+| `public OnboardingDraftController(OnboardingDraftService drafts)` |  |
+| `public OnboardingDraftView get(AuthenticatedOperator operator)` |  |
+| `public OnboardingDraftView save(AuthenticatedOperator operator, OnboardingCommands.SaveDraft command)` | Reemplaza el borrador completo. Sin archivos: un data URI se rechaza con 422. |
+
+<sub>`interfaces/rest/PayoutController.java` · 118 líneas</sub>
+
+#### `PayoutController` · clase · `@Tag(name = "2. Pagos", description = "Pagos con control interno maker-checker: quien crea no aprueba.")` `@RestController` `@RequestMapping("/api/payouts")`
 
 | Método | Descripción |
 |---|---|
 | `public PayoutController(ExecutePayoutService payoutService)` |  |
-| `public List<PayoutView> list(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping` |  |
-| `public KiraPayoutPage kiraHistory(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/kira")` | Historial de la empresa en Kira, incluidos movimientos que no nacieron en el portal. Pagina por `page` (desde 1) y `limit` (1-100). `status`: CREATED, PENDING, PROCESSING, COMPLETED, FAILED, CANCELLED, IN_REVIEW, KYT_PENDING. Fechas ISO 8601 o AAAA-MM-DD. |
-| `public PayoutPreviewView preview(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping("/preview")` `@PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")` | Coste del pago sin reservar precio. Para cerrarlo, cotiza en /api/quotations. |
-| `public PayoutView get(@AuthenticationPrincipal AuthenticatedOperator operator, @PathVariable String id)` `@GetMapping("/{id}")` |  |
-| `public ResponseEntity<PayoutView> create(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping` `@PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")` |  |
-| `public PayoutView approve(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping("/{id}/approve")` `@PreAuthorize("hasAnyRole('TREASURY_APPROVER','ADMIN')")` | Aprueba y envia a Kira. La entidad rechaza que el aprobador sea el mismo que lo creo, y la cotizacion debe seguir vigente y con saldo suficiente. El cuerpo es opcional: solo hace falta para la naturaleza del pago, el memo del WIRE y los documentos de soporte. |
-| `public PayoutView reject(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping("/{id}/reject")` `@PreAuthorize("hasAnyRole('TREASURY_APPROVER','ADMIN')")` |  |
-| `public List<PayoutEventView> events(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/{id}/events")` | Linea de tiempo del pago en Kira. Vacia mientras no se haya enviado. |
-| `public PayoutView refresh(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping("/{id}/refresh")` |  |
+| `public PayoutPreviewView preview(AuthenticatedOperator operator, PayoutCommands.PreviewPayout command)` | Coste del pago sin reservar precio. Para cerrarlo, cotiza en /api/quotations. |
+| `public PayoutView get(AuthenticatedOperator operator, String id)` |  |
+| `public PayoutView requote(AuthenticatedOperator operator, String id)` | Renueva la cotizacion vencida de un pago pendiente; devuelve el pago con el precio nuevo. |
+| `public PayoutView reject(AuthenticatedOperator operator, String id, PayoutCommands.RejectPayout command)` |  |
+| `public List<PayoutEventView> events(AuthenticatedOperator operator, String id)` | Linea de tiempo del pago en Kira. Vacia mientras no se haya enviado. |
+| `public PayoutView refresh(AuthenticatedOperator operator, String id)` |  |
 
-<sub>`interfaces/rest/QuotationController.java` · 55 líneas</sub>
+<sub>`interfaces/rest/PlatformController.java` · 46 líneas</sub>
 
-#### `QuotationController` · clase · `@RestController` `@RequestMapping`
+#### `PlatformController` · clase · `@Tag(name = "8. Consola de operaciones", description = "Solo PLATFORM_OPERATOR. Cada ficha consultada queda auditada.")` `@RestController` `@RequestMapping("/api/platform")` `@PreAuthorize("hasRole('PLATFORM_OPERATOR')")`
+
+Consola de operaciones y cumplimiento de AU: todas las organizaciones, solo lectura.
+
+| Método | Descripción |
+|---|---|
+| `public PlatformController(PlatformConsoleService console)` |  |
+| `public List<PlatformConsoleService.TenantSummary> tenants(AuthenticatedOperator operator)` |  |
+| `public PlatformConsoleService.Tenant360 tenant(AuthenticatedOperator operator, String id)` |  |
+| `public PlatformConsoleService.Tenant360 refresh(AuthenticatedOperator operator, String id)` |  |
+| `public List<PlatformConsoleService.ReviewItem> reviewQueue(AuthenticatedOperator operator)` |  |
+
+<sub>`interfaces/rest/QuotationController.java` · 54 líneas</sub>
+
+#### `QuotationController` · clase · `@Tag(name = "2.1 Cotizaciones", description = "Precio en firme de una transferencia: desglose de comisiones y TTL de 15 minutos.")` `@RestController` `@RequestMapping("/api/quotations")`
 
 Cotizaciones de transferencia.
 
 Viven 15 minutos exactos. La respuesta trae 'secondsToExpiry' para el contador: al
 llegar a cero hay que recotizar, no reutilizar.
 
-Grupo en Swagger: **2.1 Cotizaciones**.
-
 | Método | Descripción |
 |---|---|
 | `public QuotationController(CreateQuoteService quotes)` |  |
-| `public List<QuotationView> list(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping` |  |
-| `public QuotationView get(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/{id}")` |  |
-| `public ResponseEntity<QuotationView> create(` `@PostMapping` `@PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")` |  |
+| `public QuotationView get(AuthenticatedOperator operator, String id)` |  |
+| `public ResponseEntity<QuotationView> create( AuthenticatedOperator operator, QuotationCommands.CreateQuote command)` |  |
 
-<sub>`interfaces/rest/RecipientController.java` · 77 líneas</sub>
+<sub>`interfaces/rest/RecipientController.java` · 78 líneas</sub>
 
-#### `RecipientController` · clase · `@RestController` `@RequestMapping`
+#### `RecipientController` · clase · `@Tag(name = "2.2 Destinatarios", description = "Directorio de destinos de pago. Un destinatario = un riel.")` `@RestController` `@RequestMapping("/api/recipients")`
 
 Directorio de destinatarios.
 
 No hay PUT: Kira no expone actualizacion ni borrado de destinatarios. Para corregir uno
 se da de alta el reemplazo y se archiva el anterior apuntando al nuevo.
 
-Grupo en Swagger: **2.2 Destinatarios**.
-
 | Método | Descripción |
 |---|---|
 | `public RecipientController(RegisterRecipientService recipients)` |  |
-| `public List<RecipientView> list(@AuthenticationPrincipal AuthenticatedOperator operator)` `@GetMapping` |  |
-| `public List<KiraRecipientView> listInKira(@AuthenticationPrincipal AuthenticatedOperator operator)` `@GetMapping("/kira")` | Destinatarios de la empresa tal como los tiene Kira, para conciliar con el directorio. |
-| `public KiraRecipientView getInKira(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/{id}/kira")` |  |
-| `public RecipientView get(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/{id}")` |  |
-| `public ResponseEntity<RecipientView> register(` `@PostMapping` `@PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")` | `alreadyExisted: true` significa que Kira devolvio un 202: el destino ya estaba. |
-| `public RecipientView archive(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping("/{id}/archive")` `@PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")` | Archiva el destinatario. Con `replacedByRecipientId` queda enlazado a su sustituto. |
+| `public List<RecipientView> list(AuthenticatedOperator operator)` |  |
+| `public List<KiraRecipientView> listInKira(AuthenticatedOperator operator)` | Destinatarios de la empresa tal como los tiene Kira, para conciliar con el directorio. |
+| `public KiraRecipientView getInKira(AuthenticatedOperator operator, String id)` |  |
+| `public RecipientView get(AuthenticatedOperator operator, String id)` |  |
 
-<sub>`interfaces/rest/ReferenceController.java` · 29 líneas</sub>
+<sub>`interfaces/rest/ReferenceController.java` · 28 líneas</sub>
 
-#### `ReferenceController` · clase · `@RestController` `@RequestMapping`
-
-Grupo en Swagger: **0. Catalogos**.
+#### `ReferenceController` · clase · `@Tag(name = "0. Catalogos", description = "Catalogos de referencia de Kira, cacheados en el BFF.")` `@RestController` `@RequestMapping("/api/reference")`
 
 | Método | Descripción |
 |---|---|
 | `public ReferenceController(ReferenceCatalogService catalog)` |  |
-| `public List<CountryView> countries()` `@GetMapping("/countries")` | Paises soportados con sus subdivisiones. Cacheado 24 h. |
+| `public List<CountryView> countries()` | Paises soportados con sus subdivisiones. Cacheado 24 h. |
 
-<sub>`interfaces/rest/RestExceptionHandler.java` · 117 líneas</sub>
+<sub>`interfaces/rest/RestExceptionHandler.java` · 116 líneas</sub>
 
 #### `RestExceptionHandler` · clase · `@RestControllerAdvice`
 
@@ -4477,62 +4914,58 @@ formas de error; el BFF no las propaga crudas: entrega codigo estable y mensaje 
 
 | Método | Descripción |
 |---|---|
-| `public ResponseEntity<Map<String, Object>> handleRfiAnswer(RfiAnswerRejectedException e)` `@ExceptionHandler(RfiAnswerRejectedException.class)` | Errores por item_id: el portal los pinta junto a cada campo y no marca ninguno como guardado. |
-| `public ResponseEntity<Map<String, Object>> handleDomain(DomainException e)` `@ExceptionHandler(DomainException.class)` |  |
-| `public ResponseEntity<Map<String, Object>> handleDenied(AccessDeniedException e)` `@ExceptionHandler(AccessDeniedException.class)` |  |
-| `public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException e)` `@ExceptionHandler(MethodArgumentNotValidException.class)` |  |
-| `public ResponseEntity<Map<String, Object>> handleBadRequest(Exception e)` `@ExceptionHandler({MissingServletRequestPartException.class, MissingServletRequestParameterException.class,` | Peticion mal formada: parte o parametro ausente, JSON ilegible o tipo equivocado. |
-| `public ResponseEntity<Map<String, Object>> handleUploadTooLarge(MaxUploadSizeExceededException e)` `@ExceptionHandler(MaxUploadSizeExceededException.class)` |  |
-| `public ResponseEntity<Map<String, Object>> handleNotFound(NoResourceFoundException e)` `@ExceptionHandler(NoResourceFoundException.class)` | Ruta inexistente: 404, no "error inesperado". |
-| `public ResponseEntity<Map<String, Object>> handleKiraNotConfigured(KiraNotConfiguredException e)` `@ExceptionHandler(KiraNotConfiguredException.class)` |  |
-| `public ResponseEntity<Map<String, Object>> handleKira(KiraApiException e)` `@ExceptionHandler(KiraApiException.class)` |  |
-| `public ResponseEntity<Map<String, Object>> handleUnexpected(Exception e)` `@ExceptionHandler(Exception.class)` |  |
+| `public ResponseEntity<Map<String, Object>> handleRfiAnswer(RfiAnswerRejectedException e)` | Errores por item_id: el portal los pinta junto a cada campo y no marca ninguno como guardado. |
+| `public ResponseEntity<Map<String, Object>> handleDomain(DomainException e)` |  |
+| `public ResponseEntity<Map<String, Object>> handleDenied(AccessDeniedException e)` |  |
+| `public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException e)` |  |
+| `public ResponseEntity<Map<String, Object>> handleBadRequest(Exception e)` | Peticion mal formada: parte o parametro ausente, JSON ilegible o tipo equivocado. |
+| `public ResponseEntity<Map<String, Object>> handleUploadTooLarge(MaxUploadSizeExceededException e)` |  |
+| `public ResponseEntity<Map<String, Object>> handleNotFound(NoResourceFoundException e)` | Ruta inexistente: 404, no "error inesperado". |
+| `public ResponseEntity<Map<String, Object>> handleKiraNotConfigured(KiraNotConfiguredException e)` |  |
+| `public ResponseEntity<Map<String, Object>> handleKira(KiraApiException e)` |  |
+| `public ResponseEntity<Map<String, Object>> handleUnexpected(Exception e)` |  |
 
-<sub>`interfaces/rest/RfiController.java` · 112 líneas</sub>
+<sub>`interfaces/rest/RfiController.java` · 124 líneas</sub>
 
-#### `RfiController` · clase · `@RestController` `@RequestMapping`
+#### `RfiController` · clase · `@Tag(name = "1.3 Solicitudes de informacion (RFI)", description = "Requerimientos de Kira: bandeja, sincronizacion y respuesta por item.")` `@RestController` `@RequestMapping("/api/rfis")`
 
 Bandeja de solicitudes de informacion (RFI) de Kira.
 
 No hay POST de alta: Kira genera los RFIs. El portal los sincroniza, los muestra y
 responde sus items. Un RFI sin atender detiene lo que bloquea hasta que vence.
 
-Grupo en Swagger: **1.3 Solicitudes de informacion (RFI)**.
-
 | Método | Descripción |
 |---|---|
 | `public RfiController(AnswerRfiService rfis)` |  |
-| `public List<RfiView> list(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping` | Con `open=true` solo los que admiten respuesta (pending y answered). |
-| `public RfiView get(@AuthenticationPrincipal AuthenticatedOperator operator, @PathVariable String id)` `@GetMapping("/{id}")` |  |
-| `public List<RfiView> sync(@AuthenticationPrincipal AuthenticatedOperator operator)` `@PostMapping("/sync")` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` | Trae de Kira los RFIs de la empresa. Red de seguridad del webhook rfi.*. |
-| `public RfiView refresh(@AuthenticationPrincipal AuthenticatedOperator operator, @PathVariable String id)` `@PostMapping("/{id}/refresh")` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` |  |
-| `public RfiView answer(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PatchMapping("/{id}/items")` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` | Responde items de texto. Es all-or-nothing: un `422` trae `details` por item_id y significa que no se guardo ninguno. |
-| `public RfiView uploadDocuments(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping(value = "/{id}/items/{itemId}/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` | Sube archivos a un item de tipo documento: multipart con la parte `files` repetida (maximo 20, 30 MB cada uno; PDF, JPEG, PNG, HEIC o WebP salvo que el item diga otra cosa). |
-| `public RfiView removeDocument(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@DeleteMapping("/{id}/items/{itemId}/documents/{documentId}")` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` | Kira no permite borrar el ultimo archivo de un item ya respondido (422). |
-| `public RfiDocumentLink documentLink(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/{id}/items/{itemId}/documents/{documentId}/link")` | Enlace temporal (minutos). Abrirlo al momento; si caduca, pedir otro. |
+| `public RfiView get(AuthenticatedOperator operator, String id)` |  |
+| `public List<RfiView> sync(AuthenticatedOperator operator)` | Trae de Kira los RFIs de la empresa. Red de seguridad del webhook rfi.*. |
+| `public RfiView refresh(AuthenticatedOperator operator, String id)` |  |
+| `public RfiView answer(AuthenticatedOperator operator, String id, RfiCommands.AnswerItems command)` | Responde items de texto. Es all-or-nothing: un `422` trae `details` por item_id y significa que no se guardo ninguno. |
+| `public RfiView uploadDocuments(AuthenticatedOperator operator, String id, String itemId, List<MultipartFile> files)` | Sube archivos a un item de tipo documento: multipart con la parte `files` repetida (maximo 20, 30 MB cada uno; PDF, JPEG, PNG, HEIC o WebP salvo que el item diga otra cosa). |
+| `public RfiView removeDocument(AuthenticatedOperator operator, String id, String itemId, String documentId)` | Kira no permite borrar el ultimo archivo de un item ya respondido (422). |
+| `public RfiUboLink mintUboLink(AuthenticatedOperator operator, String id, String itemId)` | Enlace de verificacion de un beneficiario (item ubo_link). Pedirlo cuando la persona pulsa: caduca en torno a una hora. Si el item ya trae url, se devuelve esa. |
+| `public RfiDocumentLink documentLink(AuthenticatedOperator operator, String id, String itemId, String documentId)` | Enlace temporal (minutos). Abrirlo al momento; si caduca, pedir otro. |
 
-<sub>`interfaces/rest/UboController.java` · 65 líneas</sub>
+<sub>`interfaces/rest/UboController.java` · 125 líneas</sub>
 
-#### `UboController` · clase · `@RestController` `@RequestMapping`
+#### `UboController` · clase · `@Tag(name = "1.2 Beneficiarios finales", description = "UBOs de la empresa, sincronizacion con Kira y enlaces de prueba de vida (7 dias).")` `@RestController` `@RequestMapping("/api/ubos")`
 
 Beneficiarios finales (UBOs) y sus enlaces de prueba de vida.
 
 El registro es local primero y se sincroniza en bloque: Kira exige el array completo en
 cada envio, asi que no hay un "alta de un UBO" contra su API.
 
-Grupo en Swagger: **1.2 Beneficiarios finales**.
-
 | Método | Descripción |
 |---|---|
 | `public UboController(SyncUbosService ubos)` |  |
-| `public UboView.Roster list(@AuthenticationPrincipal AuthenticatedOperator operator)` `@GetMapping` | Incluye la validacion del grupo: suma de participacion y si hay beneficiario final. |
-| `public UboView save(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` | Alta o edicion local. Sin `id` crea; con `id` actualiza. |
-| `public OnboardingView sync(@AuthenticationPrincipal AuthenticatedOperator operator)` `@PostMapping("/sync")` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` | Envia el array completo a Kira. Falla antes de llamar si no hay beneficiario final. |
-| `public UboView.Roster requestLivenessLinks(` `@PostMapping("/liveness-links")` `@PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")` | Un enlace por beneficiario final. Repetir la llamada devuelve los mismos enlaces mientras no cambien las URLs de redireccion. |
+| `public UboView.Roster list(AuthenticatedOperator operator)` | Incluye la validacion del grupo: suma de participacion y si hay beneficiario final. |
+| `public UboView save(AuthenticatedOperator operator, UboCommands.SaveUbo command)` | Alta o edicion local. Sin `id` crea; con `id` actualiza. |
+| `public UboView.Roster delete(AuthenticatedOperator operator, String id)` | Borra un beneficiario que Kira aun no conoce. Devuelve el grupo actualizado. |
+| `public OnboardingView sync(AuthenticatedOperator operator)` | Envia el array completo a Kira. Falla antes de llamar si no hay beneficiario final. |
 
-<sub>`interfaces/rest/VirtualAccountController.java` · 79 líneas</sub>
+<sub>`interfaces/rest/VirtualAccountController.java` · 80 líneas</sub>
 
-#### `VirtualAccountController` · clase · `@RestController` `@RequestMapping`
+#### `VirtualAccountController` · clase · `@Tag(name = "2.3 Cuentas virtuales", description = "Apertura, activacion y saldo de las cuentas en bancos de EE. UU.")` `@RestController` `@RequestMapping("/api/virtual-accounts")`
 
 Cuentas virtuales.
 
@@ -4540,57 +4973,53 @@ Cuentas virtuales.
 si solo no basta. Si 'activationDelayed' es true, la activacion lleva demasiado tiempo y
 el portal debe ofrecer contactar con Kira en vez de seguir esperando.
 
-Grupo en Swagger: **2.3 Cuentas virtuales**.
-
 | Método | Descripción |
 |---|---|
 | `public VirtualAccountController(OpenVirtualAccountService accounts)` |  |
-| `public List<VirtualAccountView> list(@AuthenticationPrincipal AuthenticatedOperator operator)` `@GetMapping` |  |
-| `public VirtualAccountView get(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@GetMapping("/{id}")` |  |
-| `public ResponseEntity<VirtualAccountView> open(` `@PostMapping` `@PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','COMPLIANCE_INTERNAL')")` | Exige KYB VERIFIED y producto elegible. Un 409 de Kira reutiliza la cuenta existente. |
-| `public VirtualAccountView refresh(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping("/{id}/refresh")` | Relee la cuenta. Cubre el hueco de un virtual_account.activated que nunca llego. |
-| `public VirtualAccountView refreshBalance(@AuthenticationPrincipal AuthenticatedOperator operator, …)` `@PostMapping("/{id}/balance")` |  |
-| `public VirtualAccountView simulateDeposit(` `@PostMapping("/{id}/simulate-deposit")` `@PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER')")` | Solo sandbox: en produccion responde 422 sin llamar a Kira. |
+| `public List<VirtualAccountView> list(AuthenticatedOperator operator)` |  |
+| `public VirtualAccountView get(AuthenticatedOperator operator, String id)` |  |
+| `public ResponseEntity<VirtualAccountView> open( AuthenticatedOperator operator, VirtualAccountCommands.OpenAccount command)` | Exige KYB VERIFIED y producto elegible. Un 409 de Kira reutiliza la cuenta existente. |
+| `public VirtualAccountView refresh(AuthenticatedOperator operator, String id)` | Relee la cuenta. Cubre el hueco de un virtual_account.activated que nunca llego. |
+| `public VirtualAccountView refreshBalance(AuthenticatedOperator operator, String id)` |  |
+| `public VirtualAccountView simulateDeposit( AuthenticatedOperator operator, String id, VirtualAccountCommands.SimulateDeposit command)` | Solo sandbox: en produccion responde 422 sin llamar a Kira. |
 
-### A.22 Interfaces — webhook
+### A.27 Interfaces — webhook
 
-<sub>`interfaces/webhook/KiraWebhookController.java` · 69 líneas</sub>
+<sub>`interfaces/webhook/KiraWebhookController.java` · 88 líneas</sub>
 
-#### `KiraWebhookController` · clase · `@RestController` `@RequestMapping`
+#### `KiraWebhookController` · clase · `@Tag(name = "6. Webhooks de Kira", description = "Ingress firmado con HMAC. Kira reintenta 4 veces ante 5xx o timeout.")` `@RestController` `@RequestMapping("/api/webhooks")`
 
 Ingress de eventos de Kira.
 
-Kira entrega una sola vez, sin reintentos, y aborta a los 30 segundos. Por eso este
-controlador solo hace dos cosas: verificar la firma sobre los bytes crudos y encolar.
-Todo lo demas ocurre despues de haber respondido.
+Kira corta a los 30 segundos y reintenta 4 veces (1, 5, 15 y 60 min) ante 408, 429, 5xx
+o falta de respuesta. Por eso este controlador solo verifica la firma sobre los bytes
+crudos y guarda el evento; la proyeccion ocurre despues de haber respondido.
 
-Se responde 2xx incluso ante un evento desconocido: un 4xx no provoca reintento, solo
-pierde el evento.
-
-Grupo en Swagger: **6. Webhooks de Kira**.
+Se responde 2xx incluso ante un evento desconocido: un 4xx es la unica respuesta que Kira
+no reintenta, asi que solo serviria para perder el evento.
 
 | Método | Descripción |
 |---|---|
-| `public KiraWebhookController(ProcessWebhookUseCase processWebhook, KiraWebhookVerifier verifier)` |  |
-| `public ResponseEntity<Map<String, String>> receive(` `@PostMapping(value = "/kira", consumes = MediaType.ALL_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)` |  |
+| `public KiraWebhookController(ProcessWebhookUseCase processWebhook, KiraWebhookVerifier verifier, IntegrationMetrics metrics)` |  |
 
 ---
 
 ## Anexo B. Catálogo de pruebas
 
-**40 clases de prueba, 283 métodos `@Test`.** Los nombres describen la regla de negocio que protegen.
+**51 clases de prueba, 400 métodos `@Test`.** Los nombres describen la regla de negocio que protegen.
 
 ### `AuTransactionalApplicationTests.java` — 1
 
 - `contextLoads` — context loads
 
-### `application/account/OpenVirtualAccountServiceTest.java` — 13
+### `application/account/OpenVirtualAccountServiceTest.java` — 14
 
 - `elBancoLoFijaElEntornoNoElFormulario` — el banco lo fija el entorno no el formulario
 - `verifiedNoBastaSiElProductoNoEsElegible` — verified no basta si el producto no es elegible
 - `laClaveDeIdempotenciaSePersisteAntesDeLlamar` — la clave de idempotencia se persiste antes de llamar
 - `unaCuentaPendienteNoEstaListaParaFondos` — una cuenta pendiente no esta lista para fondos
-- `approvedSinNumeroRealSigueSinEstarLista` — approved sin numero real sigue sin estar lista
+- `activatingSinNumeroRealSigueSinEstarLista` — activating sin numero real sigue sin estar lista
+- `activeLaHabilitaAunqueNoHayaLlegadoElEvento` — active la habilita aunque no haya llegado el evento
 - `unNumeroDeCuentaRealSiLaHabilita` — un numero de cuenta real si la habilita
 - `unConflictoReutilizaLaCuentaExistente` — un conflicto reutiliza la cuenta existente
 - `unCuatrocientosEnElSaldoEsCalculandoNoUnError` — un cuatrocientos en el saldo es calculando no un error
@@ -4600,12 +5029,18 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `enSandboxSimularDepositoRefrescaElSaldo` — en sandbox simular deposito refresca el saldo
 - `unaCuentaSinAbrirEnKiraNoSeRefresca` — una cuenta sin abrir en kira no se refresca
 
-### `application/account/RecordDepositServiceTest.java` — 13
+### `application/account/RecordDepositServiceTest.java` — 19
 
 - `unDepositoRecibidoSeProyectaConSusTresImportes` — un deposito recibido se proyecta con sus tres importes
 - `seLeeElCasingMezcladoDelPayload` — se lee el casing mezclado del payload
 - `losSeisEventosConvergenEnUnaSolaFila` — los seis eventos convergen en una sola fila
 - `unDepositoDevueltoNoVuelveAAcreditar` — un deposito devuelto no vuelve a acreditar
+- `docs_depositFundsReceivedLeeOrdenanteYRielDeSource` — docs_deposit funds received lee ordenante y riel de source
+- `docs_depositFundsRefundedNoQuedaComoAcreditado` — docs_deposit funds refunded no queda como acreditado
+- `docs_depositoProgramadoOEnRevisionNoAcredita` — docs_deposito programado o en revision no acredita
+- `unDepositoRetenidoNoAcreditaYPuedeLiberarse` — un deposito retenido no acredita y puede liberarse
+- `laCuentaDelOrdenanteSaleEnmascarada` — la cuenta del ordenante sale enmascarada
+- `unEstadoDesconocidoNuncaAcreditaSaldo` — un estado desconocido nunca acredita saldo
 - `unEventoTardioNoResucitaUnDepositoDevuelto` — un evento tardio no resucita un deposito devuelto
 - `elFalloSeProyectaAunqueElPayloadNoTraigaEstado` — el fallo se proyecta aunque el payload no traiga estado
 - `unMicrodepositoNoCuentaComoIngreso` — un microdeposito no cuenta como ingreso
@@ -4614,18 +5049,35 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `unDepositoDeUnaCuentaDesconocidaNoRompeNada` — un deposito de una cuenta desconocida no rompe nada
 - `unEventoSinIdentificadorNoSeProyecta` — un evento sin identificador no se proyecta
 - `laSincronizacionDesdeKiraConvergeEnLaMismaFilaQueElWebhook` — la sincronizacion desde kira converge en la misma fila que el webhook
-- `kytRechazadoEsUnDepositoFallido` — kyt rechazado es un deposito fallido
+- `losEstadosDeRetencionSeConservanYNoSonFallos` — los estados de retencion se conservan y no son fallos
 
-### `application/compliance/AnswerRfiServiceTest.java` — 22
+### `application/auth/MfaServiceTest.java` — 8
+
+- `sinSegundoFactorLaContrasenaDaLaSesion` — sin segundo factor la contrasena da la sesion
+- `conSegundoFactorLaContrasenaSoloDaUnRetoQueNoSirveComoSesion` — con segundo factor la contrasena solo da un reto que no sirve como sesion
+- `elSecretoSeGuardaCifrado` — el secreto se guarda cifrado
+- `elRetoMasUnCodigoValidoDanLaSesion` — el reto mas un codigo valido dan la sesion
+- `unCodigoYaUsadoNoValeOtraVez` — un codigo ya usado no vale otra vez
+- `cincoCodigosErroneosAgotanElReto` — cinco codigos erroneos agotan el reto
+- `unOperadorDeLaPlataformaEntraSinEmpresa` — un operador de la plataforma entra sin empresa
+- `siElEntornoLoExigeQuienNoLoTieneDebeConfigurarloAlEntrar` — si el entorno lo exige quien no lo tiene debe configurarlo al entrar
+
+### `application/compliance/AnswerRfiServiceTest.java` — 28
 
 - `laSincronizacionAsientaEstadoPlazoYBloqueo` — la sincronizacion asienta estado plazo y bloqueo
+- `unRfiQueDesapareceDelListadoYDa404QuedaRetirado` — un rfi que desaparece del listado y da 404 queda retirado
+- `refrescarUnRfiRetiradoLoCierraSinError` — refrescar un rfi retirado lo cierra sin error
+- `seGuardaElMotivoDeUnRfiCerradoSinResolver` — se guarda el motivo de un rfi cerrado sin resolver
+- `seAcunaElEnlaceDelBeneficiarioCuandoElItemNoTraeUrl` — se acuna el enlace del beneficiario cuando el item no trae url
+- `siElItemYaTraeUrlSeDevuelveSinLlamarAKira` — si el item ya trae url se devuelve sin llamar a kira
+- `noSeAcunaEnlaceParaUnItemQueNoEsDeBeneficiario` — no se acuna enlace para un item que no es de beneficiario
 - `laSincronizacionNoImportaRfisDeOtraEmpresaAunqueKiraLosDevuelva` — la sincronizacion no importa rfis de otra empresa aunque kira los devuelva
 - `laSincronizacionFiltraPorEmpresaYPaginaConOffset` — la sincronizacion filtra por empresa y pagina con offset
 - `unaEntradaResumidaSeCompletaConElDetalle` — una entrada resumida se completa con el detalle
 - `unItemDeDocumentoNuncaEnviaAnswerValue` — un item de documento nunca envia answer value
 - `unItemQueNoEsDelRfiSeRechazaSinLlamarAKira` — un item que no es del rfi se rechaza sin llamar a kira
-- `un422DeKiraSeDevuelvePorItemYNoSeMarcaNadaComoRespondido` — un422 de kira se devuelve por item y no se marca nada como respondido
-- `un409AsientaElCierreAntesDeAvisar` — un409 asienta el cierre antes de avisar
+- `un422DeKiraSeDevuelvePorItemYNoSeMarcaNadaComoRespondido` — un 422 de kira se devuelve por item y no se marca nada como respondido
+- `un409AsientaElCierreAntesDeAvisar` — un 409 asienta el cierre antes de avisar
 - `trasUnaRespuestaParcialElEstadoLoDecideKiraYNoElPortal` — tras una respuesta parcial el estado lo decide kira y no el portal
 - `elCuerpoDelPatchLlevaItemIdYAnswerValue` — el cuerpo del patch lleva item id y answer value
 - `tesoreriaNoPuedeResponderRfis` — tesoreria no puede responder rfis
@@ -4641,14 +5093,19 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `noSePuedeBorrarElUltimoArchivoYElErrorVaPorItem` — no se puede borrar el ultimo archivo y el error va por item
 - `elEnlaceDeDescargaSeDevuelveConSuCaducidad` — el enlace de descarga se devuelve con su caducidad
 
+### `application/platform/PlatformConsoleServiceTest.java` — 4
+
+- `unOperadorDeEmpresaNoAccedeALaConsola` — un operador de empresa no accede a la consola
+- `elListadoIncluyeTodasLasOrganizacionesOrdenadas` — el listado incluye todas las organizaciones ordenadas
+- `consultarUnaFichaQuedaAuditado` — consultar una ficha queda auditado
+- `laBandejaPoneLoCriticoPrimero` — la bandeja pone lo critico primero
+
 ### `application/reference/ReferenceCatalogServiceTest.java` — 2
 
 - `elCatalogoDePaisesSeLeeUnaVezYSeSirveDeCache` — el catalogo de paises se lee una vez y se sirve de cache
 - `unFalloNoSeCachea` — un fallo no se cachea
 
 ### `application/shared/IdempotencyKeyPersistenceTest.java` — 2
-
-> La clave de idempotencia tiene que estar en MySQL ANTES de llamar a Kira y seguir ahi si la llamada falla: si Kira llego a crear el recurso y la respuesta se perdio, el reintento debe viajar con la MISMA clave o se crea una segunda empresa o una segunda cuenta. Estas pruebas son de integracion a proposito: el caso de uso es @Transactional y relanza la excepcion, asi que el rollback borraba el guardado. Con mocks y sin transaccion real ese defecto no se ve.
 
 - `laClaveDelAltaSobreviveAlFalloDeKira` — la clave del alta sobrevive al fallo de kira
 - `laClaveDeAperturaDeCuentaSobreviveAlFalloDeKira` — la clave de apertura de cuenta sobrevive al fallo de kira
@@ -4661,20 +5118,63 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `reconoceLaDiligenciaReforzada` — reconoce la diligencia reforzada
 - `unEstadoDesconocidoNoRompeLaLectura` — un estado desconocido no rompe la lectura
 
-### `application/tenant/SubmitOnboardingServiceTest.java` — 8
+### `application/tenant/KybDocumentsTest.java` — 10
+
+- `elArchivoViajaComoDataUriEnBase64` — el archivo viaja como data uri en base 64
+- `elPaisEmisorViajaEnIso3Mayusculas` — el pais emisor viaja en iso 3 mayusculas
+- `rechazaUnArchivoCuyoContenidoNoEsElTipoDeclarado` — rechaza un archivo cuyo contenido no es el tipo declarado
+- `rechazaUnTipoDeDocumentoQueKiraNoConoce` — rechaza un tipo de documento que kira no conoce
+- `rechazaUnMimeQueNoViajaEnBase64` — rechaza un mime que no viaja en base 64
+- `rechazaUnArchivoVacio` — rechaza un archivo vacio
+- `rechazaElLoteQueReventariaElCuerpoDe10Mb` — rechaza el lote que reventaria el cuerpo de 10 mb
+- `rechazaMasDeDiezArchivos` — rechaza mas de diez archivos
+- `laFusionReemplazaElRegistroDelMismoTipoYConservaLosDemas` — la fusion reemplaza el registro del mismo tipo y conserva los demas
+- `loQueSePersisteNoLlevaLosArchivos` — lo que se persiste no lleva los archivos
+
+### `application/tenant/OnboardingDraftServiceTest.java` — 9
+
+- `sinBorradorDevuelveVacioYSinFecha` — sin borrador devuelve vacio y sin fecha
+- `guardaYRecuperaElBorradorSinLlamarAKira` — guarda y recupera el borrador sin llamar a kira
+- `laBitacoraNoGuardaDatosDeLaEmpresa` — la bitacora no guarda datos de la empresa
+- `unObjetoVacioBorraElBorrador` — un objeto vacio borra el borrador
+- `rechazaArchivosDentroDelBorrador` — rechaza archivos dentro del borrador
+- `rechazaUnBorradorDemasiadoGrande` — rechaza un borrador demasiado grande
+- `unRolSinPermisoDeCumplimientoNoGuarda` — un rol sin permiso de cumplimiento no guarda
+- `unaEmpresaRechazadaNoPuedeGuardarBorrador` — una empresa rechazada no puede guardar borrador
+- `unBorradorIlegibleEnBaseSeDegradaAVacio` — un borrador ilegible en base se degrada a vacio
+
+### `application/tenant/SubmitOnboardingServiceTest.java` — 20
 
 - `elAltaEnviaSoloEmpresasYAmarraElIdInterno` — el alta envia solo empresas y amarra el id interno
 - `laClaveDeIdempotenciaSePersisteAntesDeLlamarAKira` — la clave de idempotencia se persiste antes de llamar a kira
 - `siLaLlamadaFallaLaClaveQuedaGuardadaParaElReintento` — si la llamada falla la clave queda guardada para el reintento
 - `reenviarElAltaNoVuelveALlamarAKira` — reenviar el alta no vuelve a llamar a kira
 - `elPutReenviaElObjetoCompletoNoSoloLoNuevo` — el put reenvia el objeto completo no solo lo nuevo
+- `elPutNoLlevaLasClavesQueSoloExistenEnElAlta` — el put no lleva las claves que solo existen en el alta
+- `losNombresDelAltaSeTraducenALosDelPut` — los nombres del alta se traducen a los del put
+- `unaDireccionNuevaReemplazaALaGuardada` — una direccion nueva reemplaza a la guardada
 - `unArrayNuevoReemplazaEnteroAlGuardado` — un array nuevo reemplaza entero al guardado
 - `completarElPerfilExigeAltaPrevia` — completar el perfil exige alta previa
 - `unRolDeTesoreriaNoGestionaElOnboarding` — un rol de tesoreria no gestiona el onboarding
+- `elDocumentoViajaDentroDelPutDelExpediente` — el documento viaja dentro del put del expediente
+- `elBase64NoSeGuardaEnElPayloadDeOnboarding` — el base 64 no se guarda en el payload de onboarding
+- `elRegistroSobreviveAlSiguientePutDelPerfil` — el registro sobrevive al siguiente put del perfil
+- `subirDocumentosExigeAltaPrevia` — subir documentos exige alta previa
+- `unRolDeTesoreriaNoSubeDocumentosKyb` — un rol de tesoreria no sube documentos kyb
+- `aceptarLosTerminosVigentesLosMandaAKiraYQuedaAuditado` — aceptar los terminos vigentes los manda a kira y queda auditado
+- `unaVersionQueNoEsLaVigenteSeRechaza` — una version que no es la vigente se rechaza
+- `elPerfilQueMandaElPortalNoPuedeFijarLaAceptacion` — el perfil que manda el portal no puede fijar la aceptacion
+- `elEinSoloViajaParaEmpresasDeEstadosUnidos` — el ein solo viaja para empresas de estados unidos
 
-### `application/tenant/SyncUbosServiceTest.java` — 10
+### `application/tenant/SyncUbosServiceTest.java` — 22
 
 - `elArrayEnviadoLlevaLosBooleanosQueKiraExige` — el array enviado lleva los booleanos que kira exige
+- `laPersonaViajaConLosDatosQueKiraPideYSinPersonReferenceId` — la persona viaja con los datos que kira pide y sin person reference id
+- `editarCorrigeNombreApellidoYCargo` — editar corrige nombre apellido y cargo
+- `seBorraUnBeneficiarioQueKiraAunNoConoce` — se borra un beneficiario que kira aun no conoce
+- `noSeRegistraUnSegundoBeneficiarioConElMismoCorreo` — no se registra un segundo beneficiario con el mismo correo
+- `trasSincronizarElBeneficiarioYaNoSePuedeBorrar` — tras sincronizar el beneficiario ya no se puede borrar
+- `noSeBorraUnBeneficiarioQueKiraYaConoce` — no se borra un beneficiario que kira ya conoce
 - `seEnviaSiempreElArrayCompletoNoSoloElUltimoAlta` — se envia siempre el array completo no solo el ultimo alta
 - `sinBeneficiarioNoSeGastaLaLlamadaAKira` — sin beneficiario no se gasta la llamada a kira
 - `sinVerificacionEnCursoNoSePidenEnlaces` — sin verificacion en curso no se piden enlaces
@@ -4684,6 +5184,12 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `elWebhookDeLivenessAsientaElResultadoEnSuPersona` — el webhook de liveness asienta el resultado en su persona
 - `unWebhookSinPersonaNoTocaANadie` — un webhook sin persona no toca a nadie
 - `unRolDeTesoreriaNoGestionaBeneficiarios` — un rol de tesoreria no gestiona beneficiarios
+- `sinConsentimientoBiometricoNiSelfieNiEnlaces` — sin consentimiento biometrico ni selfie ni enlaces
+- `elConsentimientoDeLaPruebaDeVidaQuedaAuditado` — el consentimiento de la prueba de vida queda auditado
+- `elDocumentoDeUnaPersonaViajaAnidadoEnSuEntradaYSeEmparejaPorEmail` — el documento de una persona viaja anidado en su entrada y se empareja por email
+- `sinEmailNoSePuedenSubirSusDocumentos` — sin email no se pueden subir sus documentos
+- `noSePuedenSubirDocumentosDeUnBeneficiarioDeOtraEmpresa` — no se pueden subir documentos de un beneficiario de otra empresa
+- `elEmailViajaEnLaSincronizacionDelGrupo` — el email viaja en la sincronizacion del grupo
 
 ### `application/treasury/CreateQuoteServiceTest.java` — 13
 
@@ -4701,8 +5207,14 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `seGuardaLaCopiaDelPrecioMostrado` — se guarda la copia del precio mostrado
 - `unRolAprobadorNoCotiza` — un rol aprobador no cotiza
 
-### `application/treasury/ExecutePayoutServiceTest.java` — 24
+### `application/treasury/ExecutePayoutServiceTest.java` — 32
 
+- `recotizarAtaUnaCotizacionNuevaYAnulaLaPrimeraFirma` — recotizar ata una cotizacion nueva y anula la primera firma
+- `unPagoSinPrecioFijadoNoSeRecotiza` — un pago sin precio fijado no se recotiza
+- `desdeElUmbralLaPrimeraFirmaNoEnviaElPago` — desde el umbral la primera firma no envia el pago
+- `laSegundaFirmaTieneQueSerDeOtraPersonaYEntoncesSeEnvia` — la segunda firma tiene que ser de otra persona y entonces se envia
+- `elUmbralDeUnaEmpresaMandaSobreElGeneral` — el umbral de una empresa manda sobre el general
+- `quienRegistroElDestinatarioNoApruebaPagosHaciaEl` — quien registro el destinatario no aprueba pagos hacia el
 - `seEnviaElBrutoParaQueElDestinatarioRecibaLoPrometido` — se envia el bruto para que el destinatario reciba lo prometido
 - `conCotizacionViajaElQuoteIdYNoElMarkup` — con cotizacion viaja el quote id y no el markup
 - `sinCotizacionElMargenViajaComoCadenaDecimal` — sin cotizacion el margen viaja como cadena decimal
@@ -4718,6 +5230,8 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `unPagoYaEnviadoNoSeReenvia` — un pago ya enviado no se reenvia
 - `aKiraViajanSusIdsYNoLosDelPortal` — a kira viajan sus ids y no los del portal
 - `crearUnPagoConUnaCuentaDeOtraEmpresaSeRechazaAlPreparar` — crear un pago con una cuenta de otra empresa se rechaza al preparar
+- `conLaMismaClaveDelPortalNoSeCreaUnSegundoPago` — con la misma clave del portal no se crea un segundo pago
+- `unaClaveDelPortalQueNoEsUuidSeRechaza` — una clave del portal que no es uuid se rechaza
 - `crearUnPagoConUnDestinatarioInexistenteSeRechazaAlPreparar` — crear un pago con un destinatario inexistente se rechaza al preparar
 - `elUserDeKiraDelPagoEsElDeLaEmpresa` — el user de kira del pago es el de la empresa
 - `unaCotizacionDeOtroDestinatarioNoSeAtaAlPago` — una cotizacion de otro destinatario no se ata al pago
@@ -4728,7 +5242,7 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `unEstadoQueKiraNoConoceSeRechazaAntesDeLlamar` — un estado que kira no conoce se rechaza antes de llamar
 - `unPagoDetenidoPorUnRfiLoIndicaEnSuDetalle` — un pago detenido por un rfi lo indica en su detalle
 
-### `application/treasury/RegisterRecipientServiceTest.java` — 13
+### `application/treasury/RegisterRecipientServiceTest.java` — 14
 
 - `elTitularSeInfiereDeLosNombresPorqueNoExisteHolderName` — el titular se infiere de los nombres porque no existe holder name
 - `enWireLaDireccionDelBancoEsUnObjeto` — en wire la direccion del banco es un objeto
@@ -4737,6 +5251,7 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `unParTokenRedInvalidoSeCortaAntesDeLlamar` — un par token red invalido se corta antes de llamar
 - `seLeeRecipientIdNoId` — se lee recipient id no id
 - `unDoscientosDosEsExitoNoError` — un doscientos dos es exito no error
+- `unReintentoConLaMismaClaveNoGuardaUnSegundoDestinatario` — un reintento con la misma clave no guarda un segundo destinatario
 - `elEstadoYElCodigoPostalSalenDelEspejoLocal` — el estado y el codigo postal salen del espejo local
 - `laCuentaSeMuestraEnmascarada` — la cuenta se muestra enmascarada
 - `sinKybAprobadoNoHayDestinatarios` — sin kyb aprobado no hay destinatarios
@@ -4747,14 +5262,18 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 ### `application/webhook/KiraWebhookEnvelopeTest.java` — 3
 
 - `leeLaEnvolturaPlana` — lee la envoltura plana
-- `desanidaLaEnvolturaV2DePayoutStatusChanged` — desanida la envoltura v2 de payout status changed
+- `desanidaLaEnvolturaV2DePayoutStatusChanged` — desanida la envoltura v 2 de payout status changed
 - `noHayEventIdEnLaRaiz` — no hay event id en la raiz
 
-### `application/webhook/UserEventProjectionTest.java` — 13
-
-> La familia user.* trae dos datos que no existen en ningun otro sitio: el motivo del rechazo del KYB y el resultado real de la prueba de vida. Si no se proyectan aqui, se pierden: la entrega es unica y el GET no los expone.
+### `application/webhook/UserEventProjectionTest.java` — 19
 
 - `elMotivoDelRechazoSeCapturaPorqueElGetNoLoExpone` — el motivo del rechazo se captura porque el get no lo expone
+- `docs_verificationFailedGuardaLosReasons` — docs_verification failed guarda los reasons
+- `docs_statusChangedMueveElEstadoConNewStatus` — docs_status changed mueve el estado con new status
+- `unaEmpresaVerificadaGeneraUnAvisoYElEventoQuedaAtribuido` — una empresa verificada genera un aviso y el evento queda atribuido
+- `unEventoQueNoCambiaElEstadoNoAvisa` — un evento que no cambia el estado no avisa
+- `docs_livenessCompletedLeeResult` — docs_liveness completed lee result
+- `docs_livenessDeLaPropiaEmpresaNoTocaBeneficiarios` — docs_liveness de la propia empresa no toca beneficiarios
 - `unRechazoSinMotivoDejaConstanciaIgual` — un rechazo sin motivo deja constancia igual
 - `laAceptacionMarcaVerificadoYVerificacionDisparada` — la aceptacion marca verificado y verificacion disparada
 - `unEventoSinStatusNoDegradaAUnaEmpresaVerificada` — un evento sin status no degrada a una empresa verificada
@@ -4770,18 +5289,18 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 
 ### `domain/account/VirtualAccountActivationTest.java` — 2
 
-> La fecha de alta es la base del aviso de activacion demorada. Si al leer la cuenta de la base se tomara la hora actual, el aviso no saltaria nunca: la cuenta siempre parece nueva.
-
 - `alLeerLaCuentaSeConservaSuFechaDeAlta` — al leer la cuenta se conserva su fecha de alta
 - `unaCuentaSinActivarTrasCincoMinutosEstaDemorada` — una cuenta sin activar tras cinco minutos esta demorada
 
-### `domain/account/VirtualAccountReadinessTest.java` — 5
+### `domain/account/VirtualAccountReadinessTest.java` — 7
 
 - `approvedSinNumeroDeCuentaNoEstaListaParaFondos` — approved sin numero de cuenta no esta lista para fondos
 - `elCentinelaDeActNoCuentaComoCuentaReal` — el centinela de act no cuenta como cuenta real
 - `unNumeroDeCuentaRealSiLaHabilita` — un numero de cuenta real si la habilita
 - `elEventoActivatedEsSenalSuficiente` — el evento activated es senal suficiente
+- `activeEsLaSenalDe20260601` — active es la senal de 20260601
 - `unaCuentaRechazadaNuncaEstaLista` — una cuenta rechazada nunca esta lista
+- `unaCuentaCongeladaNoMueveFondosAunqueSeHayaActivado` — una cuenta congelada no mueve fondos aunque se haya activado
 
 ### `domain/compliance/RfiTest.java` — 8
 
@@ -4794,12 +5313,19 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `unRfiVencidoYAbiertoEstaAtrasado` — un rfi vencido y abierto esta atrasado
 - `alRehidratarSeConservaLaFechaDeCreacion` — al rehidratar se conserva la fecha de creacion
 
-### `domain/tenant/TenantOnboardingTest.java` — 9
+### `domain/shared/FileSignatureTest.java` — 3
+
+- `reconoceLosFormatosQueKiraAcepta` — reconoce los formatos que kira acepta
+- `elTipoDeclaradoTieneQueCoincidirConElContenido` — el tipo declarado tiene que coincidir con el contenido
+- `elDocumentoDeSoporteDelPagoTambienSeComprueba` — el documento de soporte del pago tambien se comprueba
+
+### `domain/tenant/TenantOnboardingTest.java` — 10
 
 - `laClaveDeIdempotenciaSeReservaUnaSolaVez` — la clave de idempotencia se reserva una sola vez
 - `elAltaNoDisparaLaVerificacion` — el alta no dispara la verificacion
 - `noSeReasignaLaEmpresaAOtroUsuarioDeKira` — no se reasigna la empresa a otro usuario de kira
-- `losCamposPendientesSonLosGeneralesMasLosDelProducto` — los campos pendientes son los generales mas los del producto
+- `losCamposPendientesSonLosDelProductoNoLaUnionGeneral` — los campos pendientes son los del producto no la union general
+- `siElProductoNoApareceSeUsaLaListaGeneral` — si el producto no aparece se usa la lista general
 - `verifiedNoBastaSiElProductoNoEsElegible` — verified no basta si el producto no es elegible
 - `conKybAprobadoYProductoElegibleSiEstaLista` — con kyb aprobado y producto elegible si esta lista
 - `laVerificacionDisparadaNoSeRevierteSiElGetNoLaReporta` — la verificacion disparada no se revierte si el get no la reporta
@@ -4818,10 +5344,11 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `elPaisDeNacimientoEsObligatorio` — el pais de nacimiento es obligatorio
 - `unResultadoFinalDeLivenessNoRetrocede` — un resultado final de liveness no retrocede
 
-### `domain/treasury/PayoutStatusTest.java` — 4
+### `domain/treasury/PayoutStatusTest.java` — 5
 
 - `comparaSinDistinguirMayusculas` — compara sin distinguir mayusculas
-- `returnedYCancelledResuelvenEnFailed` — returned y cancelled resuelven en failed
+- `returnedResuelveEnFailed` — returned resuelve en failed
+- `cancelledEsUnEstadoFinalPropio` — cancelled es un estado final propio
 - `unEstadoDesconocidoNoRompeYNoEsTerminal` — un estado desconocido no rompe y no es terminal
 - `kytPendingEInReviewSonNoTerminales` — kyt pending e in review son no terminales
 
@@ -4838,8 +5365,6 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `elMontoDebeSerPositivo` — el monto debe ser positivo
 
 ### `domain/treasury/QuotationRailTest.java` — 5
-
-> El riel del pago se deriva del account_type del destinatario. Si no coinciden, la API falla al EJECUTAR el pago, no al cotizar: por eso se valida antes.
 
 - `cadaTipoDeCuentaTieneSusRieles` — cada tipo de cuenta tiene sus rieles
 - `unRielDeOtroTipoDeCuentaSeRechaza` — un riel de otro tipo de cuenta se rechaza
@@ -4863,8 +5388,6 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 
 ### `domain/treasury/RecipientAccountTest.java` — 12
 
-> Un destinatario = un riel, y de ese riel sale el riel de todos sus pagos. Las combinaciones imposibles se cortan al construirlo, no al pagar.
-
 - `elRoutingNumberTieneNueveDigitos` — el routing number tiene nueve digitos
 - `elSwiftTieneOchoUOnceCaracteres` — el swift tiene ocho u once caracteres
 - `usdcNoExisteEnTron` — usdc no existe en tron
@@ -4873,21 +5396,19 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `elRielSaleDelTipoDeCuenta` — el riel sale del tipo de cuenta
 - `unaEmpresaNecesitaRazonSocialYUnaPersonaNombreCompleto` — una empresa necesita razon social y una persona nombre completo
 - `elTelefonoTieneTope` — el telefono tiene tope
-- `unDestinatarioBancarioNecesitaDireccionEnIso2` — un destinatario bancario necesita direccion en iso2
+- `unDestinatarioBancarioNecesitaDireccionEnIso2` — un destinatario bancario necesita direccion en iso 2
 - `unaWalletNoNecesitaDireccionPostal` — una wallet no necesita direccion postal
 - `archivarEnlazaConElReemplazo` — archivar enlaza con el reemplazo
 - `sinAltaEnKiraNoSePuedeUsar` — sin alta en kira no se puede usar
 
 ### `infrastructure/bootstrap/CertProfileStartupTest.java` — 2
 
-> Fuera de desarrollo el arranque debe caerse si falta un secreto, en lugar de quedar en pie firmando tokens con una clave de ejemplo o fallando en la primera llamada a Kira.
-
 - `certNoArrancaSinLosSecretosDeKira` — cert no arranca sin los secretos de kira
 - `certArrancaConTodosLosSecretosPresentes` — cert arranca con todos los secretos presentes
 
 ### `infrastructure/bootstrap/DevDataSeederTest.java` — 4
 
-- `creaLasTresOrganizacionesConUnOperadorPorRol` — crea las tres organizaciones con un operador por rol
+- `creaLasTresOrganizacionesConUnOperadorPorRolYUnOperadorDePlataforma` — crea las tres organizaciones con un operador por rol y un operador de plataforma
 - `laContrasenaQuedaCifradaNoEnClaro` — la contrasena queda cifrada no en claro
 - `makerYApproverSonOperadoresDistintosDelMismoTenant` — maker y approver son operadores distintos del mismo tenant
 - `volverARegarNoDuplicaNada` — volver a regar no duplica nada
@@ -4899,8 +5420,6 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `rechazaUnaClaveDeFirmaDemasiadoCorta` — rechaza una clave de firma demasiado corta
 
 ### `infrastructure/kira/KiraAmountsTest.java` — 9
-
-> La conversion de importes vive en un solo sitio porque la API expresa el MISMO markup de dos formas distintas segun el endpoint. Si algun dia dejan de coincidir, falla aqui.
 
 - `convierteUnidadesMenoresConSuPrecision` — convierte unidades menores con su precision
 - `laConversionEsExactaYNoPierdeCentavos` — la conversion es exacta y no pierde centavos
@@ -4914,41 +5433,49 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 
 ### `infrastructure/kira/KiraApiClientVersionTest.java` — 5
 
-> Los RFIs solo existen en 2026-06-01 y la cuenta integra con 2026-04-14. Si la cabecera por peticion no se sobrescribe, las rutas de RFI no se encuentran y la bandeja queda vacia sin ningun error visible.
-
 - `lasRutasDeRfiViajanConLaVersionQueLasContiene` — las rutas de rfi viajan con la version que las contiene
 - `laCotizacionViajaConLaVersionQueTraeElDesglose` — la cotizacion viaja con la version que trae el desglose
-- `elRestoDeRutasSigueConLaVersionConfigurada` — el resto de rutas sigue con la version configurada
-- `losDocumentosDeUnRfiViajanComoMultipartConLaParteFilesYLaVersionDeRfis` — los documentos de un rfi viajan como multipart con la parte files y la version de rfis
-- `elCatalogoDePaisesVivePorDebajoDeV1` — el catalogo de paises vive por debajo de v1
+- `elRestoDeRutasViajaConLaMismaVersion` — el resto de rutas viaja con la misma version
+- `losDocumentosDeUnRfiViajanComoMultipartConLaParteFilesYLaMismaVersion` — los documentos de un rfi viajan como multipart con la parte files y la misma version
+- `elCatalogoDePaisesVivePorDebajoDeV1` — el catalogo de paises vive por debajo de v 1
 
 ### `infrastructure/kira/KiraCredentialManagerTest.java` — 2
-
-> Sin credenciales, el BFF debe decir "integracion no configurada" (503) y no un error inesperado. Faltar client_id o password tambien cuenta: antes acababa en un NullPointerException.
 
 - `sinApiKeyLaIntegracionNoEstaConfigurada` — sin api key la integracion no esta configurada
 - `sinClientIdOPasswordTampocoYNoEsUnNullPointer` — sin client id o password tampoco y no es un null pointer
 
-### `infrastructure/kira/KiraWebhookVerifierTest.java` — 6
+### `infrastructure/kira/KiraPropertiesTest.java` — 3
+
+- `aceptaLaVersionYElBancoSoportados` — acepta la version y el banco soportados
+- `rechazaOtraVersion` — rechaza otra version
+- `rechazaUnBancoNoDocumentadoONoSoportado` — rechaza un banco no documentado o no soportado
+
+### `infrastructure/kira/KiraWebhookVerifierTest.java` — 7
 
 - `aceptaUnaFirmaValidaSobreLosBytesCrudos` — acepta una firma valida sobre los bytes crudos
 - `rechazaSiElCuerpoCambiaUnSoloByte` — rechaza si el cuerpo cambia un solo byte
 - `reserializarElJsonInvalidaLaFirma` — reserializar el json invalida la firma
+- `duranteLaRotacionAceptaTambienElSecretoAnterior` — durante la rotacion acepta tambien el secreto anterior
 - `rechazaConOtroSecreto` — rechaza con otro secreto
 - `rechazaSinCabeceraDeFirma` — rechaza sin cabecera de firma
 - `sinSecretoConfiguradoNoValidaNada` — sin secreto configurado no valida nada
 
-### `infrastructure/reconciliation/LivenessReconciliationWorkerTest.java` — 3
+### `infrastructure/observability/ObservabilityTest.java` — 6
 
-> El enlace de prueba de vida vive 7 dias y Kira no lo prorroga. Uno vencido que sigue en PENDING deja al portal esperando un resultado que ya no va a llegar.
+- `cadaRespuestaLlevaSuIdDePeticionYRespetaUnoValido` — cada respuesta lleva su id de peticion y respeta uno valido
+- `lasMetricasNoSonParaUnaEmpresa` — las metricas no son para una empresa
+- `laPlataformaPasaLaReglaDeSeguridadDeLasMetricas` — la plataforma pasa la regla de seguridad de las metricas
+- `lasRutasDeKiraSeEtiquetanSinIds` — las rutas de kira se etiquetan sin ids
+- `registraLatenciaYResultadoDeKiraYLosWebhooks` — registra latencia y resultado de kira y los webhooks
+- `laAuditoriaGuardaElIdDeLaPeticion` — la auditoria guarda el id de la peticion
+
+### `infrastructure/reconciliation/LivenessReconciliationWorkerTest.java` — 3
 
 - `unEnlaceVencidoQuedaMarcadoComoExpirado` — un enlace vencido queda marcado como expirado
 - `sinEnlacesVencidosNoSeGuardaNada` — sin enlaces vencidos no se guarda nada
 - `unResultadoFinalYaRecibidoNoSePisa` — un resultado final ya recibido no se pisa
 
 ### `infrastructure/reconciliation/PayoutReconciliationWorkerTest.java` — 5
-
-> Kira entrega cada webhook una sola vez: si se pierde, el pago se queda para siempre en el estado que tenia. Este worker vuelve a preguntar por el recurso, que es la autoridad final.
 
 - `unPagoEnVueloSeActualizaConElEstadoDelRecurso` — un pago en vuelo se actualiza con el estado del recurso
 - `unFalloEnUnPagoNoDetieneElLote` — un fallo en un pago no detiene el lote
@@ -4958,36 +5485,32 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 
 ### `infrastructure/reconciliation/QuotationReconciliationWorkerTest.java` — 3
 
-> Una cotizacion vencida que sigue apareciendo como ACTIVE es un precio que el portal ofrece y que ya no se puede redimir. El vencimiento es local: no hace falta preguntar a Kira.
-
 - `unaCotizacionActivaYVencidaQuedaMarcadaComoExpirada` — una cotizacion activa y vencida queda marcada como expirada
 - `sinCotizacionesVencidasNoSeGuardaNada` — sin cotizaciones vencidas no se guarda nada
 - `unFalloAlGuardarUnaNoDetieneALasDemas` — un fallo al guardar una no detiene a las demas
 
 ### `infrastructure/reconciliation/ReconciliationWorkersDisabledTest.java` — 1
 
-> El interruptor tiene que apagarlos de verdad: las pruebas corren con bff.reconciliation.enabled=false para que ningun worker toque la base ni llame a Kira.
-
 - `conElInterruptorApagadoNoSeRegistraNinguno` — con el interruptor apagado no se registra ninguno
 
 ### `infrastructure/reconciliation/ReconciliationWorkersEnabledTest.java` — 1
 
-> Los workers son la red de seguridad de los webhooks perdidos: si no se registran como beans, nada avisa y el hueco vuelve sin que nadie lo note.
-
-- `losCincoWorkersSeRegistranCuandoLaReconciliacionEstaActiva` — los cinco workers se registran cuando la reconciliacion esta activa
+- `losSieteWorkersSeRegistranCuandoLaReconciliacionEstaActiva` — los siete workers se registran cuando la reconciliacion esta activa
 
 ### `infrastructure/reconciliation/RfiReconciliationWorkerTest.java` — 4
-
-> Los eventos rfi.* exigen suscripcion explicita en Kira y se entregan una sola vez. Un RFI que no llega es un pago detenido que nadie ve hasta que vence, y el plazo no se prorroga.
 
 - `soloSeSincronizanLasEmpresasDadasDeAltaEnKira` — solo se sincronizan las empresas dadas de alta en kira
 - `unFalloEnUnaEmpresaNoDetieneALasDemas` — un fallo en una empresa no detiene a las demas
 - `sinCredencialesDeKiraSeCortaSinRecorrerElResto` — sin credenciales de kira se corta sin recorrer el resto
 - `sinEmpresasRegistradasNoSeLlamaAlServicio` — sin empresas registradas no se llama al servicio
 
-### `infrastructure/reconciliation/WebhookReprojectionWorkerTest.java` — 9
+### `infrastructure/reconciliation/TenantAndAccountReconciliationWorkerTest.java` — 3
 
-> El ingress responde 2xx en cuanto guarda el evento: si la proyeccion falla despues, Kira no reintenta y la fila con processed = false es el unico rastro del cambio de estado. Dos de esos eventos (el motivo del rechazo del KYB y el resultado de la prueba de vida) no estan en ningun GET, asi que perderlos es perderlos para siempre.
+- `soloSeConsultanLasEmpresasRegistradasQueAunNoPuedenOperar` — solo se consultan las empresas registradas que aun no pueden operar
+- `sinCredencialesElLoteDeEmpresasSeCorta` — sin credenciales el lote de empresas se corta
+- `seConsultanLasCuentasAbiertasSalvoLasDesactivadas` — se consultan las cuentas abiertas salvo las desactivadas
+
+### `infrastructure/reconciliation/WebhookReprojectionWorkerTest.java` — 9
 
 - `unEventoPendienteSeVuelveAProyectar` — un evento pendiente se vuelve a proyectar
 - `unEventoQueSigueFallandoConservaElMotivoYNoSeMarcaComoProcesado` — un evento que sigue fallando conserva el motivo y no se marca como procesado
@@ -4999,9 +5522,22 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `sinEventosPendientesNoSeLlamaAlCasoDeUso` — sin eventos pendientes no se llama al caso de uso
 - `elLoteRespetaElTamanoConfigurado` — el lote respeta el tamano configurado
 
-### `interfaces/rest/OpenApiDocsTest.java` — 6
+### `infrastructure/security/TotpTest.java` — 5
 
-> La documentacion es parte del entregable: si un endpoint no aparece aqui, el equipo de frontend no puede probarlo. Estas pruebas fallan si alguien saca un endpoint del contrato sin darse cuenta.
+- `reproduceLosVectoresDeLaRfc6238` — reproduce los vectores de la rfc 6238
+- `toleraUnPasoDeDesfaseYNoMas` — tolera un paso de desfase y no mas
+- `rechazaFormatosQueNoSonSeisDigitos` — rechaza formatos que no son seis digitos
+- `elSecretoNuevoEsBase32DeCientoSesentaBits` — el secreto nuevo es base 32 de ciento sesenta bits
+- `laUriLaEntiendenLasAppsAutenticadoras` — la uri la entienden las apps autenticadoras
+
+### `interfaces/rest/KybDocumentUploadTest.java` — 4
+
+- `laParteTypesSeResuelveSinReventarLaCapaWeb` — la parte types se resuelve sin reventar la capa web
+- `unTypePorCadaFileOSeRechazaAntesDeLlamarAKira` — un type por cada file o se rechaza antes de llamar a kira
+- `elMismoEngancheValeParaLosDocumentosDeUnBeneficiario` — el mismo enganche vale para los documentos de un beneficiario
+- `tesoreriaNoSubeDocumentosDeCumplimiento` — tesoreria no sube documentos de cumplimiento
+
+### `interfaces/rest/OpenApiDocsTest.java` — 6
 
 - `laInterfazDeSwaggerSeSirveSinAutenticacion` — la interfaz de swagger se sirve sin autenticacion
 - `losEndpointsDeNegocioEstanDocumentados` — los endpoints de negocio estan documentados
@@ -5010,18 +5546,26 @@ Grupo en Swagger: **6. Webhooks de Kira**.
 - `laVerificacionBiometricaPropiaYaNoExiste` — la verificacion biometrica propia ya no existe
 - `elHealthCheckRespondeSinAutenticacion` — el health check responde sin autenticacion
 
-### `interfaces/webhook/KiraWebhookControllerTest.java` — 4
+### `interfaces/rest/ProviderQueryAuthorizationTest.java` — 3
+
+- `soloLecturaNoConsultaAKira` — solo lectura no consulta a kira
+- `tesoreriaSiConsultaElEstadoDeSusOperaciones` — tesoreria si consulta el estado de sus operaciones
+- `elEnlaceDeUnDocumentoDeRfiEsDeCumplimiento` — el enlace de un documento de rfi es de cumplimiento
+
+### `interfaces/webhook/KiraWebhookControllerTest.java` — 6
 
 - `elWebhookNoExigeJwtPeroSiFirmaValida` — el webhook no exige jwt pero si firma valida
 - `rechazaUnaFirmaInvalidaSinTocarLaBase` — rechaza una firma invalida sin tocar la base
 - `rechazaSiFaltaLaCabeceraDeFirma` — rechaza si falta la cabecera de firma
 - `elMismoEventIdSoloSeAlmacenaUnaVez` — el mismo event id solo se almacena una vez
+- `elEventoYaEstaGuardadoCuandoSeResponde200` — el evento ya esta guardado cuando se responde 200
+- `unJsonIlegibleConFirmaValidaDa400` — un json ilegible con firma valida da 400
 
 ---
 
 ## Anexo C. DDL que espera Hibernate (MySQL)
 
-Generado el 11-sep-2026 desde los metadatos JPA con el dialecto `MySQLDialect` (procedimiento en §12.5). Es exactamente el esquema que valida `ddl-auto: validate` en cert y prod.
+Generado el 16-sep-2026 desde los metadatos JPA con el dialecto `MySQLDialect` (procedimiento en §12.5). Es exactamente el esquema que valida `ddl-auto: validate` en cert y prod.
 
 ```sql
 create table audit_logs (
@@ -5057,6 +5601,19 @@ create table deposits (
     primary key (id)
 ) engine=InnoDB;
 
+create table notifications (
+    created_at datetime(6) not null,
+    severity varchar(20) not null,
+    id varchar(36) not null,
+    tenant_id varchar(36) not null,
+    resource_type varchar(40),
+    kind varchar(60) not null,
+    resource_id varchar(100),
+    title varchar(160) not null,
+    message varchar(500),
+    primary key (id)
+) engine=InnoDB;
+
 create table payouts (
     amount decimal(18,4) not null,
     kira_fee decimal(18,4) not null,
@@ -5068,6 +5625,7 @@ create table payouts (
     currency varchar(10) not null,
     payment_method varchar(20),
     approver_user_id varchar(36),
+    first_approver_user_id varchar(36),
     id varchar(36) not null,
     maker_user_id varchar(36) not null,
     quotation_id varchar(36),
@@ -5119,6 +5677,7 @@ create table recipients (
     routing_number varchar(20),
     swift_code varchar(20),
     wallet_token varchar(20),
+    created_by_user_id varchar(36),
     id varchar(36) not null,
     replaced_by_recipient_id varchar(36),
     tenant_id varchar(36) not null,
@@ -5145,6 +5704,7 @@ create table rfis (
     created_at datetime(6) not null,
     due_date datetime(6),
     updated_at datetime(6) not null,
+    resolution_reason varchar(20),
     blocking_type varchar(30),
     id varchar(36) not null,
     tenant_id varchar(36) not null,
@@ -5167,6 +5727,7 @@ create table roles (
 create table tenants (
     verification_triggered bit not null,
     created_at datetime(6) not null,
+    onboarding_draft_updated_at datetime(6),
     updated_at datetime(6) not null,
     id varchar(36) not null,
     status varchar(50) not null,
@@ -5178,35 +5739,51 @@ create table tenants (
     onboarding_idempotency_key varchar(255),
     eligible_products json,
     missing_fields json,
+    onboarding_draft json,
     onboarding_payload json,
     primary key (id)
 ) engine=InnoDB;
 
 create table ubos (
+    address_country varchar(3),
+    birth_date date,
     country_of_birth varchar(3),
+    document_country varchar(3),
     has_control bit not null,
     has_ownership bit not null,
     is_signer bit not null,
+    nationality varchar(3),
     ownership_percentage decimal(5,2) not null,
     politically_exposed bit not null,
+    synced_to_kira bit not null,
     created_at datetime(6) not null,
     liveness_expires_at datetime(6),
     updated_at datetime(6) not null,
+    gender varchar(10),
+    address_zip_code varchar(20),
+    phone_number varchar(20),
     id varchar(36) not null,
     tenant_id varchar(36) not null,
     document_type varchar(50),
     liveness_status varchar(50) not null,
+    address_city varchar(100),
+    address_state varchar(100),
     document_number varchar(100),
     first_name varchar(100) not null,
     last_name varchar(100) not null,
+    occupation varchar(100),
     person_reference_id varchar(100),
     role_in_company varchar(100),
+    address_street varchar(255),
+    email varchar(255),
     liveness_link text,
     primary key (id)
 ) engine=InnoDB;
 
 create table users (
+    mfa_enabled bit not null,
     created_at datetime(6) not null,
+    notifications_seen_at datetime(6),
     updated_at datetime(6) not null,
     id varchar(36) not null,
     role_id varchar(36) not null,
@@ -5214,8 +5791,8 @@ create table users (
     status varchar(50) not null,
     first_name varchar(100) not null,
     last_name varchar(100) not null,
-    mfa_secret varchar(100),
     email varchar(255) not null,
+    mfa_secret varchar(255),
     password_hash varchar(255) not null,
     primary key (id)
 ) engine=InnoDB;
@@ -5247,6 +5824,7 @@ create table webhooks_log (
     created_at datetime(6) not null,
     processed_at datetime(6),
     id varchar(36) not null,
+    tenant_id varchar(36),
     normalized_status varchar(50),
     event_id varchar(100) not null,
     event_type varchar(100) not null,
@@ -5259,6 +5837,7 @@ create table webhooks_log (
 create index idx_audit_tenant on audit_logs (tenant_id, created_at);
 create index idx_deposits_tenant on deposits (tenant_id);
 alter table deposits add constraint uk_deposits_kira_id unique (kira_deposit_id);
+create index idx_notifications_tenant on notifications (tenant_id, created_at);
 create index idx_payouts_tenant on payouts (tenant_id, created_at);
 create index idx_payouts_idempotency on payouts (idempotency_key);
 alter table payouts add constraint uk_payouts_idempotency unique (idempotency_key);
