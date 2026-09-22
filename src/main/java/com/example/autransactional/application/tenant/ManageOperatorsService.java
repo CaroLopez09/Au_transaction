@@ -25,15 +25,15 @@ import java.util.UUID;
  * pueden quedar en manos del controlador:
  *
  * 1. La empresa sale SIEMPRE de la sesion del administrador, nunca del cuerpo de la peticion.
- * 2. Un ADMIN no puede fabricar otro ADMIN ni un PLATFORM_OPERATOR: escalar privilegios desde
- *    el portal convertiria el RBAC en decorativo. Esos dos siguen siendo alta controlada.
+ * 2. Un ADMIN puede repartir ADMIN o TREASURY_APPROVER dentro de su propia empresa, pero nunca
+ *    PLATFORM_OPERATOR: ese rol sigue siendo alta controlada fuera del portal.
  * 3. Nadie se da de baja a si mismo: dejaria a la empresa sin administrador.
  */
 @Service
 public class ManageOperatorsService {
 
     /** Roles que un ADMIN puede repartir dentro de su empresa. */
-    private static final Set<Role> ASSIGNABLE = Set.of(Role.TREASURY_APPROVER);
+    private static final Set<Role> ASSIGNABLE = Set.of(Role.ADMIN, Role.TREASURY_APPROVER);
 
     private final OperatorUserRepository users;
     private final PasswordEncoder passwordEncoder;

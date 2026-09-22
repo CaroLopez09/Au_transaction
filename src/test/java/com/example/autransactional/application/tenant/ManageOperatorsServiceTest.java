@@ -112,15 +112,20 @@ class ManageOperatorsServiceTest {
     }
 
     @Test
-    void unAdminNoPuedeFabricarOtroAdminNiUnOperadorDePlataforma() {
-        for (String rol : List.of("ADMIN", "PLATFORM_OPERATOR")) {
-            var command = new OperatorCommands.CreateOperator(
-                    rol.toLowerCase() + "@juriscop.test", "Ana", "Gomez", "contrasena-larga", rol);
+    void unAdminPuedeCrearOtroAdminPeroNoUnOperadorDePlataforma() {
+        var adminCommand = new OperatorCommands.CreateOperator(
+                "otro-admin@juriscop.test", "Ana", "Gomez", "contrasena-larga", "ADMIN");
+        when(users.create(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-            DomainException e = assertThrows(DomainException.class, () -> service.create(admin, command));
-            assertTrue(e.getMessage().contains("No puedes asignar"), e.getMessage());
-        }
-        verify(users, never()).create(any());
+        service.create(admin, adminCommand);
+
+        verify(users).create(argThat(nuevo -> nuevo.role() == Role.ADMIN));
+
+        var platformCommand = new OperatorCommands.CreateOperator(
+                "operador@juriscop.test", "Ana", "Gomez", "contrasena-larga", "PLATFORM_OPERATOR");
+
+        DomainException e = assertThrows(DomainException.class, () -> service.create(admin, platformCommand));
+        assertTrue(e.getMessage().contains("No puedes asignar"), e.getMessage());
     }
 
     @Test
