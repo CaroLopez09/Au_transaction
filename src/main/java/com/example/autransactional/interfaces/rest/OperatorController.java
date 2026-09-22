@@ -56,4 +56,22 @@ public class OperatorController {
                                 @PathVariable String id) {
         return operators.suspend(operator, id);
     }
+
+    @PostMapping("/{id}/reactivate")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Reactivar un operador",
+            description = "Revierte una desactivacion. Si la identidad seguia sin verificar, el proximo login vuelve a pedirla.")
+    public OperatorView reactivate(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                   @PathVariable String id) {
+        return operators.reactivate(operator, id);
+    }
+
+    @PostMapping("/{id}/relaunch-identity")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Relanzar la verificacion de identidad",
+            description = "Solo para identidades rechazadas: limpia el resultado para que la persona vuelva a intentarlo.")
+    public OperatorView relaunchIdentity(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                        @PathVariable String id) {
+        return operators.relaunchIdentity(operator, id);
+    }
 }

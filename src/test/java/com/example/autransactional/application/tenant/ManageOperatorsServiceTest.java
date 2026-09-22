@@ -2,6 +2,8 @@ package com.example.autransactional.application.tenant;
 
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.IdentityVerificationStatus;
+import com.example.autransactional.domain.tenant.OperatorIdentity;
 import com.example.autransactional.domain.tenant.OperatorUser;
 import com.example.autransactional.domain.tenant.OperatorUserRepository;
 import com.example.autransactional.domain.tenant.Role;
@@ -18,6 +20,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -45,6 +48,13 @@ class ManageOperatorsServiceTest {
     private OperatorUser operador(String id, TenantId tenant, Role role, UserStatus status) {
         return new OperatorUser(id, tenant, id + "@test", "$2a$hash", "Ana", "Gomez",
                 role, status, null, false);
+    }
+
+    private OperatorUser operadorConIdentidad(String id, TenantId tenant, Role role, UserStatus status,
+                                              IdentityVerificationStatus identityStatus) {
+        return new OperatorUser(id, tenant, id + "@test", "$2a$hash", "Ana", "Gomez",
+                role, status, null, false,
+                new OperatorIdentity(identityStatus, null, null, null, null, null, null, null, null));
     }
 
     @Test
@@ -197,5 +207,68 @@ class ManageOperatorsServiceTest {
         assertThrows(DomainException.class, () -> service.list(plataforma));
         assertThrows(DomainException.class, () -> service.suspend(plataforma, "u-1"));
         verifyNoInteractions(users);
+    }
+
+    @Test
+    void reactivaAUnOperadorDesactivado() {
+        when(users.findById("u-1")).thenReturn(
+                Optional.of(operador("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.SUSPENDED)),
+                Optional.of(operador("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.ACTIVE)));
+
+        OperatorView vista = service.reactivate(admin, "u-1");
+
+        verify(users).updateStatus("u-1", UserStatus.ACTIVE);
+        assertEquals("ACTIVE", vista.status());
+        assertTrue(vista.active());
+        verify(audit).record(eq(admin), eq("operator.reactivated"), eq("operator_user"), eq("u-1"),
+                any(), eq("OK"), any());
+    }
+
+    @Test
+    void noReactivaAUnOperadorQueYaEstaActivo() {
+        when(users.findById("u-1")).thenReturn(Optional.of(
+                operador("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.ACTIVE)));
+
+        assertThrows(DomainException.class, () -> service.reactivate(admin, "u-1"));
+        verify(users, never()).updateStatus(any(), any());
+    }
+
+    @Test
+    void noReactivaAUnOperadorDeOtraEmpresa() {
+        when(users.findById("u-9")).thenReturn(Optional.of(
+                operador("u-9", TenantId.of("bankvision"), Role.ADMIN, UserStatus.SUSPENDED)));
+
+        DomainException e = assertThrows(DomainException.class, () -> service.reactivate(admin, "u-9"));
+
+        assertEquals("El operador no existe.", e.getMessage());
+        verify(users, never()).updateStatus(any(), any());
+    }
+
+    @Test
+    void relanzaLaVerificacionDeUnaIdentidadRechazada() {
+        when(users.findById("u-1")).thenReturn(
+                Optional.of(operadorConIdentidad("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.PENDING_IDENTITY,
+                        IdentityVerificationStatus.REJECTED)),
+                Optional.of(operadorConIdentidad("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.PENDING_IDENTITY,
+                        IdentityVerificationStatus.PENDING_DOCUMENTS)));
+
+        OperatorView vista = service.relaunchIdentity(admin, "u-1");
+
+        verify(users).updateIdentity(eq("u-1"),
+                argThat(identity -> identity.status() == IdentityVerificationStatus.PENDING_DOCUMENTS),
+                eq(UserStatus.PENDING_IDENTITY));
+        assertEquals("PENDING_DOCUMENTS", vista.identityStatus());
+        verify(audit).record(eq(admin), eq("operator.identity_relaunched"), eq("operator_user"), eq("u-1"),
+                any(), eq("OK"), any());
+    }
+
+    @Test
+    void noRelanzaUnaIdentidadQueNoEstaRechazada() {
+        when(users.findById("u-1")).thenReturn(Optional.of(
+                operadorConIdentidad("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.ACTIVE,
+                        IdentityVerificationStatus.VERIFIED)));
+
+        assertThrows(DomainException.class, () -> service.relaunchIdentity(admin, "u-1"));
+        verify(users, never()).updateIdentity(any(), any(), any());
     }
 }

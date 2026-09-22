@@ -103,6 +103,28 @@ class OperatorControllerTest {
     }
 
     @Test
+    @WithMockUser(roles = "ADMIN")
+    void elAdministradorReactivaYRelanzaLaIdentidad() throws Exception {
+        when(operators.reactivate(any(), eq("u-1"))).thenReturn(vista());
+        when(operators.relaunchIdentity(any(), eq("u-1"))).thenReturn(vista());
+
+        mockMvc.perform(post("/api/operators/u-1/reactivate")).andExpect(status().isOk());
+        mockMvc.perform(post("/api/operators/u-1/relaunch-identity")).andExpect(status().isOk());
+
+        verify(operators).reactivate(any(), eq("u-1"));
+        verify(operators).relaunchIdentity(any(), eq("u-1"));
+    }
+
+    @Test
+    @WithMockUser(roles = "TREASURY_APPROVER")
+    void elAprobadorNoReactivaNiRelanzaLaIdentidad() throws Exception {
+        mockMvc.perform(post("/api/operators/u-1/reactivate")).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/operators/u-1/relaunch-identity")).andExpect(status().isForbidden());
+
+        verifyNoInteractions(operators);
+    }
+
+    @Test
     @WithMockUser(roles = "TREASURY_APPROVER")
     void elAprobadorNoAdministraOperadores() throws Exception {
         mockMvc.perform(get("/api/operators")).andExpect(status().isForbidden());

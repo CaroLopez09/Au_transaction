@@ -2,6 +2,8 @@ package com.example.autransactional.application.tenant;
 
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.IdentityVerificationStatus;
+import com.example.autransactional.domain.tenant.OperatorIdentity;
 import com.example.autransactional.domain.tenant.OperatorUser;
 import com.example.autransactional.domain.tenant.OperatorUserRepository;
 import com.example.autransactional.domain.tenant.Role;
@@ -114,6 +116,59 @@ public class ManageOperatorsService {
         return OperatorView.from(new OperatorUser(objetivo.id(), objetivo.tenantId(), objetivo.email(),
                 objetivo.passwordHash(), objetivo.firstName(), objetivo.lastName(), objetivo.role(),
                 UserStatus.SUSPENDED, objetivo.mfaSecret(), objetivo.mfaEnabled()));
+    }
+
+    /**
+     * Revierte una suspension. La identidad no cambia: si seguia sin verificar (p. ej. rechazada),
+     * el proximo intento de login vuelve a pedir el reto biometrico, como con cualquier cuenta
+     * pendiente de identidad.
+     */
+    @Transactional
+    public OperatorView reactivate(AuthenticatedOperator operator, String userId) {
+        assertTenantOperator(operator);
+
+        OperatorUser objetivo = users.findById(userId)
+                .orElseThrow(() -> new DomainException("El operador no existe."));
+        if (!objetivo.tenantId().equals(operator.tenantId())) {
+            throw new DomainException("El operador no existe.");
+        }
+        if (objetivo.status() != UserStatus.SUSPENDED) {
+            throw new DomainException("Solo se puede reactivar una cuenta desactivada.");
+        }
+
+        users.updateStatus(objetivo.id(), UserStatus.ACTIVE);
+        audit.record(operator, "operator.reactivated", "operator_user", objetivo.id(), null, "OK",
+                "rol=" + objetivo.role().name());
+
+        return OperatorView.from(users.findById(objetivo.id())
+                .orElseThrow(() -> new DomainException("El operador no existe.")));
+    }
+
+    /**
+     * Limpia una identidad rechazada para que la persona pueda volver a subir documentos y rostro.
+     * No toca el estado operativo de la cuenta: si estaba desactivada, sigue estandolo hasta que
+     * un ADMIN la reactive por separado.
+     */
+    @Transactional
+    public OperatorView relaunchIdentity(AuthenticatedOperator operator, String userId) {
+        assertTenantOperator(operator);
+
+        OperatorUser objetivo = users.findById(userId)
+                .orElseThrow(() -> new DomainException("El operador no existe."));
+        if (!objetivo.tenantId().equals(operator.tenantId())) {
+            throw new DomainException("El operador no existe.");
+        }
+        if (objetivo.identity().status() != IdentityVerificationStatus.REJECTED) {
+            throw new DomainException("Solo se puede relanzar la verificacion de una identidad no aprobada.");
+        }
+
+        users.updateIdentity(objetivo.id(), OperatorIdentity.pendingDocuments(),
+                objetivo.status());
+        audit.record(operator, "operator.identity_relaunched", "operator_user", objetivo.id(), null, "OK",
+                "rol=" + objetivo.role().name());
+
+        return OperatorView.from(users.findById(objetivo.id())
+                .orElseThrow(() -> new DomainException("El operador no existe.")));
     }
 
     private Role assignableRole(String raw) {
