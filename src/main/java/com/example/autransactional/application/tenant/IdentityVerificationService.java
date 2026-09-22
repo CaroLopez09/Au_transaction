@@ -32,6 +32,13 @@ public class IdentityVerificationService {
 
     private static final long MAX_IMAGE_BYTES = 7L * 1024 * 1024;
 
+    /**
+     * Tope de intentos rechazados consecutivos (rostro/documento no coinciden) antes de exigir
+     * que un ADMIN relance la verificacion (ManageOperatorsService.relaunchIdentity). Un IN_REVIEW
+     * no consume intentos: solo un rechazo firme del proveedor cuenta.
+     */
+    static final int MAX_REJECTED_ATTEMPTS = 3;
+
     private final OperatorUserRepository users;
     private final IdentityVerificationAttemptJpaRepository attempts;
     private final JwtService jwt;
@@ -56,6 +63,11 @@ public class IdentityVerificationService {
     public Challenge begin(OperatorUser user) {
         if (user.identity().status().isVerified()) {
             throw new DomainException("La identidad de la cuenta ya esta verificada.");
+        }
+        if (user.identity().status() == IdentityVerificationStatus.REJECTED
+                && user.identity().rejectedAttempts() >= MAX_REJECTED_ATTEMPTS) {
+            throw new DomainException(
+                    "Tu identidad fue rechazada varias veces. Pide a un administrador de tu empresa que reinicie la verificacion.");
         }
         if (user.status() == UserStatus.SUSPENDED || user.status() == UserStatus.DISABLED) {
             user.assertCanLogin();
@@ -118,14 +130,22 @@ public class IdentityVerificationService {
         attempts.save(attempt);
 
         Instant now = Instant.now();
+        int rejectedAttempts = switch (status) {
+            case REJECTED -> user.identity().rejectedAttempts() + 1;
+            case VERIFIED -> 0;
+            default -> user.identity().rejectedAttempts();
+        };
         OperatorIdentity identity = new OperatorIdentity(status, null, blankToNull(documentType),
                 lastFour(text(response.path("customerDocumentData"), "documentNumber", "number")),
                 blankToNull(countryCode), now, now, status.isVerified() ? now : null,
-                status == IdentityVerificationStatus.REJECTED ? "El proveedor no aprobo la identidad." : null);
+                status == IdentityVerificationStatus.REJECTED ? "El proveedor no aprobo la identidad." : null,
+                rejectedAttempts);
         users.updateIdentity(user.id(), identity, status.isVerified() ? UserStatus.ACTIVE : UserStatus.PENDING_IDENTITY);
         audit.record(actor(user), "operator.identity_verified", "operator_user", user.id(), null,
                 status.name(), "verification_id=" + (verificationId == null ? "unavailable" : verificationId));
-        return new Result(status.name(), verificationId);
+        Integer remainingAttempts = status == IdentityVerificationStatus.REJECTED
+                ? Math.max(0, MAX_REJECTED_ATTEMPTS - rejectedAttempts) : null;
+        return new Result(status.name(), verificationId, remainingAttempts);
     }
 
     private JsonNode callProvider(MultipartFile front, MultipartFile back, MultipartFile selfie, String documentType,
@@ -222,5 +242,5 @@ public class IdentityVerificationService {
     }
 
     public record Challenge(String token, String userId, long expiresInSeconds) { }
-    public record Result(String status, String verificationId) { }
+    public record Result(String status, String verificationId, Integer remainingAttempts) { }
 }

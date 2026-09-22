@@ -96,6 +96,10 @@ public class OperatorUserEntity {
         @Column(name = "identity_rejection_reason", length = 500)
         private String identityRejectionReason;
 
+        /** Intentos consecutivos rechazados por el proveedor (rostro/documento no coinciden). */
+        @Column(name = "identity_rejected_attempts", nullable = false)
+        private int identityRejectedAttempts = 0;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 

@@ -54,7 +54,7 @@ class ManageOperatorsServiceTest {
                                               IdentityVerificationStatus identityStatus) {
         return new OperatorUser(id, tenant, id + "@test", "$2a$hash", "Ana", "Gomez",
                 role, status, null, false,
-                new OperatorIdentity(identityStatus, null, null, null, null, null, null, null, null));
+                new OperatorIdentity(identityStatus, null, null, null, null, null, null, null, null, 0));
     }
 
     @Test

@@ -75,6 +75,7 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
         entity.setIdentityRequestedAt(user.identity().verificationRequestedAt());
         entity.setIdentityVerifiedAt(user.identity().verifiedAt());
         entity.setIdentityRejectionReason(user.identity().rejectionReason());
+        entity.setIdentityRejectedAttempts(user.identity().rejectedAttempts());
         return toDomain(jpa.save(entity));
     }
 
@@ -103,6 +104,7 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
         entity.setIdentityRequestedAt(identity.verificationRequestedAt());
         entity.setIdentityVerifiedAt(identity.verifiedAt());
         entity.setIdentityRejectionReason(identity.rejectionReason());
+        entity.setIdentityRejectedAttempts(identity.rejectedAttempts());
         entity.setUpdatedAt(java.time.Instant.now());
         jpa.save(entity);
     }
@@ -127,6 +129,6 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
             new OperatorIdentity(e.getIdentityStatus(), e.getKiraPersonReferenceId(),
                 e.getIdentityDocumentType(), e.getIdentityDocumentLastFour(),
                 e.getIdentityIssuingCountry(), e.getBiometricConsentAt(), e.getIdentityRequestedAt(),
-                e.getIdentityVerifiedAt(), e.getIdentityRejectionReason()));
+                e.getIdentityVerifiedAt(), e.getIdentityRejectionReason(), e.getIdentityRejectedAttempts()));
     }
 }

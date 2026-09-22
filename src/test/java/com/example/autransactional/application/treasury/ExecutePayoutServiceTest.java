@@ -138,7 +138,7 @@ class ExecutePayoutServiceTest {
         return new OperatorUser(id, TENANT, id + "@juriscop.test", "hash", "Operador", "Prueba", role,
                 UserStatus.ACTIVE, null, false,
                 new OperatorIdentity(IdentityVerificationStatus.VERIFIED, null, null, null, null,
-                        null, null, Instant.now(), null));
+                        null, null, Instant.now(), null, 0));
     }
 
     // --- D9: recotizar un pago pendiente cuya cotizacion vencio ---
@@ -207,7 +207,7 @@ class ExecutePayoutServiceTest {
         return new OperatorUser(id, TENANT, id + "@juriscop.test", "hash", nombre, apellido,
             Role.ADMIN, UserStatus.ACTIVE, null, false,
             new OperatorIdentity(IdentityVerificationStatus.VERIFIED, null, null, null, null,
-                null, null, Instant.now(), null));
+                null, null, Instant.now(), null, 0));
     }
 
     @Test

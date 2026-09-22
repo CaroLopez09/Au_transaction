@@ -26,6 +26,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -117,5 +118,68 @@ class IdentityVerificationServiceTest {
         assertThrows(DomainException.class, () -> service.submit("challenge-token", "op-1",
                 image("front"), image("back"), image("selfie"), "CC", "CO", false, null));
         server.verify();
+    }
+
+    @Test
+    void unRechazoIncrementaElContadorYDevuelveLosIntentosRestantes() {
+        server.expect(requestTo("https://biometria.test/api/v1/identity/validate"))
+                .andRespond(withSuccess("""
+                        { "verificationId": "ver-3", "status": "REJECTED" }
+                        """, org.springframework.http.MediaType.APPLICATION_JSON));
+
+        var result = service.submit("challenge-token", "op-1", image("front"), image("back"), image("selfie"),
+                "CC", "CO", true, null);
+
+        assertEquals("REJECTED", result.status());
+        assertEquals(2, result.remainingAttempts());
+        verify(users).updateIdentity(eq("op-1"),
+                org.mockito.ArgumentMatchers.argThat(identity -> identity.rejectedAttempts() == 1),
+                eq(UserStatus.PENDING_IDENTITY));
+    }
+
+    @Test
+    void unaVerificacionAprobadaReiniciaElContadorDeRechazos() {
+        OperatorUser conDosRechazosPrevios = new OperatorUser("op-1", juriscop, "ana@juriscop.test", "$2a$hash",
+                "Ana", "Gomez", Role.ADMIN, UserStatus.PENDING_IDENTITY, null, false,
+                new OperatorIdentity(IdentityVerificationStatus.REJECTED, null, null, null, null,
+                        null, null, null, "rechazo previo", 2));
+        when(users.findById("op-1")).thenReturn(Optional.of(conDosRechazosPrevios));
+        server.expect(requestTo("https://biometria.test/api/v1/identity/validate"))
+                .andRespond(withSuccess("""
+                        { "verificationId": "ver-4", "status": "APPROVED" }
+                        """, org.springframework.http.MediaType.APPLICATION_JSON));
+
+        var result = service.submit("challenge-token", "op-1", image("front"), image("back"), image("selfie"),
+                "CC", "CO", true, null);
+
+        assertEquals("VERIFIED", result.status());
+        verify(users).updateIdentity(eq("op-1"),
+                org.mockito.ArgumentMatchers.argThat(identity -> identity.rejectedAttempts() == 0),
+                eq(UserStatus.ACTIVE));
+    }
+
+    @Test
+    void begin_bloqueaNuevosRetosTrasAgotarLosTresIntentos() {
+        OperatorUser sinMasIntentos = new OperatorUser("op-1", juriscop, "ana@juriscop.test", "$2a$hash",
+                "Ana", "Gomez", Role.ADMIN, UserStatus.PENDING_IDENTITY, null, false,
+                new OperatorIdentity(IdentityVerificationStatus.REJECTED, null, null, null, null,
+                        null, null, null, "rechazo previo", 3));
+
+        DomainException e = assertThrows(DomainException.class, () -> service.begin(sinMasIntentos));
+
+        assertTrue(e.getMessage().contains("administrador"));
+    }
+
+    @Test
+    void begin_permiteUnCuartoRetoSiAunNoLlegaAlTope() {
+        OperatorUser conDosRechazos = new OperatorUser("op-1", juriscop, "ana@juriscop.test", "$2a$hash",
+                "Ana", "Gomez", Role.ADMIN, UserStatus.PENDING_IDENTITY, null, false,
+                new OperatorIdentity(IdentityVerificationStatus.REJECTED, null, null, null, null,
+                        null, null, null, "rechazo previo", 2));
+
+        var challenge = service.begin(conDosRechazos);
+
+        assertEquals("op-1", challenge.userId());
+        verify(attempts).save(any());
     }
 }
