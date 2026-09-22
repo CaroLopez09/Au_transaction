@@ -253,6 +253,21 @@ Local al BFF: **nunca se envía a Kira**. `PUT` reemplaza el borrador entero y `
 respuesta trae `draft` y `updatedAt`. No admite archivos: un data URI se rechaza con `422` (los
 documentos van por `POST /api/onboarding/documents` y solo con el expediente creado).
 
+`GET` **completa el borrador con el expediente ya enviado** (`tenants.onboarding_payload`,
+`OnboardingDraftSeed`): un campo que el borrador no trae, o trae en blanco, se devuelve con el
+valor que se le mandó a Kira, traducido de vuelta a los nombres del asistente
+(`doing_business_as` → `business_trade_name`, `representative_birth_date` →
+`representative_date_of_birth`, `address_*` → `registered_address {}`, `business_industry` de
+arreglo a slug, `pep_status` de booleano a `"true"`/`"false"`). Sin esto, quien rellenaba el
+formulario y lo enviaba volvía a encontrarlo en blanco en la sesión siguiente. Lo guardado en el
+borrador manda siempre; `updatedAt` sigue siendo el del borrador y es `null` si nunca se guardó.
+
+Dos cosas no se recuperan: `street_line_2` (el PUT une las dos líneas en `address_street`, y al
+volver todo cae en `street_line_1`) y la sección `documents`, porque el espejo local guarda de
+`identifying_information` el tipo y el número, no los `file_name` ni los `uploaded_at`. Kira sí
+los devuelve en `GET /v1/users/{id}`: recuperarlos exige pasar por
+`POST /api/onboarding/refresh`, no por este endpoint.
+
 #### `GET` / `POST /api/onboarding/terms` — términos aceptados
 
 ```json

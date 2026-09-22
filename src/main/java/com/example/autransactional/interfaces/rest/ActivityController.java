@@ -53,6 +53,22 @@ public class ActivityController {
         return audit.events(operator, limit);
     }
 
+    /** Solo los eventos con al menos un fallo de proyeccion: el panel de incidencias de integracion. */
+    @GetMapping("/events/incidents")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    public List<AuditQueryService.EventView> incidents(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                                       @RequestParam(defaultValue = "100") int limit) {
+        return audit.incidents(operator, limit);
+    }
+
+    /** Reintenta ahora, sin esperar al worker programado. Vuelve a fallar igual que un reintento automatico. */
+    @PostMapping("/events/{eventId}/retry")
+    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    public AuditQueryService.EventView retry(@AuthenticationPrincipal AuthenticatedOperator operator,
+                                             @PathVariable String eventId) {
+        return audit.retry(operator, eventId);
+    }
+
     @GetMapping("/audit")
     @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
     public List<AuditQueryService.AuditEntryView> auditTrail(

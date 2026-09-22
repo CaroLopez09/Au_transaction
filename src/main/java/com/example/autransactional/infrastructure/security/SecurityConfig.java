@@ -29,6 +29,8 @@ public class SecurityConfig {
                         // Validan el reto del login (o la sesion) dentro del servicio.
                         .requestMatchers("/api/auth/mfa/verify", "/api/auth/mfa/setup", "/api/auth/mfa/enable")
                         .permitAll()
+                        // Se autentica dentro de IdentityVerificationService con un JWT de proposito restringido.
+                        .requestMatchers("/api/operators/*/verify-identity").permitAll()
                         .requestMatchers("/api/webhooks/**").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         // Metricas de la integracion: sin datos de empresas, pero solo para la plataforma.

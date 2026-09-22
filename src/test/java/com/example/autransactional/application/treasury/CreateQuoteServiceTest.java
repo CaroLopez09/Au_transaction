@@ -9,6 +9,7 @@ import com.example.autransactional.domain.shared.TenantId;
 import com.example.autransactional.domain.tenant.Role;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
+import com.example.autransactional.domain.tenant.TenantSettings;
 import com.example.autransactional.domain.tenant.TenantStatus;
 import com.example.autransactional.domain.treasury.Quotation;
 import com.example.autransactional.domain.treasury.QuotationRepository;
@@ -18,6 +19,7 @@ import com.example.autransactional.domain.treasury.Recipient;
 import com.example.autransactional.domain.treasury.RecipientAccount;
 import com.example.autransactional.domain.treasury.RecipientHolder;
 import com.example.autransactional.domain.treasury.RecipientRepository;
+import com.example.autransactional.domain.treasury.WalletToken;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
 import com.example.autransactional.infrastructure.kira.KiraApiClient;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
@@ -29,6 +31,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.Optional;
 
@@ -66,8 +69,7 @@ class CreateQuoteServiceTest {
               "fees": [ { "code": "wire_domestic_outbound", "kind": "fixed",
                           "charged_by": "kira", "amount": 1500 } ],
               "totals": { "kira_revenue_total": 1500, "client_markup_total": 1500,
-                          "fee_total": 3000, "currency": "USD", "precision": 2 },
-              "balance_sufficient": true
+                          "fee_total": 3000, "currency": "USD", "precision": 2 }
             }
             """;
 
@@ -80,6 +82,9 @@ class CreateQuoteServiceTest {
         cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT, "jp_morgan", null);
         cuenta.linkKiraAccount("kva-1");
         cuenta.describeBank("Bank", "1234567890", "021000021");
+        // Saldo local suficiente por defecto: el calculo de balanceSufficient ahora compara
+        // contra este valor, no contra un campo inexistente en la respuesta de Kira.
+        cuenta.refreshBalance(new BigDecimal("5000.00"), Instant.now());
 
         destinatario = new Recipient("rec-1", TENANT,
                 RecipientHolder.company("Acme Corp", null, null),
@@ -202,8 +207,8 @@ class CreateQuoteServiceTest {
 
     @Test
     void elSaldoInsuficienteQuedaRegistradoEnLaCotizacion() {
-        when(kira.createQuotation(any())).thenReturn(json(
-                RESPUESTA_KIRA.replace("\"balance_sufficient\": true", "\"balance_sufficient\": false")));
+        // El saldo local no alcanza para cubrir los 1.030 que Kira va a debitar (1.000 + comisiones).
+        cuenta.refreshBalance(new BigDecimal("10.00"), Instant.now());
 
         var view = service.create(maker, peticion(null));
 
@@ -238,5 +243,14 @@ class CreateQuoteServiceTest {
                 Role.TREASURY_APPROVER);
 
         assertThrows(DomainException.class, () -> service.create(approver, peticion(null)));
+    }
+
+    @Test
+    void unTenantSinElRielHabilitadoNoPuedeCotizar() {
+        Tenant empresa = tenants.findById(TENANT).orElseThrow();
+        empresa.applySettings(new TenantSettings(EnumSet.of(Rail.ACH), EnumSet.allOf(WalletToken.class)));
+
+        DomainException ex = assertThrows(DomainException.class, () -> service.create(maker, peticion(null)));
+        assertTrue(ex.getMessage().contains("WIRE"));
     }
 }

@@ -14,5 +14,7 @@ public interface TenantRepository {
 
     Optional<Tenant> findByKiraUserId(String kiraUserId);
 
+    boolean existsByNameIgnoreCase(String name);
+
     List<Tenant> findAll();
 }

@@ -5,6 +5,7 @@ import com.example.autransactional.domain.tenant.EligibleProduct;
 import com.example.autransactional.domain.tenant.MissingFields;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
+import com.example.autransactional.domain.tenant.TenantSettings;
 import org.springframework.stereotype.Repository;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
@@ -19,6 +20,8 @@ public class JpaTenantRepository implements TenantRepository {
     private static final TypeReference<List<EligibleProduct>> PRODUCTS = new TypeReference<>() {
     };
     private static final TypeReference<Map<String, List<String>>> FIELDS = new TypeReference<>() {
+    };
+    private static final TypeReference<TenantSettings> SETTINGS = new TypeReference<>() {
     };
 
     private final TenantJpaRepository jpa;
@@ -42,6 +45,7 @@ public class JpaTenantRepository implements TenantRepository {
                 ? null : tenant.getEligibleProducts()));
         e.setMissingFields(write(tenant.getMissingFields().isEmpty()
                 ? null : tenant.getMissingFields().byProduct()));
+        e.setSettings(write(tenant.getSettings()));
         e.setVerificationTriggered(tenant.isVerificationTriggered());
         e.setOnboardingPayload(tenant.getOnboardingPayload());
         e.setOnboardingDraft(tenant.getOnboardingDraft());
@@ -65,6 +69,11 @@ public class JpaTenantRepository implements TenantRepository {
     }
 
     @Override
+    public boolean existsByNameIgnoreCase(String name) {
+        return jpa.findByNameIgnoreCase(name).isPresent();
+    }
+
+    @Override
     public List<Tenant> findAll() {
         return jpa.findAll().stream().map(this::toDomain).toList();
     }
@@ -77,6 +86,7 @@ public class JpaTenantRepository implements TenantRepository {
                 e.isVerificationTriggered(), e.getOnboardingPayload(), e.getOnboardingIdempotencyKey(),
                 e.getRejectionReason(), e.getCreatedAt(), e.getUpdatedAt());
         tenant.restoreOnboardingDraft(e.getOnboardingDraft(), e.getOnboardingDraftUpdatedAt());
+        tenant.restoreSettings(read(e.getSettings(), SETTINGS, TenantSettings.defaults()));
         return tenant;
     }
 

@@ -35,7 +35,7 @@ public class WebhookReprojectionWorker {
      * proyectarse se reintenta indefinidamente y, al ir el lote de mas antiguo a mas nuevo,
      * acaba desplazando a los eventos recientes.
      */
-    static final int MAX_RETRIES = 5;
+    public static final int MAX_RETRIES = 5;
 
     private static final String AGOTADO = "Max retries reached";
 

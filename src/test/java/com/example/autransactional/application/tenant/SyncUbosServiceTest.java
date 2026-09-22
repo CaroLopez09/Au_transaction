@@ -1,15 +1,19 @@
 package com.example.autransactional.application.tenant;
 
 import com.example.autransactional.domain.shared.DomainException;
+import com.example.autransactional.domain.shared.Rail;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.FeatureFlag;
 import com.example.autransactional.domain.tenant.LivenessStatus;
 import com.example.autransactional.domain.tenant.Role;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
+import com.example.autransactional.domain.tenant.TenantSettings;
 import com.example.autransactional.domain.tenant.TenantStatus;
 import com.example.autransactional.domain.tenant.Ubo;
 import com.example.autransactional.domain.tenant.UboRepository;
 import com.example.autransactional.domain.tenant.UboRoster;
+import com.example.autransactional.domain.treasury.WalletToken;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
 import com.example.autransactional.infrastructure.kira.KiraApiClient;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
@@ -22,9 +26,11 @@ import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -234,6 +240,19 @@ class SyncUbosServiceTest {
         // Kira responde 422 "No verification is in progress".
         empresa.linkKiraUser("usr_1");
         registrar("Ana", true, "60");
+
+        assertThrows(DomainException.class,
+                () -> service.requestLivenessLinks(compliance, CONSENTIDO));
+
+        verify(kira, never()).requestLivenessLink(anyString(), any());
+    }
+
+    @Test
+    void sinElFeatureFlagLivenessNoSePidenEnlaces() {
+        kybEnCurso();
+        registrar("Ana", true, "60");
+        empresa.applySettings(new TenantSettings(EnumSet.allOf(Rail.class), EnumSet.allOf(WalletToken.class),
+                Set.of(FeatureFlag.RFIS)));
 
         assertThrows(DomainException.class,
                 () -> service.requestLivenessLinks(compliance, CONSENTIDO));

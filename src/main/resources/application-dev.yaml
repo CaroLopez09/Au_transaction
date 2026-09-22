@@ -21,9 +21,18 @@ kira:
   base-url: ${KIRA_BASE_URL:https://api.balampay.com/sandbox}
 
 bff:
+  # Las empresas se crean SIEMPRE en el sandbox de Kira, nunca desde el portal: este worker las
+  # trae solo, cada 5 min, con su cuenta virtual y un administrador ya activo.
+  reconciliation:
+    sandbox-sync-enabled: ${BFF_SANDBOX_SYNC_ENABLED:true}
+  # Biometria no configurada en local (BIOMETRY_BASE_URL vacio): el reto nunca se completaria.
+  identity-verification:
+    enabled: ${BFF_IDENTITY_VERIFICATION_ENABLED:false}
   security:
     # Solo para desarrollo. En cert y prod se exige BFF_JWT_SECRET del entorno.
     jwt-secret: ${BFF_JWT_SECRET:secreto-de-desarrollo-no-usar-fuera-de-local-32b}
+  support:
+    email: ${BFF_SUPPORT_EMAIL:soporte-ti@juriscop.test}
   dev:
     # Crea organizaciones y operadores de prueba al arrancar. Idempotente.
     seed: ${BFF_DEV_SEED:true}

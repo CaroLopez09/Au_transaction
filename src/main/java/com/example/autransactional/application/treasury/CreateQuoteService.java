@@ -113,6 +113,7 @@ public class CreateQuoteService {
         recipient.assertUsable();
 
         QuotationRail rail = resolveRail(command.rail(), recipient);
+        tenant.getSettings().assertRailEnabled(recipient.getRail());
 
         Quotation quotation = new Quotation(
                 UUID.randomUUID().toString(),
@@ -128,9 +129,13 @@ public class CreateQuoteService {
         JsonNode response = kira.createQuotation(buildBody(account, rail, command));
         KiraQuoteResponse quote = KiraQuoteResponse.from(response);
 
+        // Kira no informa si el saldo alcanza: se calcula aqui contra el saldo local, que
+        // el propio riel de cobro (sourceAmount, mismo currency que la cuenta) debe cubrir.
+        boolean balanceSufficient = account.availableBalance().amount().compareTo(quote.sourceAmount()) >= 0;
+
         quotation.applyKiraQuote(quote.quoteId(), quote.expiresAt(), quote.sourceAmount(),
                 quote.recipientAmount(), quote.recipientCurrency(), quote.exchangeRate(),
-                quote.fees(), quote.balanceSufficient(), quote.rateSource(), quote.feesSnapshot());
+                quote.fees(), balanceSufficient, quote.rateSource(), quote.feesSnapshot());
 
         if (!quotation.hasConsistentTotals()) {
             // No se bloquea: manda lo que Kira cobra. Pero tiene que quedar registrado.
@@ -146,7 +151,7 @@ public class CreateQuoteService {
         quotations.save(quotation);
         audit.record(operator, "quotation.created", "quotation", quotation.getId(), null, "OK",
                 "kira_quote_id=" + quote.quoteId() + " riel=" + rail
-                        + " saldo_suficiente=" + quote.balanceSufficient());
+                        + " saldo_suficiente=" + balanceSufficient);
 
         return quotation;
     }

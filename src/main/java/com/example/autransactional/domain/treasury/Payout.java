@@ -40,6 +40,15 @@ public class Payout {
     /** IMAD / ACH trace / UETR: el comprobante que el cliente final reclama. */
     private String referenceNumber;
     private String paymentMethod;
+    /** No nulo cuando el pago se financia con un deposito cripto en vez del saldo de la cuenta (G-19). */
+    private String fundingNetwork;
+    private String fundingCurrency;
+    /**
+     * JSON crudo de 'deposit_instructions' (additionalProperties libres segun Kira): direccion,
+     * red y vencimiento del deposito unico que financia el pago. Se guarda sin tipar porque el
+     * contrato no fija sus claves; el frontend lo interpreta.
+     */
+    private String depositInstructions;
     private Instant updatedAt;
 
     public Payout(String id, TenantId tenantId, String kiraUserId, String virtualAccountId,
@@ -75,6 +84,7 @@ public class Payout {
                                    String approverUserId, String firstApproverUserId,
                                    String rejectionReason, String kiraPayoutId,
                                    String errorCode, String referenceNumber, String paymentMethod,
+                                   String fundingNetwork, String fundingCurrency, String depositInstructions,
                                    Instant updatedAt) {
         Payout p = new Payout(id, tenantId, kiraUserId, virtualAccountId, recipientId, amount, fees,
                 idempotencyKey, makerUserId);
@@ -91,6 +101,9 @@ public class Payout {
         p.errorCode = errorCode;
         p.referenceNumber = referenceNumber;
         p.paymentMethod = paymentMethod;
+        p.fundingNetwork = fundingNetwork;
+        p.fundingCurrency = fundingCurrency;
+        p.depositInstructions = depositInstructions;
         p.updatedAt = updatedAt;
         return p;
     }
@@ -285,6 +298,36 @@ public class Payout {
             this.paymentMethod = paymentMethod;
         }
         touch();
+    }
+
+    /**
+     * Marca el pago como financiado con un deposito cripto (mode=CRYPTO) en vez de con el
+     * saldo de la cuenta. Se decide al crear el pago: WalletToken ya valida el par red/token.
+     */
+    public void requestCryptoFunding(String network, String currency) {
+        if (kiraPayoutId != null) {
+            throw new DomainException("El pago ya fue enviado: la forma de financiarlo no se puede cambiar.");
+        }
+        WalletToken token = WalletToken.from(currency);
+        if (token == WalletToken.COPM) {
+            throw new DomainException("COPm no es un token valido para financiar un pago (solo USDC o USDT).");
+        }
+        token.assertSupportedOn(network);
+        this.fundingNetwork = network.trim().toLowerCase(java.util.Locale.ROOT);
+        this.fundingCurrency = token.wireValue();
+        touch();
+    }
+
+    public boolean isCryptoFunded() {
+        return fundingNetwork != null && fundingCurrency != null;
+    }
+
+    /** Guarda tal cual el 'deposit_instructions' que Kira devuelve al enviar un pago cripto. */
+    public void recordDepositInstructions(String rawJson) {
+        if (rawJson != null && !rawJson.isBlank() && !"null".equals(rawJson)) {
+            this.depositInstructions = rawJson;
+            touch();
+        }
     }
 
     private void touch() {

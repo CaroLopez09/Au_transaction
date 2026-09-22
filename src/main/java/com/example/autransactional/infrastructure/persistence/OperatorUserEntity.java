@@ -1,6 +1,7 @@
 package com.example.autransactional.infrastructure.persistence;
 
 import com.example.autransactional.domain.tenant.UserStatus;
+import com.example.autransactional.domain.tenant.IdentityVerificationStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -62,6 +63,38 @@ public class OperatorUserEntity {
     /** false mientras el secreto esta pendiente de confirmar con un primer codigo. */
     @Column(name = "mfa_enabled", nullable = false)
     private boolean mfaEnabled = false;
+
+        /** Estado de documento y rostro, independiente de la activacion de la cuenta. */
+        @Enumerated(EnumType.STRING)
+        @JdbcTypeCode(SqlTypes.VARCHAR)
+        @Column(name = "identity_status", nullable = false, length = 50)
+        private IdentityVerificationStatus identityStatus = IdentityVerificationStatus.PENDING_DOCUMENTS;
+
+        /** Referencia que Kira entrega para correlacionar el webhook de liveness. */
+        @Column(name = "kira_person_reference_id", length = 100)
+        private String kiraPersonReferenceId;
+
+        @Column(name = "identity_document_type", length = 100)
+        private String identityDocumentType;
+
+        /** Solo los ultimos cuatro caracteres; el numero completo no se almacena en el BFF. */
+        @Column(name = "identity_document_last_four", length = 4)
+        private String identityDocumentLastFour;
+
+        @Column(name = "identity_issuing_country", length = 3)
+        private String identityIssuingCountry;
+
+        @Column(name = "biometric_consent_at")
+        private Instant biometricConsentAt;
+
+        @Column(name = "identity_requested_at")
+        private Instant identityRequestedAt;
+
+        @Column(name = "identity_verified_at")
+        private Instant identityVerifiedAt;
+
+        @Column(name = "identity_rejection_reason", length = 500)
+        private String identityRejectionReason;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();

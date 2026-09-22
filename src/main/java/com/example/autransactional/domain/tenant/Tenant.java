@@ -50,6 +50,9 @@ public class Tenant {
     private String onboardingDraft;
     private Instant onboardingDraftUpdatedAt;
 
+    /** Parametrizacion propia del portal (arquitectura §8): no viene de Kira. */
+    private TenantSettings settings = TenantSettings.defaults();
+
     public Tenant(TenantId id, String name, String taxId, String jurisdiction) {
         if (name == null || name.isBlank()) {
             throw new DomainException("La empresa cliente necesita un nombre.");
@@ -106,6 +109,20 @@ public class Tenant {
     public void restoreOnboardingDraft(String draftJson, Instant updatedAt) {
         this.onboardingDraft = draftJson;
         this.onboardingDraftUpdatedAt = updatedAt;
+    }
+
+    /** Rehidrata la parametrizacion desde la base; no falla si nunca se guardo nada. */
+    public void restoreSettings(TenantSettings settings) {
+        this.settings = settings == null ? TenantSettings.defaults() : settings;
+    }
+
+    /** Actualiza la parametrizacion. Solo PLATFORM_OPERATOR puede llegar hasta aqui (ver servicio). */
+    public void applySettings(TenantSettings settings) {
+        if (settings == null) {
+            throw new DomainException("La parametrizacion no puede quedar vacia.");
+        }
+        this.settings = settings;
+        touch();
     }
 
     /**

@@ -6,13 +6,17 @@ import com.example.autransactional.domain.compliance.Rfi;
 import com.example.autransactional.domain.compliance.RfiRepository;
 import com.example.autransactional.domain.compliance.RfiStatus;
 import com.example.autransactional.domain.shared.DomainException;
+import com.example.autransactional.domain.shared.Rail;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.FeatureFlag;
 import com.example.autransactional.domain.tenant.Role;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
+import com.example.autransactional.domain.tenant.TenantSettings;
 import com.example.autransactional.domain.tenant.TenantStatus;
 import com.example.autransactional.domain.treasury.Payout;
 import com.example.autransactional.domain.treasury.PayoutRepository;
+import com.example.autransactional.domain.treasury.WalletToken;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
 import com.example.autransactional.infrastructure.kira.KiraApiClient;
 import com.example.autransactional.infrastructure.kira.KiraApiException;
@@ -24,9 +28,11 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,6 +59,8 @@ class AnswerRfiServiceTest {
 
     private final AuthenticatedOperator cumplimiento =
             new AuthenticatedOperator("u-1", "compliance@juriscop.test", TENANT, Role.COMPLIANCE_INTERNAL);
+    private final AuthenticatedOperator admin =
+            new AuthenticatedOperator("u-9", "admin@juriscop.test", TENANT, Role.ADMIN);
 
     private static final String DETALLE = detalle("pending", "pending");
 
@@ -117,6 +125,15 @@ class AnswerRfiServiceTest {
         assertEquals(RfiStatus.PENDING, rfi.getStatus());
         assertEquals("kpo_9", rfi.getBlockingResourceId());
         assertNotNull(rfi.getDueDate());
+    }
+
+    @Test
+    void sinElFeatureFlagRfisNoSeSincroniza() {
+        tenants.findById(TENANT).orElseThrow().applySettings(new TenantSettings(
+                EnumSet.allOf(Rail.class), EnumSet.allOf(WalletToken.class), Set.of(FeatureFlag.LIVENESS)));
+
+        assertThrows(DomainException.class, () -> service.sync(cumplimiento));
+        verify(kira, never()).listRfis(any());
     }
 
     // --- RFI retirado, motivo de cierre y enlace de beneficiario (docs 15-sep) ---
@@ -475,9 +492,19 @@ class AnswerRfiServiceTest {
                 "The last file cannot be removed", "{\"message\":\"The last file cannot be removed\"}"));
 
         RfiAnswerRejectedException e = assertThrows(RfiAnswerRejectedException.class, () ->
-                service.removeDocument(cumplimiento, rfi.getId(), "i-doc", "doc-1"));
+                service.removeDocument(admin, rfi.getId(), "i-doc", "doc-1"));
 
         assertEquals("The last file cannot be removed", e.itemErrors().get("i-doc"));
+    }
+
+    @Test
+    void cumplimientoNoPuedeBorrarDocumentosSoloAdmin() {
+        // Borrar es destructivo: se separa de la gestion general de RFIs (guia de arquitectura §2.5).
+        Rfi rfi = sincronizarUno();
+
+        assertThrows(DomainException.class, () ->
+                service.removeDocument(cumplimiento, rfi.getId(), "i-doc", "doc-1"));
+        verify(kira, never()).removeRfiDocument(any(), any(), any());
     }
 
     @Test

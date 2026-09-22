@@ -24,15 +24,19 @@ import com.example.autransactional.domain.treasury.Payout;
 import com.example.autransactional.domain.treasury.PayoutRepository;
 import com.example.autransactional.domain.treasury.PayoutStatus;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
+import com.example.autransactional.infrastructure.kira.KiraApiClient;
+import com.example.autransactional.infrastructure.kira.KiraProperties;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Consola de operaciones y cumplimiento de AU (arquitectura §2.2): todas las organizaciones, de
@@ -56,13 +60,16 @@ public class PlatformConsoleService {
     private final SubmitOnboardingService onboarding;
     private final OpenVirtualAccountService accountService;
     private final AuditTrail audit;
+    private final KiraApiClient kira;
+    private final KiraProperties kiraProperties;
 
     private final PayoutApprovalPolicy approvalPolicy;
 
     public PlatformConsoleService(TenantRepository tenants, UboRepository ubos, VirtualAccountRepository accounts,
                                   PayoutRepository payouts, DepositRepository deposits, RfiRepository rfis,
                                   SubmitOnboardingService onboarding, OpenVirtualAccountService accountService,
-                                  AuditTrail audit, PayoutApprovalPolicy approvalPolicy) {
+                                  AuditTrail audit, PayoutApprovalPolicy approvalPolicy, KiraApiClient kira,
+                                  KiraProperties kiraProperties) {
         this.approvalPolicy = approvalPolicy;
         this.tenants = tenants;
         this.ubos = ubos;
@@ -73,6 +80,8 @@ public class PlatformConsoleService {
         this.onboarding = onboarding;
         this.accountService = accountService;
         this.audit = audit;
+        this.kira = kira;
+        this.kiraProperties = kiraProperties;
     }
 
     @Transactional(readOnly = true)
@@ -83,6 +92,34 @@ public class PlatformConsoleService {
                 .map(t -> summarize(t, now))
                 .sorted(Comparator.comparing(TenantSummary::name, String.CASE_INSENSITIVE_ORDER))
                 .toList();
+    }
+
+    /** Usuarios existentes en Kira Sandbox, solo para consulta en la consola de operaciones. */
+    @Transactional(readOnly = true)
+    public List<KiraSandboxUser> sandboxUsers(AuthenticatedOperator operator) {
+        assertPlatform(operator);
+        if (!kiraProperties.sandbox()) {
+            throw new DomainException("El directorio de Kira solo esta disponible en Sandbox.");
+        }
+        JsonNode response = kira.listUsers(Map.of("limit", 100, "offset", 0));
+        JsonNode users = response.has("data") ? response.path("data") : response;
+        if (users.isObject() && users.has("items")) {
+            users = users.path("items");
+        }
+        if (!users.isArray()) {
+            throw new DomainException("Kira devolvio un directorio de usuarios con formato no reconocido.");
+        }
+        List<KiraSandboxUser> result = new ArrayList<>();
+        for (JsonNode user : users) {
+            String id = text(user, "id");
+            if (id != null) {
+                result.add(new KiraSandboxUser(id, firstText(user, "business_legal_name", "legal_name", "name"),
+                        text(user, "email"), text(user, "status"), text(user, "external_id")));
+            }
+        }
+        audit.record(operator, "platform.kira_sandbox_users_viewed", "kira", "users", null, "OK",
+                "cantidad=" + result.size());
+        return result;
     }
 
     @Transactional(readOnly = true)
@@ -197,11 +234,29 @@ public class PlatformConsoleService {
         }
     }
 
+    private static String firstText(JsonNode body, String... names) {
+        for (String name : names) {
+            String value = text(body, name);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static String text(JsonNode body, String name) {
+        JsonNode value = body.get(name);
+        return value == null || value.isNull() || value.asText().isBlank() ? null : value.asText();
+    }
+
     public record TenantSummary(String id, String name, String kiraUserId, String status,
                                 boolean verificationTriggered, boolean readyForVirtualAccounts,
                                 int pendingFields, String rejectionReason, int beneficialOwners,
                                 int virtualAccounts, int openRfis, int overdueRfis, int heldPayouts,
                                 Instant createdAt, Instant updatedAt) {
+    }
+
+    public record KiraSandboxUser(String id, String name, String email, String status, String externalId) {
     }
 
     public record RfiSummary(String id, String kiraRfiId, String status, String resolutionReason, Instant dueDate,

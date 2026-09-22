@@ -33,7 +33,8 @@ public class JwtTenantFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         // El webhook de Kira no trae JWT: se autentica por firma HMAC en su propio controlador.
-        return request.getRequestURI().startsWith("/api/webhooks/");
+        return request.getRequestURI().startsWith("/api/webhooks/")
+            || request.getRequestURI().matches("/api/operators/[^/]+/verify-identity");
     }
 
     @Override

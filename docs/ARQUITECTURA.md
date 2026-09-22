@@ -177,7 +177,7 @@ Login  →  Onboarding KYB  →  UBOs + liveness  →  Cuenta virtual  →  Dep�
 |---|---|---|
 | `tenants` | 15 | Empresas cliente + estado del bucle de onboarding |
 | `roles` | 6 | Catálogo RBAC (FK desde `users`) |
-| `users` | 12 | Operadores de cada empresa |
+| `users` | 21 | Operadores de cada empresa + estado de identidad |
 | `ubos` | 21 | Beneficiarios finales + liveness |
 | `virtual_accounts` | 19 | Cuentas en bancos de EE. UU. |
 | `deposits` | 19 | Fondeos entrantes |
@@ -211,6 +211,7 @@ Cada una tapa un hueco documentado de la API. **Ninguna es cosmética.**
 | `tenants` | `onboarding_payload` | El `GET` no devuelve el cuestionario (G6) y el `PUT` debe ir completo (G8) |
 | `tenants` | `onboarding_idempotency_key` | Se persiste antes de la primera llamada (D4) |
 | `tenants` | `rejection_reason` | Única fuente: webhook `user.verification.failed` |
+| `users` | `identity_status`, `kira_person_reference_id`, metadatos de documento, consentimiento y fechas | Verificación individual por operador sin guardar archivos, enlace de liveness ni número completo del documento |
 | `ubos` | `has_ownership`, `has_control`, `is_signer`, `politically_exposed`, `country_of_birth` | El cargo no identifica al beneficiario; omitirlos bloquea el KYB en silencio |
 | `virtual_accounts` | `mode`, `bank`, `description`, `activated_event_seen`, `balance_refreshed_at`, `opening_idempotency_key` | Modo inmutable, banco por entorno, señal de fondos-listos |
 | `recipients` | 21 columnas (espejo completo) | Kira no permite actualizar: corregir obliga a reconstruir el alta entera |

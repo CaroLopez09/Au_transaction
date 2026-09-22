@@ -77,4 +77,12 @@ public enum Role {
     public boolean canManageCompliance() {
         return this == COMPLIANCE_INTERNAL || this == ADMIN;
     }
+
+    /**
+     * Borrar un documento de RFI es destructivo e irreversible del lado de Kira: se separa
+     * de canManageCompliance() para poder segregarlo por rol (guia de arquitectura §2.5).
+     */
+    public boolean canDeleteRfiDocuments() {
+        return this == ADMIN;
+    }
 }

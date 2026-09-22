@@ -3,6 +3,7 @@ package com.example.autransactional.application.tenant;
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.PostalAddress;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.FeatureFlag;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
 import com.example.autransactional.domain.tenant.Ubo;
@@ -207,6 +208,7 @@ public class SyncUbosService {
         Tenant tenant = load(operator.tenantId());
         // Sin verificacion en curso, Kira responde 422: se corta antes de gastar la llamada.
         tenant.assertVerificationInProgress();
+        tenant.getSettings().assertFeatureEnabled(FeatureFlag.LIVENESS);
 
         Map<String, Object> body = new LinkedHashMap<>();
         if (command.successUrl() != null && command.rejectUrl() != null) {

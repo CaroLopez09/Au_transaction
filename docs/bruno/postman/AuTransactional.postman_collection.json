@@ -496,7 +496,7 @@
             "auth": {
               "type": "noauth"
             },
-            "description": "Sin cabecera Authorization responde 403 con cuerpo VACIO (no 401)."
+            "description": "Sin cabecera Authorization responde 401 (F7): el 403 queda para el rol autenticado sin permiso."
           },
           "response": [],
           "event": [
@@ -505,8 +505,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"responde 403\", function () {",
-                  "  pm.expect([403]).to.include(pm.response.code);",
+                  "pm.test(\"responde 401\", function () {",
+                  "  pm.expect([401]).to.include(pm.response.code);",
                   "});"
                 ]
               }

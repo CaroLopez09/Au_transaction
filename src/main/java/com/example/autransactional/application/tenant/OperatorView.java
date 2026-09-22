@@ -16,7 +16,8 @@ public record OperatorView(
         String roleDescription,
         String status,
         boolean active,
-        boolean mfaEnabled) {
+        boolean mfaEnabled,
+        String identityStatus) {
 
     public static OperatorView from(OperatorUser user) {
         return new OperatorView(
@@ -29,6 +30,7 @@ public record OperatorView(
                 user.role().description(),
                 user.status().name(),
                 user.isActive(),
-                user.mfaEnabled());
+                user.mfaEnabled(),
+                user.identity().status().name());
     }
 }

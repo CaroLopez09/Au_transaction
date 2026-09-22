@@ -104,4 +104,51 @@ class PayoutTest {
         assertThrows(DomainException.class, () -> new Payout("p", TenantId.of("t"), null, "va", "rec",
                 Money.zero("USD"), FeeBreakdown.standard(), IdempotencyKey.newKey(), "maker"));
     }
+
+    @Test
+    void financiarConCriptoRegistraRedYTokenNormalizados() {
+        Payout payout = newPayout("maker-1");
+
+        payout.requestCryptoFunding("Polygon", "usdc");
+
+        assertTrue(payout.isCryptoFunded());
+        assertEquals("polygon", payout.getFundingNetwork());
+        assertEquals("USDC", payout.getFundingCurrency());
+    }
+
+    @Test
+    void unParDeRedYTokenInvalidoSeRechaza() {
+        Payout payout = newPayout("maker-1");
+
+        // USDC no existe en tron (WalletToken.assertSupportedOn).
+        assertThrows(DomainException.class, () -> payout.requestCryptoFunding("tron", "USDC"));
+        assertFalse(payout.isCryptoFunded());
+    }
+
+    @Test
+    void copmNoEsValidoParaFinanciarUnPago() {
+        Payout payout = newPayout("maker-1");
+
+        assertThrows(DomainException.class, () -> payout.requestCryptoFunding("polygon", "COPM"));
+    }
+
+    @Test
+    void unPagoSinFinanciamientoCriptoNoEsCryptoFunded() {
+        Payout payout = newPayout("maker-1");
+
+        assertFalse(payout.isCryptoFunded());
+        assertNull(payout.getFundingNetwork());
+    }
+
+    @Test
+    void lasInstruccionesDeDepositoSoloSeGuardanSiVienenPobladas() {
+        Payout payout = newPayout("maker-1");
+        payout.requestCryptoFunding("polygon", "USDC");
+
+        payout.recordDepositInstructions("{\"address\":\"0xabc\",\"network\":\"polygon\"}");
+        assertEquals("{\"address\":\"0xabc\",\"network\":\"polygon\"}", payout.getDepositInstructions());
+
+        payout.recordDepositInstructions(null);
+        assertEquals("{\"address\":\"0xabc\",\"network\":\"polygon\"}", payout.getDepositInstructions());
+    }
 }

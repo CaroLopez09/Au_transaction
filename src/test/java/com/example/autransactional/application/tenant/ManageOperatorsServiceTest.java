@@ -89,7 +89,9 @@ class ManageOperatorsServiceTest {
         assertEquals("Gomez", usuario.lastName());
         assertEquals("$2a$hash", usuario.passwordHash());
         assertNotEquals("contrasena-larga", usuario.passwordHash());
-        assertEquals(UserStatus.ACTIVE, usuario.status());
+        assertEquals(UserStatus.PENDING_IDENTITY, usuario.status());
+        assertEquals(com.example.autransactional.domain.tenant.IdentityVerificationStatus.PENDING_DOCUMENTS,
+            usuario.identity().status());
         assertFalse(usuario.mfaEnabled());
         assertEquals("TREASURY_MAKER", vista.role());
         verify(passwordEncoder).encode("contrasena-larga");

@@ -50,6 +50,11 @@ public class TenantEntity {
     @Column(name = "eligible_products")
     private String eligibleProducts;
 
+    /** Parametrizacion del portal (rieles/tokens habilitados, umbral de doble firma). No viene de Kira. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "settings")
+    private String settings;
+
     // --- Estado del bucle de onboarding. Columnas propias del BFF: cada una cubre un
     // hueco concreto de la API de Kira, documentado en el campo correspondiente. ---
 

@@ -9,7 +9,15 @@ import com.example.autransactional.domain.shared.TenantId;
  */
 public record OperatorUser(String id, TenantId tenantId, String email, String passwordHash,
                            String firstName, String lastName, Role role, UserStatus status,
-                           String mfaSecret, boolean mfaEnabled) {
+                           String mfaSecret, boolean mfaEnabled, OperatorIdentity identity) {
+
+    /** Compatibilidad para operadores ya creados: su identidad queda pendiente de documentacion. */
+    public OperatorUser(String id, TenantId tenantId, String email, String passwordHash,
+                        String firstName, String lastName, Role role, UserStatus status,
+                        String mfaSecret, boolean mfaEnabled) {
+        this(id, tenantId, email, passwordHash, firstName, lastName, role, status, mfaSecret,
+                mfaEnabled, OperatorIdentity.pendingDocuments());
+    }
 
     public void assertCanLogin() {
         if (!status.canLogin()) {

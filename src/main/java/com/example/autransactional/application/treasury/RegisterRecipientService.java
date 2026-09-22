@@ -146,11 +146,17 @@ public class RegisterRecipientService {
         tenant.assertCanOperateTreasury();
         tenant.assertRegisteredInKira();
 
+        RecipientAccount account = buildAccount(command);
+        tenant.getSettings().assertRailEnabled(Rail.from(command.rail()));
+        if (account instanceof RecipientAccount.Wallet wallet) {
+            tenant.getSettings().assertTokenEnabled(wallet.token());
+        }
+
         Recipient recipient = new Recipient(
                 UUID.randomUUID().toString(),
                 operator.tenantId(),
                 buildHolder(command),
-                buildAccount(command),
+                account,
                 toAddress(command.address()));
         recipient.recordAuthor(operator.userId());
 

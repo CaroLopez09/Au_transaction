@@ -24,4 +24,7 @@ public interface OperatorUserRepository {
 
     /** Cambia el estado de la cuenta (alta, suspension o baja). */
     void updateStatus(String userId, UserStatus status);
+
+    /** Actualiza el resultado de identidad junto al estado operativo de la cuenta. */
+    void updateIdentity(String userId, OperatorIdentity identity, UserStatus status);
 }

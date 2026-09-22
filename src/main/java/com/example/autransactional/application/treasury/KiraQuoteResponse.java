@@ -13,6 +13,11 @@ import java.time.Instant;
  * Kira envia unidades menores mas una precision: 5000000 con precision 2 son 50.000,00 USD.
  * La conversion ocurre aqui y una sola vez; del agregado hacia adentro solo circulan
  * importes decimales.
+ *
+ * Kira NO devuelve balance_sufficient (no existe en su esquema documentado ni en la respuesta
+ * real): se comprueba en CreateQuoteService comparando sourceAmount contra el saldo local de
+ * la cuenta. Antes se leia aqui un campo inexistente y siempre daba false, mostrando "saldo
+ * insuficiente" en cotizaciones con saldo de sobra.
  */
 public record KiraQuoteResponse(
         String quoteId,
@@ -23,7 +28,6 @@ public record KiraQuoteResponse(
         String recipientCurrency,
         BigDecimal exchangeRate,
         FeeBreakdown fees,
-        boolean balanceSufficient,
         String rateSource,
         String feesSnapshot) {
 
@@ -46,7 +50,6 @@ public record KiraQuoteResponse(
                         amount(totals, "kira_revenue_total", totals),
                         amount(totals, "client_markup_total", totals),
                         null),
-                body.path("balance_sufficient").asBoolean(false),
                 text(conversion, "rate_source"),
                 // Se guarda el bloque entero: es la prueba del precio que se mostro.
                 body.has("fees") || !totals.isMissingNode()

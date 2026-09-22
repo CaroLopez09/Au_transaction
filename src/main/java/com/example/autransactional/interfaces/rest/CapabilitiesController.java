@@ -6,6 +6,7 @@ import com.example.autransactional.infrastructure.kira.KiraProperties;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,12 +29,15 @@ public class CapabilitiesController {
     private final KiraProperties properties;
     private final KiraCredentialManager credentials;
     private final PayoutApprovalPolicy approvalPolicy;
+    private final String supportEmail;
 
     public CapabilitiesController(KiraProperties properties, KiraCredentialManager credentials,
-                                  PayoutApprovalPolicy approvalPolicy) {
+                                  PayoutApprovalPolicy approvalPolicy,
+                                  @Value("${bff.support.email:}") String supportEmail) {
         this.properties = properties;
         this.credentials = credentials;
         this.approvalPolicy = approvalPolicy;
+        this.supportEmail = supportEmail == null || supportEmail.isBlank() ? null : supportEmail;
     }
 
     @GetMapping
@@ -47,7 +51,8 @@ public class CapabilitiesController {
                 credentials.isConfigured(),
                 properties.bank(),
                 properties.apiVersion(),
-                threshold);
+                threshold,
+                supportEmail);
     }
 
     /**
@@ -56,8 +61,10 @@ public class CapabilitiesController {
      * @param bank               banco de las cuentas virtuales de este entorno
      * @param providerApiVersion version de la API del proveedor que entiende el BFF
      * @param dualApprovalThreshold  desde este importe un pago necesita dos firmas; nulo si no hay umbral
+     * @param supportEmail       correo de soporte/operaciones para escalar una incidencia (bff.support.email)
      */
     public record CapabilitiesView(boolean sandbox, boolean providerConfigured, String bank,
-                                   String providerApiVersion, BigDecimal dualApprovalThreshold) {
+                                   String providerApiVersion, BigDecimal dualApprovalThreshold,
+                                   String supportEmail) {
     }
 }

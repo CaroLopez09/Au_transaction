@@ -102,6 +102,7 @@ public class ExecutePayoutService {
         if (!operator.role().canCreatePayout()) {
             throw new DomainException("Tu rol no puede preparar pagos.");
         }
+        assertIdentityVerified(operator);
         VirtualAccount account = loadAccount(operator.tenantId(), command.virtualAccountId());
         Recipient recipient = loadRecipient(operator.tenantId(), command.recipientId());
         recipient.assertUsable();
@@ -259,6 +260,11 @@ public class ExecutePayoutService {
             payout.attachQuotation(quotation, Instant.now());
         }
 
+        if (command.cryptoNetwork() != null && !command.cryptoNetwork().isBlank()
+                || command.cryptoCurrency() != null && !command.cryptoCurrency().isBlank()) {
+            payout.requestCryptoFunding(command.cryptoNetwork(), command.cryptoCurrency());
+        }
+
         payouts.save(payout);
         audit.record(operator, "payout.created", "payout", payout.getId(), key.value(), "OK", null);
         return view(payout);
@@ -270,6 +276,7 @@ public class ExecutePayoutService {
         if (!operator.role().canApprovePayout()) {
             throw new DomainException("Tu rol no puede autorizar pagos.");
         }
+        assertIdentityVerified(operator);
 
         Instant now = Instant.now();
         Payout payout = load(operator.tenantId(), payoutId);
@@ -350,6 +357,9 @@ public class ExecutePayoutService {
         // reference_number es el comprobante para el cliente final y solo vive en el recurso.
         payout.describeRemote(body.path("reference_number").asText(null),
                 body.path("payment_method").asText(null));
+        if (payout.isCryptoFunded() && body.has("deposit_instructions")) {
+            payout.recordDepositInstructions(body.get("deposit_instructions").toString());
+        }
         payouts.save(payout);
         return view(payout);
     }
@@ -461,6 +471,9 @@ public class ExecutePayoutService {
             payout.markAsSubmitted(kiraPayoutId, data.path("status").asText(null));
             payout.describeRemote(data.path("reference_number").asText(null),
                     data.path("payment_method").asText(null));
+            if (payout.isCryptoFunded() && data.has("deposit_instructions")) {
+                payout.recordDepositInstructions(data.get("deposit_instructions").toString());
+            }
 
             // La cotizacion se consume ahora, no al preparar el pago.
             if (quotation != null) {
@@ -483,6 +496,15 @@ public class ExecutePayoutService {
             throw e;
         }
         return payout;
+    }
+
+    /** Kira autoriza a la empresa; este BFF autoriza a la persona que inicia la transferencia. */
+    private void assertIdentityVerified(AuthenticatedOperator operator) {
+        OperatorUser user = users.findById(operator.userId())
+                .orElseThrow(() -> new DomainException("El operador no existe."));
+        if (!user.identity().status().isVerified()) {
+            throw new DomainException("Completa la verificacion de identidad antes de operar transferencias.");
+        }
     }
 
     /**
@@ -535,6 +557,14 @@ public class ExecutePayoutService {
         }
         if (!extraInfo.isEmpty()) {
             body.put("extra_info", extraInfo);
+        }
+
+        if (payout.isCryptoFunded()) {
+            // mode=CRYPTO: el pago no debita el saldo, se financia con un deposito unico.
+            body.put("mode", "CRYPTO");
+            body.put("payment_instructions", Map.of(
+                    "network", payout.getFundingNetwork(),
+                    "currency", payout.getFundingCurrency()));
         }
         return body;
     }

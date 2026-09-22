@@ -1,21 +1,52 @@
-Task ID,Task Name,Estado en CSV,Estado nuevo,Comentario
-AUT-015,Excluir type y external_id del PUT de onboarding,to do,Complete,forUpdate quita type y external_id; PUT 200 contra el sandbox (ESTADO §3.11).
-AUT-016,Prueba de regresion del contrato del PUT,to do,Complete,Prueba elPutNoLlevaLasClavesQueSoloExistenEnElAlta.
-AUT-017,Verificar el PUT contra el sandbox,to do,Complete,PUT /api/onboarding 200 con juriscop; faltan solo 2 documentos para usa-virtual-accounts.
-AUT-018,Exponer el enum cerrado de business_type,to do,Complete,Selector de tipo de sociedad (BUSINESS_TYPES) en el asistente.
-AUT-019,Commitear la rama depuracion-bff,to do,Complete,"Commits por tema en develop; ramas main, certificacion y produccion creadas."
+Task ID,Task Name,Estado en ClickUp,Estado nuevo,Evidencia
+AUT-001,RFIs: modelar que bloquean,to do,Complete,Columnas blocking_type y blocking_resource_id mas idx_rfis_blocking. Commit dc6af92 (10-sep).
+AUT-002,Depurar el alcance del BFF,to do,Complete,"8 endpoints, 29 clases, 33 pruebas y la tabla verification_sessions eliminados; fuera Postman y Thymeleaf. ESTADO 3.1, commit ed853d3 (11-sep)."
+AUT-003,Corregir ids locales enviados a Kira,to do,Complete,Cotizar y pagar traducen a kiraAccountId/kiraRecipientId antes de enviar. ESTADO 3.2 (11-sep).
+AUT-004,Corregir defectos D1 a D6,to do,Complete,D1 rehydrate conserva createdAt en 7 agregados; D3 503 kira_not_configured; D4 actuator UP; D5 400/404/413. ESTADO 3.3 (11-sep).
+AUT-005,Exponer 9 rutas de Kira al portal,to do,Complete,Documentos de RFI, payouts/preview, payouts/events, recipients/kira, deposits/sync y reference/countries. ESTADO 3.4 (11-sep).
+AUT-006,Construir 5 workers de reconciliacion,to do,Complete,"infrastructure/reconciliation: Payout, Quotation, Liveness, Rfi, Tenant (hoy son 7 con VirtualAccount y WebhookReprojection). ESTADO 3.5."
+AUT-007,Consolidar la idempotencia (F1),to do,Complete,IdempotencyKeyStore; el front no envia Idempotency-Key. ESTADO 3.5 (11-sep).
+AUT-008,Cotizacion itemizada 2026-06-01,to do,Complete,Commit ed853d3 (11-sep).
+AUT-009,Credenciales de sandbox y secretos,to do,Complete,.env fuera del repositorio via spring.config.import; verificado hoy con auth 200 contra api.balampay.com/sandbox.
+AUT-010,Documentos KYB: subida de empresa y de UBO,to do,Complete,"POST /api/onboarding/documents y POST /api/ubos/{id}/documents, multipart files+types. Commit b339152 (14-sep)."
+AUT-011,Corregir emparejamiento de UBOs por email,to do,Complete,SyncUbosService empareja por email; el correo es obligatorio para subir documentos del beneficiario.
+AUT-012,Verificar documentos KYB end-to-end en sandbox,to do,Complete,"identifying_information del sandbox trae hoy nit, certificate_of_registration y 7 tipos mas con file_name y uploaded_at."
+AUT-013,Borrador de onboarding,to do,Complete,"GET/PUT /api/onboarding/draft, tenants.onboarding_draft (64 KB, rechaza data:). Commit 26d8df4 (15-sep)."
+AUT-014,Auditoria de alcance y cronograma,to do,Complete,REVISION-INTEGRAL-FRONT-BFF.md y REVISION-REQUISITOS-VS-CODIGO.md. Commits c195069 y cfdadbf (15-sep).
+AUT-015,Excluir type y external_id del PUT de onboarding,to do,Complete,SubmitOnboardingService.forUpdate los quita; verificado leyendo el metodo hoy (17-sep).
+AUT-016,Prueba de regresion del contrato del PUT,to do,Complete,Prueba elPutNoLlevaLasClavesQueSoloExistenEnElAlta. Suite: 434 pruebas verdes (17-sep).
+AUT-017,Verificar el PUT contra el sandbox,to do,Complete,PUT /api/onboarding 200 con juriscop (15-sep). Pendiente reverificar con international_entity_type (ver AUT-059).
+AUT-018,Exponer el enum cerrado de business_type,to do,Complete,BUSINESS_TYPES en kyb-catalog.ts y selector en company-step.ts.
+AUT-019,Commitear la rama depuracion-bff,to do,Complete,"24 commits por tema en develop; ramas main, certificacion y produccion. El front ya tiene 15 commits (el 15-sep no tenia ninguno)."
 AUT-020,Bruno modo B: Sesion y Onboarding KYB,to do,Complete,"Bruno 00 y 01 contra el sandbox: 104/104 peticiones, 67/67 tests (15-sep)."
 AUT-021,Bruno modo B: Beneficiarios finales,to do,Complete,Bruno 02 contra el sandbox; sync de beneficiarios 200.
-AUT-022,Corregir defectos de onboarding y UBOs,to do,Complete,B1-B6 y W1-W6 corregidos (ESTADO §3.11).
-AUT-023,Bruno 04 Cuentas virtuales,to do,In Progress,Bruno 04 ejecutado pero responde 422: ningun user del sandbox esta VERIFIED. Banco jp_morgan y version 2026-06-01 ya aplicados.
-AUT-024,Bruno 05 Depositos,to do,In Progress,Bruno 05 ejecutado; sin cuenta real no hay depositos que sincronizar. Estados KYT y retenidos ya soportados.
-AUT-026,Bruno 06 Destinatarios,to do,In Progress,Bruno 06 pendiente de un user VERIFIED.
-AUT-027,Bruno 07 Cotizaciones,to do,In Progress,Bruno 07 responde 422 sin cuenta operativa.
-AUT-028,Subir CreateQuoteService a 2026-06-01,to do,Complete,Version unica 2026-06-01 en todas las peticiones; KiraProperties rechaza otra.
-AUT-029,Corregir defectos de tesoreria,to do,In Progress,"KYT_PENDING/KYT_REJECTED, CANCELLED, FROZEN, idempotencia, doble firma y recotizacion hechos; falta recorrido real."
-AUT-031,"Pagos: eventos, comprobante y maker-checker",to do,In Progress,Maker-checker con doble firma por limite y segregacion destinatario/aprobador (15-sep); falta probar contra Kira.
-AUT-033,Bruno 03 RFIs en sandbox,to do,In Progress,Sync de RFIs 200 contra el sandbox; no hay RFIs abiertos para responder.
-AUT-034,Guardar resolution_reason de RFIs cerrados,to do,Complete,rfis.resolution_reason guardado; RFIs retirados pasan a WITHDRAWN.
-AUT-035,Corregir defectos de pagos y webhooks,to do,In Progress,"Webhooks: guardado antes del 2xx, segundo secreto, payloads nuevos corregidos; faltan entregas reales (AUT-032/051)."
-AUT-042,Documentacion final al dia,to do,In Progress,"ARQUITECTURA, API-GUIA, ESTADO, front al dia (15-sep); anexos de DOCUMENTACION-CODIGO pendientes."
-AUT-044,Aplicar el DDL a mano en cert,to do,In Progress,SQL completo en ESTADO §7 (incluye payouts.first_approver_user_id y recipients.created_by_user_id); falta aplicarlo en cert.
+AUT-022,Corregir defectos de onboarding y UBOs,to do,Complete,"B1-B6 y W1-W6 corregidos (ESTADO 3.11). B4 cerrado: associated_persons ya viaja con birth_date, nationality, occupation, gender y phone_number, confirmado hoy contra el sandbox."
+AUT-023,Bruno 04 Cuentas virtuales,to do,In Progress,Bruno 04 responde 422: ningun user del sandbox esta VERIFIED. Bloqueado por AUT-056.
+AUT-024,Bruno 05 Depositos,to do,In Progress,Sin cuenta real no hay depositos que sincronizar. Estados KYT y retenidos ya soportados.
+AUT-025,Decidir el sexto worker de depositos,to do,to do,"Sin decidir. Hoy hay 7 workers y ninguno de depositos: Payout, Quotation, Liveness, Rfi, Tenant, VirtualAccount y WebhookReprojection."
+AUT-026,Bruno 06 Destinatarios,to do,In Progress,Pendiente de un user VERIFIED.
+AUT-027,Bruno 07 Cotizaciones,to do,In Progress,Responde 422 sin cuenta operativa.
+AUT-028,Subir CreateQuoteService a 2026-06-01,to do,Complete,Version unica 2026-06-01; KiraProperties rechaza cualquier otra. Commit 8b0af6d (15-sep).
+AUT-029,Corregir defectos de tesoreria,to do,In Progress,"KYT_PENDING/KYT_REJECTED, CANCELLED, FROZEN, idempotencia, doble firma y recotizacion hechos; falta el recorrido real."
+AUT-030,Bruno 08 Pagos: preview y ejecucion,to do,to do,Sin empezar. Bloqueado por AUT-056.
+AUT-031,"Pagos: eventos, comprobante y maker-checker",to do,In Progress,"Doble firma por limite y segregacion destinatario/aprobador. Commits 9bde9cc y 41889dd (15-sep); falta probar contra Kira."
+AUT-032,Webhooks reales de Kira,to do,to do,Bloqueado por AUT-051 (host publico).
+AUT-033,Bruno 03 RFIs en sandbox,to do,In Progress,Sync de RFIs 200; no hay RFIs abiertos que responder.
+AUT-034,Guardar resolution_reason de RFIs cerrados,to do,Complete,rfis.resolution_reason guardado; los RFIs retirados pasan a WITHDRAWN.
+AUT-035,Corregir defectos de pagos y webhooks,to do,In Progress,"Guardado antes del 2xx, segundo secreto y payloads nuevos corregidos; faltan entregas reales (AUT-032/051)."
+AUT-036,Propagar warnings[] de Kira al portal,to do,to do,Verificado hoy: la palabra warnings no aparece en ningun .java del BFF.
+AUT-037,Cerrar pendientes de documentos KYB,to do,to do,Ampliado por AUT-056: el catalogo no ofrece file_board_minutes ni file_fatca.
+AUT-038,Decidir las tablas huerfanas de dev,to do,to do,"Confirmadas hoy en la base de dev: tenant/tenants, payout/payouts, audit_log/audit_logs, operator_user/users, webhook_event/webhooks_log. Enmascaran errores al pasar a cert (ddl-auto validate)."
+AUT-039,Decidir pago sin cotizacion y memo en WIRE,to do,to do,Sin decidir.
+AUT-040,Honrar expires_in del token de Kira,to do,to do,"Verificado hoy: KiraAuthResponse lee expires_in, pero KiraClientConfig calcula el TTL con properties.tokenTtlSeconds(). Sigue sin honrarse."
+AUT-041,Endpoint de gestion de operadores,to do,Complete,"OperatorController con GET/POST /api/operators y /api/operators/{id}; pagina Equipo en el front. Commits 0b60ed9 y 2d4c770 (16-sep). No estaba en el CSV del 15-sep."
+AUT-042,Documentacion final al dia,to do,In Progress,"DOCUMENTACION-CODIGO secciones 1-17 y anexos regenerados (7c4c2f1, 16-sep); API-GUIA y frontend-backend-contract actualizados hoy. Falta ESTADO.md con el trabajo del 16 y 17-sep."
+AUT-043,Congelacion de alcance,to do,to do,Sin empezar.
+AUT-044,Aplicar el DDL a mano en cert,to do,In Progress,"SQL completo en ESTADO 7 (incluye onboarding_draft, onboarding_draft_updated_at, payouts.first_approver_user_id y recipients.created_by_user_id); falta aplicarlo."
+AUT-045,Cargar secretos rotados y desplegar a cert,to do,to do,Sin empezar. Ver AUT-058: hay secretos reales en .env.example sin commitear.
+AUT-046,Smoke: coleccion Bruno completa contra cert,to do,to do,Sin empezar.
+AUT-047,Verificar los 5 workers en cert,to do,to do,Sin empezar. Son 7 workers.
+AUT-048,Acta de entrega y traspaso,to do,to do,Sin empezar.
+AUT-049,Pedir a Kira la suscripcion a rfi.*,to do,to do,Bloqueante externo. Sin respuesta.
+AUT-050,Pedir a Kira credenciales nuevas de Cognito,to do,to do,Bloqueante externo. Sin respuesta.
+AUT-051,Conseguir host publico para los webhooks,to do,to do,Bloqueante externo. Bloquea AUT-032 y AUT-035.

@@ -49,6 +49,11 @@ public record PayoutView(
         String paymentMethod,
         String errorCode,
         String blockedByRfiId,
+        /** No nulo cuando el pago se financia con un deposito cripto en vez del saldo (G-19). */
+        String fundingNetwork,
+        String fundingCurrency,
+        /** JSON crudo de Kira con la direccion/red/vencimiento del deposito. Null si no aplica. */
+        String depositInstructions,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -88,6 +93,9 @@ public record PayoutView(
                 p.getPaymentMethod(),
                 p.getErrorCode(),
                 blockedByRfiId,
+                p.getFundingNetwork(),
+                p.getFundingCurrency(),
+                p.getDepositInstructions(),
                 p.getCreatedAt(),
                 p.getUpdatedAt());
     }

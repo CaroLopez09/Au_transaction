@@ -76,7 +76,7 @@ public class ManageOperatorsService {
                 command.firstName().trim(),
                 command.lastName().trim(),
                 role,
-                UserStatus.ACTIVE,
+                UserStatus.PENDING_IDENTITY,
                 null,
                 false);
 

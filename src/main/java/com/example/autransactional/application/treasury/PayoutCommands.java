@@ -20,7 +20,10 @@ public final class PayoutCommands {
             @NotBlank String recipientId,
             @NotNull @DecimalMin(value = "0.00000001") BigDecimal amount,
             @NotBlank String currency,
-            String quotationId) {
+            String quotationId,
+            /** Con ambos presentes, el pago se financia con un deposito cripto (mode=CRYPTO), G-19. */
+            String cryptoNetwork,
+            String cryptoCurrency) {
     }
 
     /**

@@ -16,6 +16,8 @@ import com.example.autransactional.domain.tenant.UboRepository;
 import com.example.autransactional.domain.tenant.UboRoster;
 import com.example.autransactional.domain.treasury.PayoutRepository;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
+import com.example.autransactional.infrastructure.kira.KiraApiClient;
+import com.example.autransactional.infrastructure.kira.KiraProperties;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,7 +66,8 @@ class PlatformConsoleServiceTest {
         when(rfis.findOpenByTenant(any())).thenReturn(List.of());
         service = new PlatformConsoleService(tenants, ubos, accounts, payouts, deposits, rfis,
                 mock(SubmitOnboardingService.class), mock(OpenVirtualAccountService.class), audit,
-                new com.example.autransactional.application.treasury.PayoutApprovalPolicy(null, null));
+            new com.example.autransactional.application.treasury.PayoutApprovalPolicy(null, null),
+            mock(KiraApiClient.class), mock(KiraProperties.class));
     }
 
     @Test

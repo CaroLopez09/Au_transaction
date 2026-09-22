@@ -41,7 +41,7 @@ class OperatorControllerTest {
 
     private static OperatorView vista() {
         return new OperatorView("u-1", "ana@juriscop.test", "Ana", "Gomez", "Ana Gomez",
-                "TREASURY_MAKER", "Operador", "ACTIVE", true, false);
+                                "TREASURY_MAKER", "Operador", "ACTIVE", true, false, "VERIFIED");
     }
 
     // --- F7: falta de sesion ---

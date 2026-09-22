@@ -46,6 +46,11 @@ kira:
   # Habilita lo que solo existe en el sandbox, como simular un deposito.
   sandbox: ${KIRA_SANDBOX:true}
 
+# Servicio de identidad externo. Solo el BFF lo consume; ninguna credencial viaja al navegador.
+biometry:
+  base-url: ${BIOMETRY_BASE_URL:}
+  api-key: ${BIOMETRY_API_KEY:}
+
 # --- Configuracion propia del BFF ---
 bff:
   # Workers que cubren el hueco de un webhook perdido: Kira entrega una sola vez y sin reintentos.
@@ -62,6 +67,11 @@ bff:
     webhook-batch: 50
     tenants-ms: 1800000       # empresas registradas que aun no pueden operar (GET /v1/users/{id})
     accounts-ms: 3600000      # cuentas abiertas: failed, deactivated y frozen no tienen webhook
+    # Trae automaticamente al BFF cualquier empresa/cuenta creada directamente en el Sandbox de
+    # Kira (fuera del onboarding del portal). Apagado por defecto: crea tenants y administradores
+    # con contrasena generada, solo se debe encender en dev/sandbox (ver application-dev.yaml).
+    sandbox-sync-enabled: ${BFF_SANDBOX_SYNC_ENABLED:false}
+    sandbox-sync-ms: 300000   # cada 5 minutos: GET /v1/users completo, compara contra tenants locales
 
   # Limites internos de pagos (fijos en configuracion). Desde el umbral, dos aprobadores distintos.
   # tenant-thresholds: umbral propio por id de empresa, p. ej. juriscop: 25000
@@ -76,12 +86,22 @@ bff:
     version: ${BFF_TERMS_VERSION:}
     url: ${BFF_TERMS_URL:}
 
+  # Reto biometrico obligatorio antes de dar sesion. Debe quedar en true en cert y prod.
+  identity-verification:
+    enabled: ${BFF_IDENTITY_VERIFICATION_ENABLED:true}
+
   security:
     jwt-secret: ${BFF_JWT_SECRET:}
     jwt-issuer: ${BFF_JWT_ISSUER:autransactional-bff}
     token-expiration-ms: ${BFF_JWT_TTL_MS:28800000}
     mfa-encryption-key: ${BFF_MFA_ENCRYPTION_KEY:}
     mfa-enforced: ${BFF_MFA_ENFORCED:false}
+
+  # Correo de soporte/operaciones al que se escala una incidencia de integracion desde el
+  # centro de eventos (webhooks que agotaron sus reintentos). Vacio por defecto: el portal no
+  # ofrece el boton de escalar hasta que el operador lo configure.
+  support:
+    email: ${BFF_SUPPORT_EMAIL:}
 
 # El requestId (X-Request-Id) de cada peticion va en cada linea de log.
 logging:

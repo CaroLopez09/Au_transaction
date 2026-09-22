@@ -7,6 +7,8 @@ import com.example.autransactional.domain.tenant.OperatorUser;
 import com.example.autransactional.domain.tenant.OperatorUserRepository;
 import com.example.autransactional.infrastructure.security.BffSecurityProperties;
 import com.example.autransactional.infrastructure.security.JwtService;
+import com.example.autransactional.application.tenant.IdentityVerificationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -19,15 +21,28 @@ public class LoginUseCase {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final BffSecurityProperties security;
+    private final IdentityVerificationService identity;
+    private final IdentityVerificationProperties identityVerificationProperties;
 
+    @Autowired
     public LoginUseCase(OperatorUserRepository users, TenantRepository tenants,
                         PasswordEncoder passwordEncoder, JwtService jwtService,
-                        BffSecurityProperties security) {
+                        BffSecurityProperties security, IdentityVerificationService identity,
+                        IdentityVerificationProperties identityVerificationProperties) {
         this.users = users;
         this.tenants = tenants;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.security = security;
+        this.identity = identity;
+        this.identityVerificationProperties = identityVerificationProperties;
+    }
+
+    /** Compatibilidad para pruebas unitarias que construyen el caso de uso sin Spring. */
+    public LoginUseCase(OperatorUserRepository users, TenantRepository tenants,
+                        PasswordEncoder passwordEncoder, JwtService jwtService,
+                        BffSecurityProperties security) {
+        this(users, tenants, passwordEncoder, jwtService, security, null, new IdentityVerificationProperties(true));
     }
 
     public LoginResult login(String email, String rawPassword) {
@@ -37,6 +52,10 @@ public class LoginUseCase {
         if (!passwordEncoder.matches(rawPassword, user.passwordHash())) {
             // Mismo mensaje que el usuario inexistente: no revelamos que cuentas existen.
             throw new DomainException("Credenciales invalidas.");
+        }
+        if (identity != null && identityVerificationProperties.enabled() && !user.identity().status().isVerified()) {
+            IdentityVerificationService.Challenge challenge = identity.begin(user);
+            return LoginResult.identity(challenge.token(), challenge.userId(), challenge.expiresInSeconds(), user.email());
         }
         user.assertCanLogin();
         Tenant tenant = tenantOf(user);
@@ -60,8 +79,8 @@ public class LoginUseCase {
 
     private LoginResult session(OperatorUser user, Tenant tenant) {
         return new LoginResult(jwtService.issue(user), jwtService.expiresInSeconds(),
-                user.email(), user.role().name(), user.tenantId().value(),
-                tenant == null ? PLATFORM_NAME : tenant.getName(), null, null, null);
+            user.email(), user.role().name(), user.tenantId().value(),
+            tenant == null ? PLATFORM_NAME : tenant.getName(), null, null, null, null, null);
     }
 
     public static final String PLATFORM_NAME = "AU Transactional · Operaciones";
@@ -83,11 +102,17 @@ public class LoginUseCase {
      */
     public record LoginResult(String accessToken, long expiresIn, String email,
                               String role, String tenantId, String tenantName,
-                              String mfaChallenge, Boolean mfaRequired, Boolean mfaSetupRequired) {
+                              String mfaChallenge, Boolean mfaRequired, Boolean mfaSetupRequired,
+                              String identityChallenge, String identityUserId) {
 
         static LoginResult challenge(String challenge, long expiresIn, String email, boolean setupRequired) {
-            return new LoginResult(null, expiresIn, email, null, null, null, challenge,
-                    !setupRequired, setupRequired);
+                return new LoginResult(null, expiresIn, email, null, null, null, challenge,
+                    !setupRequired, setupRequired, null, null);
+            }
+
+            static LoginResult identity(String challenge, String userId, long expiresIn, String email) {
+                return new LoginResult(null, expiresIn, email, null, null, null, null,
+                    null, null, challenge, userId);
         }
     }
 }

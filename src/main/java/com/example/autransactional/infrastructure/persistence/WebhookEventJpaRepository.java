@@ -23,4 +23,8 @@ public interface WebhookEventJpaRepository extends JpaRepository<WebhookEventEnt
 
     List<WebhookEventEntity> findByTenantIdOrderByCreatedAtDesc(String tenantId,
                                                                 org.springframework.data.domain.Pageable page);
+
+    /** Incidencias: eventos que fallaron proyectando al menos una vez, sea que aun se reintenten o no. */
+    List<WebhookEventEntity> findByTenantIdAndProcessingErrorIsNotNullOrderByCreatedAtDesc(
+            String tenantId, org.springframework.data.domain.Pageable page);
 }

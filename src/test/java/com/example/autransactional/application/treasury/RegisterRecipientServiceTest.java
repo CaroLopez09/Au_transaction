@@ -2,13 +2,16 @@ package com.example.autransactional.application.treasury;
 
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.IdempotencyKey;
+import com.example.autransactional.domain.shared.Rail;
 import com.example.autransactional.domain.shared.TenantId;
 import com.example.autransactional.domain.tenant.Role;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
+import com.example.autransactional.domain.tenant.TenantSettings;
 import com.example.autransactional.domain.tenant.TenantStatus;
 import com.example.autransactional.domain.treasury.Recipient;
 import com.example.autransactional.domain.treasury.RecipientRepository;
+import com.example.autransactional.domain.treasury.WalletToken;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
 import com.example.autransactional.infrastructure.kira.KiraApiClient;
 import com.example.autransactional.infrastructure.kira.KiraResponse;
@@ -19,6 +22,7 @@ import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -229,6 +233,25 @@ class RegisterRecipientServiceTest {
                 Role.TREASURY_APPROVER);
 
         assertThrows(DomainException.class, () -> service.register(approver, wire()));
+    }
+
+    @Test
+    void unTenantSinElRielHabilitadoNoPuedeRegistrarEseDestinatario() {
+        Tenant empresa = tenants.findById(TENANT).orElseThrow();
+        empresa.applySettings(new TenantSettings(EnumSet.of(Rail.ACH), EnumSet.allOf(WalletToken.class)));
+
+        DomainException ex = assertThrows(DomainException.class, () -> service.register(maker, wire()));
+        assertTrue(ex.getMessage().contains("WIRE"));
+    }
+
+    @Test
+    void unTenantSinElTokenHabilitadoNoPuedeRegistrarEseWallet() {
+        Tenant empresa = tenants.findById(TENANT).orElseThrow();
+        empresa.applySettings(new TenantSettings(EnumSet.allOf(Rail.class), EnumSet.of(WalletToken.USDT)));
+
+        DomainException ex = assertThrows(DomainException.class,
+                () -> service.register(maker, wallet("USDC", "polygon")));
+        assertTrue(ex.getMessage().contains("USDC"));
     }
 
     @Test

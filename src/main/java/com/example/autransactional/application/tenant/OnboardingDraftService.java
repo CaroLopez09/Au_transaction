@@ -43,10 +43,58 @@ public class OnboardingDraftService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * Devuelve el formulario tal como quedo. Si el borrador no cubre un campo pero el expediente
+     * ya enviado si lo tiene, se rellena desde ahi: el dato existe, esta aceptado por el proveedor
+     * y no tiene sentido pedirlo otra vez. Lo guardado en el borrador manda siempre.
+     */
     @Transactional(readOnly = true)
     public OnboardingDraftView get(AuthenticatedOperator operator) {
         Tenant tenant = load(operator.tenantId());
-        return new OnboardingDraftView(read(tenant.getOnboardingDraft()), tenant.getOnboardingDraftUpdatedAt());
+        Map<String, Object> draft = overlay(
+                OnboardingDraftSeed.from(read(tenant.getOnboardingPayload())),
+                read(tenant.getOnboardingDraft()));
+        return new OnboardingDraftView(draft, tenant.getOnboardingDraftUpdatedAt());
+    }
+
+    /**
+     * Fusion en dos niveles (secciones y sus campos): un valor del borrador solo reemplaza al del
+     * expediente si trae contenido. El asistente guarda la forma completa con cadenas vacias, asi
+     * que sin esta regla un borrador recien empezado taparia todo lo ya enviado.
+     */
+    private static Map<String, Object> overlay(Map<String, Object> base, Map<String, Object> top) {
+        if (base.isEmpty()) {
+            return top;
+        }
+        Map<String, Object> merged = new LinkedHashMap<>(base);
+        top.forEach((key, value) -> {
+            if (value instanceof Map<?, ?> nested && merged.get(key) instanceof Map<?, ?> existing) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = overlay((Map<String, Object>) existing, (Map<String, Object>) nested);
+                merged.put(key, result);
+            } else if (hasContent(value)) {
+                merged.put(key, value);
+            } else {
+                merged.putIfAbsent(key, value);
+            }
+        });
+        return merged;
+    }
+
+    private static boolean hasContent(Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof String text) {
+            return !text.isBlank();
+        }
+        if (value instanceof Map<?, ?> map) {
+            return !map.isEmpty();
+        }
+        if (value instanceof Collection<?> list) {
+            return !list.isEmpty();
+        }
+        return true;
     }
 
     @Transactional

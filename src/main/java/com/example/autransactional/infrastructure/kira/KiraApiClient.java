@@ -71,6 +71,11 @@ public class KiraApiClient {
         return exchange(HttpMethod.POST, "/v1/users", body, key);
     }
 
+    /** Directorio paginado de usuarios disponible solo en el entorno sandbox de Kira. */
+    public JsonNode listUsers(Map<String, ?> query) {
+        return exchange(HttpMethod.GET, withQuery("/v1/users", query), null, null);
+    }
+
     /** PUT, no PATCH: PATCH no esta soportado en esta ruta. Solo se escriben los campos enviados. */
     public JsonNode updateUser(String userId, Object body) {
         return exchange(HttpMethod.PUT, "/v1/users/" + userId, body, null);

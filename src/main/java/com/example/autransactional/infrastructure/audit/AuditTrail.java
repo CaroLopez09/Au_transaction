@@ -7,6 +7,8 @@ import com.example.autransactional.infrastructure.security.AuthenticatedOperator
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import tools.jackson.databind.ObjectMapper;
@@ -35,6 +37,7 @@ public class AuditTrail {
         this.objectMapper = objectMapper;
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(AuthenticatedOperator operator, String action, String resourceType,
                        String resourceId, String idempotencyKey, String result, String detail) {
         Map<String, Object> changes = new LinkedHashMap<>();

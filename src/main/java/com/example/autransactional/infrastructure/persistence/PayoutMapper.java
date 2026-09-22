@@ -34,6 +34,9 @@ final class PayoutMapper {
                 e.getErrorCode(),
                 e.getReferenceNumber(),
                 e.getPaymentMethod(),
+                e.getFundingNetwork(),
+                e.getFundingCurrency(),
+                e.getDepositInstructions(),
                 e.getUpdatedAt());
     }
 
@@ -62,6 +65,9 @@ final class PayoutMapper {
         e.setErrorCode(p.getErrorCode());
         e.setReferenceNumber(p.getReferenceNumber());
         e.setPaymentMethod(p.getPaymentMethod());
+        e.setFundingNetwork(p.getFundingNetwork());
+        e.setFundingCurrency(p.getFundingCurrency());
+        e.setDepositInstructions(p.getDepositInstructions());
         e.setCreatedAt(p.getCreatedAt());
         e.setUpdatedAt(p.getUpdatedAt());
         return e;

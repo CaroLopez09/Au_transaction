@@ -21,6 +21,7 @@ public class JwtService {
     /** Marca un token que no da acceso: solo sirve para completar el segundo factor. */
     private static final String CLAIM_PURPOSE = "purpose";
     private static final String PURPOSE_MFA = "mfa";
+    private static final String PURPOSE_IDENTITY = "identity";
 
     private final Algorithm algorithm;
     private final JWTVerifier verifier;
@@ -73,6 +74,33 @@ public class JwtService {
     }
 
     public record MfaChallenge(String userId, String challengeId) {
+    }
+
+    /** Credencial de un solo proposito: no autentica rutas de negocio ni entrega permisos. */
+    public String issueIdentityChallenge(OperatorUser user, String attemptId) {
+        Instant now = Instant.now();
+        return JWT.create()
+                .withIssuer(properties.jwtIssuer())
+                .withSubject(user.email())
+                .withJWTId(java.util.UUID.randomUUID().toString())
+                .withClaim(CLAIM_USER_ID, user.id())
+                .withClaim(CLAIM_PURPOSE, PURPOSE_IDENTITY)
+                .withClaim("identity_attempt_id", attemptId)
+                .withIssuedAt(now)
+                .withExpiresAt(now.plusMillis(properties.mfaChallengeTtlMs()))
+                .sign(algorithm);
+    }
+
+    public IdentityChallenge verifyIdentityChallenge(String token) {
+        DecodedJWT decoded = verifier.verify(token);
+        if (!PURPOSE_IDENTITY.equals(decoded.getClaim(CLAIM_PURPOSE).asString())) {
+            throw new IllegalArgumentException("No es un reto de identidad.");
+        }
+        return new IdentityChallenge(decoded.getClaim(CLAIM_USER_ID).asString(),
+                decoded.getClaim("identity_attempt_id").asString(), decoded.getId());
+    }
+
+    public record IdentityChallenge(String userId, String attemptId, String challengeId) {
     }
 
     public long expiresInSeconds() {

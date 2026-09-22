@@ -87,7 +87,7 @@ public class RfiController {
 
     /** Kira no permite borrar el ultimo archivo de un item ya respondido (422). */
     @DeleteMapping("/{id}/items/{itemId}/documents/{documentId}")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public RfiView removeDocument(@AuthenticationPrincipal AuthenticatedOperator operator,
                                   @PathVariable String id, @PathVariable String itemId,
                                   @PathVariable String documentId) {

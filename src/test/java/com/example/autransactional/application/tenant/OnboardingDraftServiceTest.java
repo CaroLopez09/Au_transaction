@@ -134,4 +134,91 @@ class OnboardingDraftServiceTest {
 
         assertTrue(service.get(consulta).draft().isEmpty());
     }
+
+    // --- Rehidratacion desde el expediente ya enviado ---
+
+    /** Expediente como lo deja `forUpdate`: nombres del PUT de Kira, no los del asistente. */
+    private void conExpedienteEnviado() {
+        empresa.recordOnboardingPayload(mapper.writeValueAsString(Map.ofEntries(
+                Map.entry("business_legal_name", "Juriscop S.A.S."),
+                Map.entry("email", "tesoreria@juriscop.test"),
+                Map.entry("doing_business_as", "Juriscop"),
+                Map.entry("business_industry", List.of("legal-services")),
+                Map.entry("address_street", "Calle 1 # 2-3"),
+                Map.entry("address_city", "Bogota"),
+                Map.entry("address_country", "COL"),
+                Map.entry("pep_status", false),
+                Map.entry("source_of_funds", "sales_of_goods_and_services"),
+                Map.entry("expected_monthly_payments", "10"),
+                Map.entry("transaction_countries", List.of("COL", "USA")),
+                Map.entry("additional_info", Map.of("has_us_bank_account", "No")),
+                Map.entry("representative_birth_date", "1980-05-04"),
+                Map.entry("representative_first_name", "Ana"),
+                Map.entry("capabilities", Map.of("requested_banks", List.of("zenus"))))));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void sinBorradorElFormularioSeRellenaConLoYaEnviado() {
+        conExpedienteEnviado();
+
+        Map<String, Object> draft = service.get(consulta).draft();
+
+        Map<String, Object> company = (Map<String, Object>) draft.get("company");
+        assertEquals("Juriscop S.A.S.", company.get("business_legal_name"));
+        // Los nombres vuelven a los del asistente.
+        assertEquals("Juriscop", company.get("business_trade_name"));
+        assertEquals("legal-services", company.get("business_industry"));
+        assertEquals("Calle 1 # 2-3", ((Map<String, Object>) company.get("registered_address")).get("street_line_1"));
+        assertEquals("COL", ((Map<String, Object>) company.get("registered_address")).get("country"));
+
+        Map<String, Object> activity = (Map<String, Object>) draft.get("activity");
+        assertEquals("false", activity.get("pep_status"));
+        assertEquals("No", activity.get("has_us_bank_account"));
+        assertEquals("sales_of_goods_and_services", activity.get("source_of_funds"));
+        assertEquals("10", activity.get("expected_monthly_payments"));
+        assertEquals("COL, USA", activity.get("transaction_countries"));
+
+        Map<String, Object> representative = (Map<String, Object>) draft.get("representative");
+        assertEquals("1980-05-04", representative.get("representative_date_of_birth"));
+        assertEquals("Ana", representative.get("representative_first_name"));
+
+        // Lo que no es un campo del asistente no se cuela en el formulario.
+        assertFalse(company.containsKey("capabilities"));
+    }
+
+    /** El defecto reportado: el asistente guarda la forma completa y sus vacios tapaban lo enviado. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void unBorradorRecienEmpezadoNoBorraLoYaEnviado() {
+        conExpedienteEnviado();
+        service.save(compliance, new OnboardingCommands.SaveDraft(Map.of(
+                "company", new java.util.LinkedHashMap<>(Map.of("business_legal_name", "Otra Razon S.A.S.",
+                        "email", "", "business_type", "")),
+                "activity", Map.of("source_of_funds", ""))));
+
+        Map<String, Object> draft = service.get(consulta).draft();
+
+        Map<String, Object> company = (Map<String, Object>) draft.get("company");
+        // Lo tecleado manda...
+        assertEquals("Otra Razon S.A.S.", company.get("business_legal_name"));
+        // ...y lo que quedo en blanco se recupera del expediente.
+        assertEquals("tesoreria@juriscop.test", company.get("email"));
+        assertEquals("sales_of_goods_and_services",
+                ((Map<String, Object>) draft.get("activity")).get("source_of_funds"));
+    }
+
+    @Test
+    void sinExpedienteNiBorradorSigueDevolviendoVacio() {
+        assertTrue(service.get(consulta).draft().isEmpty());
+        assertNull(service.get(consulta).updatedAt());
+    }
+
+    @Test
+    void unExpedienteIlegibleNoRompeElFormulario() {
+        empresa.recordOnboardingPayload("{no es json");
+        service.save(compliance, new OnboardingCommands.SaveDraft(Map.of("company", Map.of("email", "a@b.co"))));
+
+        assertEquals(Map.of("company", Map.of("email", "a@b.co")), service.get(consulta).draft());
+    }
 }

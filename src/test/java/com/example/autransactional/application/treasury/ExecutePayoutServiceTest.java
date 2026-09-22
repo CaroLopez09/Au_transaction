@@ -11,6 +11,8 @@ import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
 import com.example.autransactional.domain.tenant.TenantStatus;
 import com.example.autransactional.domain.tenant.UserStatus;
+import com.example.autransactional.domain.tenant.IdentityVerificationStatus;
+import com.example.autransactional.domain.tenant.OperatorIdentity;
 import com.example.autransactional.domain.treasury.BankAccountKind;
 import com.example.autransactional.domain.treasury.Recipient;
 import com.example.autransactional.domain.treasury.RecipientAccount;
@@ -126,8 +128,17 @@ class ExecutePayoutServiceTest {
         when(kira.executePayout(anyString(), any(), any())).thenReturn(json(RESPUESTA_201));
 
         when(rfis.findOpenBlocking(any())).thenReturn(Optional.empty());
+        when(usuarios.findById("maker-1")).thenReturn(Optional.of(verifiedOperator("maker-1", Role.TREASURY_MAKER)));
+        when(usuarios.findById("approver-2")).thenReturn(Optional.of(verifiedOperator("approver-2", Role.TREASURY_APPROVER)));
         service = new ExecutePayoutService(payouts, quotations, accounts, recipients, tenants, rfis, kira,
                 audit, mapper, politica, cotizador, usuarios);
+    }
+
+    private OperatorUser verifiedOperator(String id, Role role) {
+        return new OperatorUser(id, TENANT, id + "@juriscop.test", "hash", "Operador", "Prueba", role,
+                UserStatus.ACTIVE, null, false,
+                new OperatorIdentity(IdentityVerificationStatus.VERIFIED, null, null, null, null,
+                        null, null, Instant.now(), null));
     }
 
     // --- D9: recotizar un pago pendiente cuya cotizacion vencio ---
@@ -194,7 +205,9 @@ class ExecutePayoutServiceTest {
 
     private static OperatorUser operador(String id, String nombre, String apellido) {
         return new OperatorUser(id, TENANT, id + "@juriscop.test", "hash", nombre, apellido,
-                Role.TREASURY_MAKER, UserStatus.ACTIVE, null, false);
+            Role.TREASURY_MAKER, UserStatus.ACTIVE, null, false,
+            new OperatorIdentity(IdentityVerificationStatus.VERIFIED, null, null, null, null,
+                null, null, Instant.now(), null));
     }
 
     @Test
@@ -229,6 +242,7 @@ class ExecutePayoutServiceTest {
     @Test
     void laSegundaFirmaTieneQueSerDeOtraPersonaYEntoncesSeEnvia() {
         pagoGrande();
+        when(usuarios.findById("approver-3")).thenReturn(Optional.of(verifiedOperator("approver-3", Role.ADMIN)));
         service.approveAndSubmit(approver, "p-1", new PayoutCommands.ApprovePayout(null, null, null, null));
 
         assertThrows(DomainException.class, () -> service.approveAndSubmit(approver, "p-1",
@@ -443,7 +457,7 @@ class ExecutePayoutServiceTest {
         when(accounts.findByIdAndTenant("va-ajena", TENANT)).thenReturn(Optional.empty());
 
         var e = assertThrows(DomainException.class, () -> service.create(maker,
-                new PayoutCommands.CreatePayout("va-ajena", "rec-1", new BigDecimal("100"), "USD", null)));
+                new PayoutCommands.CreatePayout("va-ajena", "rec-1", new BigDecimal("100"), "USD", null, null, null)));
 
         assertEquals("La cuenta virtual no existe.", e.getMessage());
         verify(payouts, never()).save(any());
@@ -452,7 +466,7 @@ class ExecutePayoutServiceTest {
     @Test
     void conLaMismaClaveDelPortalNoSeCreaUnSegundoPago() {
         String clave = "3f1a9c20-4b5d-4e6f-8a90-1c2d3e4f5a6b";
-        var comando = new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null);
+        var comando = new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null, null, null);
         when(payouts.findByIdempotencyKey(IdempotencyKey.of(clave))).thenReturn(Optional.empty());
 
         var primero = service.create(maker, comando, clave);
@@ -470,7 +484,7 @@ class ExecutePayoutServiceTest {
     @Test
     void unaClaveDelPortalQueNoEsUuidSeRechaza() {
         assertThrows(DomainException.class, () -> service.create(maker,
-                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null), "doble-clic"));
+                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null, null, null), "doble-clic"));
         verify(payouts, never()).save(any());
     }
 
@@ -479,14 +493,14 @@ class ExecutePayoutServiceTest {
         when(recipients.findByIdAndTenant("rec-x", TENANT)).thenReturn(Optional.empty());
 
         assertThrows(DomainException.class, () -> service.create(maker,
-                new PayoutCommands.CreatePayout("va-1", "rec-x", new BigDecimal("100"), "USD", null)));
+                new PayoutCommands.CreatePayout("va-1", "rec-x", new BigDecimal("100"), "USD", null, null, null)));
         verify(payouts, never()).save(any());
     }
 
     @Test
     void elUserDeKiraDelPagoEsElDeLaEmpresa() {
         var view = service.create(maker,
-                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null));
+                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null, null, null));
 
         ArgumentCaptor<Payout> guardado = ArgumentCaptor.forClass(Payout.class);
         verify(payouts).save(guardado.capture());
@@ -501,7 +515,46 @@ class ExecutePayoutServiceTest {
         when(quotations.findByIdAndTenant("q-2", TENANT)).thenReturn(Optional.of(otra));
 
         assertThrows(DomainException.class, () -> service.create(maker,
-                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", "q-2")));
+                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", "q-2", null, null)));
+    }
+
+    // --- G-19: financiar un pago con un deposito cripto en vez de con el saldo de la cuenta ---
+
+    @Test
+    void crearUnPagoConRedYTokenLoMarcaComoFinanciadoConCripto() {
+        var view = service.create(maker,
+                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null,
+                        "polygon", "USDC"));
+
+        assertEquals("polygon", view.fundingNetwork());
+        assertEquals("USDC", view.fundingCurrency());
+    }
+
+    @Test
+    void unParDeRedYTokenInvalidoSeRechazaAlCrear() {
+        assertThrows(DomainException.class, () -> service.create(maker,
+                new PayoutCommands.CreatePayout("va-1", "rec-1", new BigDecimal("100"), "USD", null,
+                        "tron", "USDC")));
+    }
+
+    @Test
+    void unPagoFinanciadoConCriptoEnviaModoYPaymentInstructionsAKira() {
+        pago.requestCryptoFunding("polygon", "USDC");
+        pago.attachQuotation("q-1", Instant.now().plusSeconds(900));
+        when(kira.executePayout(anyString(), any(), any())).thenReturn(json("""
+                { "id": "pay_1", "status": "created", "deposit_instructions":
+                  { "address": "0xabc123", "network": "polygon", "currency": "USDC",
+                    "expires_at": "2026-09-22T12:00:00.000Z" } }
+                """));
+
+        var view = service.approveAndSubmit(approver, "p-1", new PayoutCommands.ApprovePayout(null, null, null, null));
+
+        ArgumentCaptor<Map<String, Object>> cuerpo = ArgumentCaptor.forClass(Map.class);
+        verify(kira).executePayout(anyString(), cuerpo.capture(), any());
+        assertEquals("CRYPTO", cuerpo.getValue().get("mode"));
+        assertEquals(Map.of("network", "polygon", "currency", "USDC"), cuerpo.getValue().get("payment_instructions"));
+        assertNotNull(view.depositInstructions());
+        assertTrue(view.depositInstructions().contains("0xabc123"));
     }
 
     // ---------- Vista previa, linea de tiempo e historial de Kira ----------

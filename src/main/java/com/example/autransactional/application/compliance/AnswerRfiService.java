@@ -8,6 +8,7 @@ import com.example.autransactional.domain.compliance.RfiStatus;
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.FileSignature;
 import com.example.autransactional.domain.shared.TenantId;
+import com.example.autransactional.domain.tenant.FeatureFlag;
 import com.example.autransactional.domain.tenant.Tenant;
 import com.example.autransactional.domain.tenant.TenantRepository;
 import com.example.autransactional.domain.treasury.Payout;
@@ -103,6 +104,9 @@ public class AnswerRfiService {
     @Transactional
     public List<RfiView> sync(AuthenticatedOperator operator) {
         assertCanManage(operator);
+        tenants.findById(operator.tenantId())
+                .orElseThrow(() -> new DomainException("La organizacion no existe."))
+                .getSettings().assertFeatureEnabled(FeatureFlag.RFIS);
         syncInternal(operator.tenantId(), operator);
         return list(operator, false);
     }
@@ -113,6 +117,12 @@ public class AnswerRfiService {
      */
     @Transactional
     public int syncForTenant(TenantId tenantId) {
+        Tenant tenant = tenants.findById(tenantId)
+                .orElseThrow(() -> new DomainException("La organizacion no existe."));
+        if (!tenant.getSettings().enabledFeatures().contains(FeatureFlag.RFIS)) {
+            // El worker recorre todas las empresas: una sin el modulo activo simplemente no aporta.
+            return 0;
+        }
         return syncInternal(tenantId, null);
     }
 
@@ -298,7 +308,7 @@ public class AnswerRfiService {
     /** Elimina un archivo. Kira no deja borrar el ultimo de un item ya respondido. */
     @Transactional(noRollbackFor = DomainException.class)
     public RfiView removeDocument(AuthenticatedOperator operator, String rfiId, String itemId, String documentId) {
-        assertCanManage(operator);
+        assertCanDeleteDocuments(operator);
         Rfi rfi = load(operator.tenantId(), rfiId);
         rfi.assertAcceptsAnswers();
         documentItem(rfi, itemId);
@@ -672,6 +682,13 @@ public class AnswerRfiService {
     private void assertCanManage(AuthenticatedOperator operator) {
         if (!operator.role().canManageCompliance()) {
             throw new DomainException("Tu rol no puede gestionar RFIs.");
+        }
+    }
+
+    /** Borrar documentos es una accion mas sensible que gestionar RFIs: permiso propio. */
+    private void assertCanDeleteDocuments(AuthenticatedOperator operator) {
+        if (!operator.role().canDeleteRfiDocuments()) {
+            throw new DomainException("Tu rol no puede eliminar documentos de un RFI.");
         }
     }
 

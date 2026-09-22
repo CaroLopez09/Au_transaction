@@ -120,6 +120,17 @@ public class PayoutEntity {
     @Column(name = "payment_method", length = 20)
     private String paymentMethod;
 
+    /** No nulo cuando el pago se financia con un deposito cripto en vez del saldo (G-19). */
+    @Column(name = "funding_network", length = 20)
+    private String fundingNetwork;
+
+    @Column(name = "funding_currency", length = 10)
+    private String fundingCurrency;
+
+    /** JSON crudo de 'deposit_instructions' que Kira devuelve al enviar un pago cripto. */
+    @Column(name = "deposit_instructions", columnDefinition = "TEXT")
+    private String depositInstructions;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 

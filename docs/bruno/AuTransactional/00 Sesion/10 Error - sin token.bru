@@ -11,11 +11,11 @@ get {
 }
 
 tests {
-  test("responde 403", function () {
-    expect([403]).to.include(res.getStatus());
+  test("responde 401", function () {
+    expect([401]).to.include(res.getStatus());
   });
 }
 
 docs {
-  Sin cabecera Authorization responde 403 con cuerpo VACIO (no 401).
+  Sin cabecera Authorization responde 401 (F7): el 403 queda para el rol autenticado sin permiso.
 }

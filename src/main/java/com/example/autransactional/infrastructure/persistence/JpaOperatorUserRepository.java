@@ -5,6 +5,7 @@ import com.example.autransactional.domain.tenant.OperatorUser;
 import com.example.autransactional.domain.tenant.OperatorUserRepository;
 import com.example.autransactional.domain.tenant.Role;
 import com.example.autransactional.domain.tenant.UserStatus;
+import com.example.autransactional.domain.tenant.OperatorIdentity;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -65,6 +66,15 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
         entity.setRole(role);
         entity.setStatus(user.status());
         entity.setMfaEnabled(false);
+        entity.setIdentityStatus(user.identity().status());
+        entity.setKiraPersonReferenceId(user.identity().kiraPersonReferenceId());
+        entity.setIdentityDocumentType(user.identity().documentType());
+        entity.setIdentityDocumentLastFour(user.identity().documentNumberLastFour());
+        entity.setIdentityIssuingCountry(user.identity().issuingCountry());
+        entity.setBiometricConsentAt(user.identity().biometricConsentAt());
+        entity.setIdentityRequestedAt(user.identity().verificationRequestedAt());
+        entity.setIdentityVerifiedAt(user.identity().verifiedAt());
+        entity.setIdentityRejectionReason(user.identity().rejectionReason());
         return toDomain(jpa.save(entity));
     }
 
@@ -74,6 +84,25 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
         OperatorUserEntity entity = jpa.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("Usuario inexistente: " + userId));
         entity.setStatus(status);
+        entity.setUpdatedAt(java.time.Instant.now());
+        jpa.save(entity);
+    }
+
+    @Override
+    @org.springframework.transaction.annotation.Transactional
+    public void updateIdentity(String userId, OperatorIdentity identity, UserStatus status) {
+        OperatorUserEntity entity = jpa.findById(userId)
+                .orElseThrow(() -> new IllegalStateException("Usuario inexistente: " + userId));
+        entity.setStatus(status);
+        entity.setIdentityStatus(identity.status());
+        entity.setKiraPersonReferenceId(identity.kiraPersonReferenceId());
+        entity.setIdentityDocumentType(identity.documentType());
+        entity.setIdentityDocumentLastFour(identity.documentNumberLastFour());
+        entity.setIdentityIssuingCountry(identity.issuingCountry());
+        entity.setBiometricConsentAt(identity.biometricConsentAt());
+        entity.setIdentityRequestedAt(identity.verificationRequestedAt());
+        entity.setIdentityVerifiedAt(identity.verifiedAt());
+        entity.setIdentityRejectionReason(identity.rejectionReason());
         entity.setUpdatedAt(java.time.Instant.now());
         jpa.save(entity);
     }
@@ -94,6 +123,10 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
         TenantId tenant = e.getTenantId() == null ? TenantId.PLATFORM : TenantId.of(e.getTenantId());
         return new OperatorUser(e.getId(), tenant, e.getEmail(), e.getPasswordHash(),
                 e.getFirstName(), e.getLastName(), Role.fromDbName(e.getRole().getName()),
-                e.getStatus(), e.getMfaSecret(), e.isMfaEnabled());
+            e.getStatus(), e.getMfaSecret(), e.isMfaEnabled(),
+            new OperatorIdentity(e.getIdentityStatus(), e.getKiraPersonReferenceId(),
+                e.getIdentityDocumentType(), e.getIdentityDocumentLastFour(),
+                e.getIdentityIssuingCountry(), e.getBiometricConsentAt(), e.getIdentityRequestedAt(),
+                e.getIdentityVerifiedAt(), e.getIdentityRejectionReason()));
     }
 }
