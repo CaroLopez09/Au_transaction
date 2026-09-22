@@ -50,8 +50,8 @@ class OpenVirtualAccountServiceTest {
     private Tenant empresa;
     private List<VirtualAccount> registro;
 
-    private final AuthenticatedOperator maker =
-            new AuthenticatedOperator("u-1", "treasury.maker@juriscop.test", TENANT, Role.TREASURY_MAKER);
+    private final AuthenticatedOperator admin =
+            new AuthenticatedOperator("u-1", "admin@juriscop.test", TENANT, Role.ADMIN);
 
     private KiraProperties properties(String bank, boolean sandbox) {
         return new KiraProperties("https://api.balampay.com/sandbox", "k", "c", "p", "2026-06-01",
@@ -112,7 +112,7 @@ class OpenVirtualAccountServiceTest {
     void elBancoLoFijaElEntornoNoElFormulario() {
         kiraAbre("pending", null);
 
-        service.open(maker, new VirtualAccountCommands.OpenAccount("Operativa", "fiat", "USD"));
+        service.open(admin, new VirtualAccountCommands.OpenAccount("Operativa", "fiat", "USD"));
 
         Map<String, Object> body = cuerpoEnviado();
         assertEquals("jp_morgan", body.get("bank"));
@@ -132,7 +132,7 @@ class OpenVirtualAccountServiceTest {
         empresa = sinProducto;
 
         assertThrows(DomainException.class,
-                () -> service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null)));
+                () -> service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null)));
         verify(kira, never()).createVirtualAccount(any(), any());
     }
 
@@ -140,7 +140,7 @@ class OpenVirtualAccountServiceTest {
     void laClaveDeIdempotenciaSePersisteAntesDeLlamar() {
         kiraAbre("pending", null);
 
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
 
         VirtualAccount abierta = registro.stream()
                 .filter(a -> a.getId().equals(view.id())).findFirst().orElseThrow();
@@ -154,7 +154,7 @@ class OpenVirtualAccountServiceTest {
     void unaCuentaPendienteNoEstaListaParaFondos() {
         kiraAbre("pending", null);
 
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
 
         assertFalse(view.fundsReady());
         assertEquals("kva_1", view.kiraAccountId());
@@ -165,7 +165,7 @@ class OpenVirtualAccountServiceTest {
         // 2026-06-01: una cuenta nueva vuelve 'activating'; el banco aun la esta abriendo.
         kiraAbre("activating", "PENDING-ACT-ACCOUNT");
 
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
 
         assertFalse(view.fundsReady());
         assertEquals("PENDING", view.status());
@@ -175,7 +175,7 @@ class OpenVirtualAccountServiceTest {
     void activeLaHabilitaAunqueNoHayaLlegadoElEvento() {
         kiraAbre("active", null);
 
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
 
         assertTrue(view.fundsReady());
     }
@@ -184,7 +184,7 @@ class OpenVirtualAccountServiceTest {
     void unNumeroDeCuentaRealSiLaHabilita() {
         kiraAbre("active", "1234567890");
 
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
 
         assertTrue(view.fundsReady());
         assertEquals("1234567890", view.accountNumber());
@@ -200,7 +200,7 @@ class OpenVirtualAccountServiceTest {
         when(kira.getVirtualAccount("kva_previa")).thenReturn(json(
                 "{\"id\":\"kva_previa\",\"status\":\"active\",\"account_number\":\"999888777\"}"));
 
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
 
         assertEquals("kva_previa", view.kiraAccountId());
         assertTrue(view.fundsReady());
@@ -209,11 +209,11 @@ class OpenVirtualAccountServiceTest {
     @Test
     void unCuatrocientosEnElSaldoEsCalculandoNoUnError() {
         kiraAbre("pending", null);
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
         when(kira.getVirtualAccountBalance(anyString()))
                 .thenThrow(new KiraApiException(400, "bad_request", "Aun activando", null));
 
-        var refrescada = assertDoesNotThrow(() -> service.refreshBalance(maker, view.id()));
+        var refrescada = assertDoesNotThrow(() -> service.refreshBalance(admin, view.id()));
 
         assertEquals(0, BigDecimal.ZERO.compareTo(refrescada.availableBalance()));
     }
@@ -221,21 +221,21 @@ class OpenVirtualAccountServiceTest {
     @Test
     void otrosErroresDeSaldoSiSePropagan() {
         kiraAbre("pending", null);
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
         when(kira.getVirtualAccountBalance(anyString()))
                 .thenThrow(new KiraApiException(500, "server_error", "Kira caido", null));
 
-        assertThrows(KiraApiException.class, () -> service.refreshBalance(maker, view.id()));
+        assertThrows(KiraApiException.class, () -> service.refreshBalance(admin, view.id()));
     }
 
     @Test
     void elSaldoLlegaEnDecimalNoEnUnidadesMenores() {
         kiraAbre("active", "1234567890");
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
         when(kira.getVirtualAccountBalance("kva_1"))
                 .thenReturn(json("{\"available_balance\":5000.00,\"currency\":\"USD\"}"));
 
-        var refrescada = service.refreshBalance(maker, view.id());
+        var refrescada = service.refreshBalance(admin, view.id());
 
         assertEquals(0, new BigDecimal("5000.00").compareTo(refrescada.availableBalance()));
         assertNotNull(refrescada.balanceRefreshedAt());
@@ -246,9 +246,9 @@ class OpenVirtualAccountServiceTest {
         service = new OpenVirtualAccountService(accounts, tenants, kira,
                 properties("jp_morgan", false), audit, idempotencyKeys);
         kiraAbre("active", "1234567890");
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
 
-        assertThrows(DomainException.class, () -> service.simulateDeposit(maker, view.id(),
+        assertThrows(DomainException.class, () -> service.simulateDeposit(admin, view.id(),
                 new VirtualAccountCommands.SimulateDeposit(new BigDecimal("100.00"), "wire")));
         verify(kira, never()).simulateDeposit(anyString(), any());
     }
@@ -256,11 +256,11 @@ class OpenVirtualAccountServiceTest {
     @Test
     void enSandboxSimularDepositoRefrescaElSaldo() {
         kiraAbre("active", "1234567890");
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, null, null));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, null, null));
         when(kira.getVirtualAccountBalance("kva_1"))
                 .thenReturn(json("{\"available_balance\":5000.00,\"currency\":\"USD\"}"));
 
-        var refrescada = service.simulateDeposit(maker, view.id(),
+        var refrescada = service.simulateDeposit(admin, view.id(),
                 new VirtualAccountCommands.SimulateDeposit(new BigDecimal("5000"), "wire"));
 
         verify(kira).simulateDeposit(eq("kva_1"), any());
@@ -273,7 +273,7 @@ class OpenVirtualAccountServiceTest {
                 com.example.autransactional.domain.account.VirtualAccountMode.FIAT, "banco", null);
         registro.add(local);
 
-        assertThrows(DomainException.class, () -> service.refresh(maker, "va-x"));
+        assertThrows(DomainException.class, () -> service.refresh(admin, "va-x"));
     }
 
     // --- G-23: un fallo de Kira no puede dejar cuentas huerfanas ---
@@ -293,7 +293,7 @@ class OpenVirtualAccountServiceTest {
         String claveOriginal = previa.getOpeningIdempotencyKey();
         kiraAbre("pending", null);
 
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount("Operativa", "fiat", "USD"));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount("Operativa", "fiat", "USD"));
 
         assertEquals("va-previa", view.id(), "debe reutilizar la fila, no crear otra");
         assertEquals(1, registro.size(), "la empresa no acumula cuentas huerfanas");
@@ -312,7 +312,7 @@ class OpenVirtualAccountServiceTest {
         registro.add(previa);
         kiraAbre("pending", null);
 
-        var view = service.open(maker, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
+        var view = service.open(admin, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
 
         assertNotEquals("va-eur", view.id());
         assertEquals(2, registro.size());
@@ -322,11 +322,11 @@ class OpenVirtualAccountServiceTest {
     void unaCuentaYaConfirmadaPorKiraNoSeReutiliza() {
         // Tiene kira_account_id: es una cuenta real, no un intento a medias.
         kiraAbre("pending", null);
-        var primera = service.open(maker, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
+        var primera = service.open(admin, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
         reset(kira);
         kiraAbre("pending", null);
 
-        var segunda = service.open(maker, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
+        var segunda = service.open(admin, new VirtualAccountCommands.OpenAccount(null, "fiat", "USD"));
 
         assertNotEquals(primera.id(), segunda.id(), "abrir una segunda cuenta sigue siendo posible");
     }

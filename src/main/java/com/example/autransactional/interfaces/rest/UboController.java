@@ -46,7 +46,7 @@ public class UboController {
 
     /** Alta o edicion local. Sin `id` crea; con `id` actualiza. */
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public UboView save(@AuthenticationPrincipal AuthenticatedOperator operator,
                         @Valid @RequestBody UboCommands.SaveUbo command) {
         return ubos.save(operator, command);
@@ -54,7 +54,7 @@ public class UboController {
 
     /** Borra un beneficiario que Kira aun no conoce. Devuelve el grupo actualizado. */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public UboView.Roster delete(@AuthenticationPrincipal AuthenticatedOperator operator,
                                  @PathVariable String id) {
         return ubos.delete(operator, id);
@@ -62,7 +62,7 @@ public class UboController {
 
     /** Envia el array completo a Kira. Falla antes de llamar si no hay beneficiario final. */
     @PostMapping("/sync")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public OnboardingView sync(@AuthenticationPrincipal AuthenticatedOperator operator) {
         return ubos.syncToKira(operator);
     }
@@ -80,7 +80,7 @@ public class UboController {
      * selfie hace falta `biometricConsent=true`: el consentimiento de la persona queda auditado.
      */
     @PostMapping(value = "/{id}/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public UboView attachDocuments(@AuthenticationPrincipal AuthenticatedOperator operator,
                                    @PathVariable String id,
                                    @RequestParam String informationType,
@@ -96,7 +96,7 @@ public class UboController {
     }
 
     @PostMapping("/liveness-links")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public UboView.Roster requestLivenessLinks(
             @AuthenticationPrincipal AuthenticatedOperator operator,
             @RequestBody(required = false) UboCommands.RequestLivenessLinks command) {

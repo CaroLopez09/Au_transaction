@@ -366,9 +366,9 @@ Las propiedades se enlazan a records `@ConfigurationProperties`: `KiraProperties
 | Algoritmo | HMAC256 con `bff.security.jwt-secret` |
 | `iss` | `bff.security.jwt-issuer` |
 | `sub` | correo del operador |
-| `uid` | id del operador (`juriscop:treasury_maker`) |
+| `uid` | id del operador (`juriscop:admin`) |
 | `tenant_id` | id de la empresa |
-| `role` | constante del enum `Role` (`TREASURY_MAKER`) |
+| `role` | constante del enum `Role` (`ADMIN`) |
 | `iat` / `exp` | emisión / emisión + `token-expiration-ms` (8 h) |
 
 `verify(token)` exige firma, emisor y vigencia; si falta `tenant_id`, `role` o `uid` lanza
@@ -407,20 +407,17 @@ servicios toman la empresa de `operator.tenantId()` (§17).
 
 | Constante | `dbName` | Descripción | `canCreatePayout` | `canApprovePayout` | `canManageCompliance` |
 |---|---|---|---|---|---|
-| `ADMIN` | `admin` | Administrador General de la Empresa Cliente | ✓ | ✓ | ✓ |
-| `TREASURY_MAKER` | `tesoreria_maker` | Registra borradores, destinatarios y cotiza | ✓ | | |
+| `ADMIN` | `admin` | Administrador General: crea pagos, gestiona cumplimiento y operadores | ✓ | ✓ | ✓ |
 | `TREASURY_APPROVER` | `tesoreria_approver` | Aprueba y autoriza pagos (maker-checker) | | ✓ | |
-| `COMPLIANCE_INTERNAL` | `compliance_internal` | Ficha 360, UBOs, liveness y RFIs | | | ✓ |
-| `READ_ONLY` | `read_only` | Sólo lectura | | | |
 | `PLATFORM_OPERATOR` | `platform_operator` | Operaciones y cumplimiento de AU: consola multiempresa de solo lectura | | | |
 
-Los cinco primeros son `RoleScope.TENANT`; `PLATFORM_OPERATOR` es `RoleScope.SYSTEM` y **no pertenece a
-ninguna empresa**: su `tenantId` es el centinela `TenantId.PLATFORM` (`__platform__`), de forma que las
-rutas de empresa le devuelven vacío y las de plataforma rechazan a los roles de empresa con `403`.
+`ADMIN` y `TREASURY_APPROVER` son `RoleScope.TENANT`; `PLATFORM_OPERATOR` es `RoleScope.SYSTEM` y **no
+pertenece a ninguna empresa**: su `tenantId` es el centinela `TenantId.PLATFORM` (`__platform__`), de forma
+que las rutas de empresa le devuelven vacío y las de plataforma rechazan a los roles de empresa con `403`.
 
 **Consultas que gastan cuota de Kira** (refrescos, saldo, sincronizar depósitos) exigen
-`ADMIN`, `TREASURY_MAKER`, `TREASURY_APPROVER` o `COMPLIANCE_INTERNAL`: `READ_ONLY` no las usa. El enlace de
-descarga de un documento de RFI es sólo de `ADMIN` y `COMPLIANCE_INTERNAL`, y queda auditado.
+`ADMIN` o `TREASURY_APPROVER`. El enlace de descarga de un documento de RFI es sólo de `ADMIN`, y
+queda auditado.
 
 **Doble barrera:** `@PreAuthorize("hasAnyRole(...)")` en el controlador **y** comprobación `role.canX()` en
 el servicio (`DomainException` → 422). Matriz completa por endpoint en §10.
@@ -1030,56 +1027,55 @@ Contrato campo a campo y ejemplos: [`API-GUIA.md`](API-GUIA.md).
 | POST | `/api/auth/login` | **público** | `AuthController.login` → `LoginUseCase.login` | no |
 | GET | `/api/auth/me` | autenticado | `AuthController.me` (del JWT) | no |
 | GET | `/api/onboarding` | autenticado | `OnboardingController.status` | no |
-| POST | `/api/onboarding` → **201** | ADMIN, COMPLIANCE_INTERNAL | `.register` | `POST /v1/users` |
-| PUT | `/api/onboarding` | ADMIN, COMPLIANCE_INTERNAL | `.completeProfile` | `PUT` + `GET /v1/users/{id}` |
-| POST | `/api/onboarding/refresh` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.refresh` | `GET /v1/users/{id}` |
-| POST | `/api/onboarding/documents` (multipart `files`) | ADMIN, COMPLIANCE_INTERNAL | `.attachDocuments` | `PUT` + `GET /v1/users/{id}` |
+| POST | `/api/onboarding` → **201** | ADMIN | `.register` | `POST /v1/users` |
+| PUT | `/api/onboarding` | ADMIN | `.completeProfile` | `PUT` + `GET /v1/users/{id}` |
+| POST | `/api/onboarding/refresh` | ADMIN, TREASURY_APPROVER | `.refresh` | `GET /v1/users/{id}` |
+| POST | `/api/onboarding/documents` (multipart `files`) | ADMIN | `.attachDocuments` | `PUT` + `GET /v1/users/{id}` |
 | GET | `/api/onboarding/draft` | autenticado | `OnboardingDraftController.get` | no |
-| PUT | `/api/onboarding/draft` | ADMIN, COMPLIANCE_INTERNAL | `.save` | no |
+| PUT | `/api/onboarding/draft` | ADMIN | `.save` | no |
 | GET | `/api/onboarding/terms` | autenticado | `OnboardingController.terms` | no |
-| POST | `/api/onboarding/terms` | ADMIN, COMPLIANCE_INTERNAL | `.acceptTerms` | `PUT /v1/users/{id}` |
+| POST | `/api/onboarding/terms` | ADMIN | `.acceptTerms` | `PUT /v1/users/{id}` |
 | GET | `/api/ubos` | autenticado | `UboController.list` | no |
-| POST | `/api/ubos` | ADMIN, COMPLIANCE_INTERNAL | `.save` | no |
-| DELETE | `/api/ubos/{id}` | ADMIN, COMPLIANCE_INTERNAL | `.delete` (sólo si Kira no lo conoce) | no |
-| POST | `/api/ubos/{id}/documents` (multipart `files`, `biometricConsent`) | ADMIN, COMPLIANCE_INTERNAL | `.attachDocuments` | `PUT /v1/users/{id}` |
-| POST | `/api/ubos/sync` | ADMIN, COMPLIANCE_INTERNAL | `.sync` | `PUT` + `GET /v1/users/{id}` |
-| POST | `/api/ubos/liveness-links` | ADMIN, COMPLIANCE_INTERNAL | `.requestLivenessLinks` | `POST …/liveness-link` |
+| POST | `/api/ubos` | ADMIN | `.save` | no |
+| DELETE | `/api/ubos/{id}` | ADMIN | `.delete` (sólo si Kira no lo conoce) | no |
+| POST | `/api/ubos/{id}/documents` (multipart `files`, `biometricConsent`) | ADMIN | `.attachDocuments` | `PUT /v1/users/{id}` |
+| POST | `/api/ubos/sync` | ADMIN | `.sync` | `PUT` + `GET /v1/users/{id}` |
+| POST | `/api/ubos/liveness-links` | ADMIN | `.requestLivenessLinks` | `POST …/liveness-link` |
 | GET | `/api/rfis?open=` | autenticado | `RfiController.list` | no |
 | GET | `/api/rfis/{id}` | autenticado | `.get` | no |
-| POST | `/api/rfis/sync` | ADMIN, COMPLIANCE_INTERNAL | `.sync` | `GET /v1/rfis` (+ detalle) |
-| POST | `/api/rfis/{id}/refresh` | ADMIN, COMPLIANCE_INTERNAL | `.refresh` | `GET /v1/rfis/{id}` |
-| PATCH | `/api/rfis/{id}/items` | ADMIN, COMPLIANCE_INTERNAL | `.answer` | `PATCH …/items` + `GET` |
-| POST | `/api/rfis/{id}/items/{itemId}/documents` (multipart `files`) | ADMIN, COMPLIANCE_INTERNAL | `.uploadDocuments` | `POST …/documents` + `GET` |
-| DELETE | `/api/rfis/{id}/items/{itemId}/documents/{documentId}` | ADMIN, COMPLIANCE_INTERNAL | `.removeDocument` | `DELETE …/documents/{doc}` + `GET` |
-| GET | `/api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | ADMIN, COMPLIANCE_INTERNAL | `.documentLink` (auditado) | `GET …/documents/{doc}` |
-| POST | `/api/rfis/{id}/items/{itemId}/ubo-link` | ADMIN, COMPLIANCE_INTERNAL | `.mintUboLink` | `POST …/ubo-link` |
+| POST | `/api/rfis/sync` | ADMIN | `.sync` | `GET /v1/rfis` (+ detalle) |
+| POST | `/api/rfis/{id}/refresh` | ADMIN | `.refresh` | `GET /v1/rfis/{id}` |
+| PATCH | `/api/rfis/{id}/items` | ADMIN | `.answer` | `PATCH …/items` + `GET` |
+| POST | `/api/rfis/{id}/items/{itemId}/documents` (multipart `files`) | ADMIN | `.uploadDocuments` | `POST …/documents` + `GET` |
+| DELETE | `/api/rfis/{id}/items/{itemId}/documents/{documentId}` | ADMIN | `.removeDocument` | `DELETE …/documents/{doc}` + `GET` |
+| GET | `/api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | ADMIN | `.documentLink` (auditado) | `GET …/documents/{doc}` |
+| POST | `/api/rfis/{id}/items/{itemId}/ubo-link` | ADMIN | `.mintUboLink` | `POST …/ubo-link` |
 | GET | `/api/virtual-accounts` | autenticado | `VirtualAccountController.list` | no |
 | GET | `/api/virtual-accounts/{id}` | autenticado | `.get` | no |
-| POST | `/api/virtual-accounts` → **201** | ADMIN, TREASURY_MAKER, COMPLIANCE_INTERNAL | `.open` | `POST /v1/virtual-accounts` (+ lista/detalle si 409) |
-| POST | `/api/virtual-accounts/{id}/refresh` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.refresh` | `GET /v1/virtual-accounts/{id}` |
-| POST | `/api/virtual-accounts/{id}/balance` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.refreshBalance` | `GET …/balance` |
-| POST | `/api/virtual-accounts/{id}/simulate-deposit` | ADMIN, TREASURY_MAKER | `.simulateDeposit` | `POST …/simulate-deposit` + balance |
+| POST | `/api/virtual-accounts` → **201** | ADMIN | `.open` | `POST /v1/virtual-accounts` (+ lista/detalle si 409) |
+| POST | `/api/virtual-accounts/{id}/refresh` | ADMIN, TREASURY_APPROVER | `.refresh` | `GET /v1/virtual-accounts/{id}` |
+| POST | `/api/virtual-accounts/{id}/balance` | ADMIN, TREASURY_APPROVER | `.refreshBalance` | `GET …/balance` |
+| POST | `/api/virtual-accounts/{id}/simulate-deposit` | ADMIN | `.simulateDeposit` | `POST …/simulate-deposit` + balance |
 | GET | `/api/deposits?limit=50` | autenticado | `DepositController.list` | no |
 | GET | `/api/virtual-accounts/{id}/deposits?limit=50` | autenticado | `.listByAccount` | no |
-| POST | `/api/virtual-accounts/{id}/deposits/sync` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.syncFromKira` | `GET …/deposits` |
+| POST | `/api/virtual-accounts/{id}/deposits/sync` | ADMIN, TREASURY_APPROVER | `.syncFromKira` | `GET …/deposits` |
 | GET | `/api/recipients` | autenticado | `RecipientController.list` | no |
 | GET | `/api/recipients/{id}` | autenticado | `.get` | no |
-| POST | `/api/recipients` → **201** (`Idempotency-Key` opcional) | TREASURY_MAKER, ADMIN | `.register` | `POST /v1/recipients` |
-| POST | `/api/recipients/{id}/archive` | TREASURY_MAKER, ADMIN | `.archive` | no |
+| POST | `/api/recipients` → **201** (`Idempotency-Key` opcional) | ADMIN | `.register` | `POST /v1/recipients` |
+| POST | `/api/recipients/{id}/archive` | ADMIN | `.archive` | no |
 | GET | `/api/recipients/kira` | autenticado | `.listInKira` | `GET /v1/recipients` |
 | GET | `/api/recipients/{id}/kira` | autenticado | `.getInKira` | `GET /v1/recipients/{id}` |
 | GET | `/api/quotations?limit=50` | autenticado | `QuotationController.list` | no |
 | GET | `/api/quotations/{id}` | autenticado | `.get` | no |
-| POST | `/api/quotations` → **201** | TREASURY_MAKER, ADMIN | `.create` | `POST /v1/quotations` |
+| POST | `/api/quotations` → **201** | ADMIN | `.create` | `POST /v1/quotations` |
 | GET | `/api/payouts?limit=50` | autenticado | `PayoutController.list` | no |
 | GET | `/api/payouts/{id}` | autenticado | `.get` | no |
-| POST | `/api/payouts` → **201** (`Idempotency-Key` opcional) | TREASURY_MAKER, ADMIN | `.create` | no |
+| POST | `/api/payouts` → **201** (`Idempotency-Key` opcional) | ADMIN | `.create` | no |
 | POST | `/api/payouts/{id}/approve` | TREASURY_APPROVER, ADMIN | `.approve` | `POST …/payout` (no en la 1ª de dos firmas) |
-| POST | `/api/payouts/{id}/requote` | TREASURY_MAKER, TREASURY_APPROVER, ADMIN | `.requote` | `POST /v1/quotations` |
+| POST | `/api/payouts/{id}/requote` | ADMIN, TREASURY_APPROVER | `.requote` | `POST /v1/quotations` |
 | POST | `/api/payouts/{id}/reject` | TREASURY_APPROVER, ADMIN | `.reject` | no |
-| POST | `/api/payouts/{id}/refresh` | ADMIN, TREASURY_MAKER, TREASURY_APPROVER, COMPLIANCE_INTERNAL | `.refresh` | `GET /v1/payouts/{id}` |
+| POST | `/api/payouts/{id}/refresh` | ADMIN, TREASURY_APPROVER | `.refresh` | `GET /v1/payouts/{id}` |
 | GET | `/api/payouts/{id}/events` | autenticado | `.events` | `GET /v1/payouts/{id}` |
-| POST | `/api/payouts/preview` | TREASURY_MAKER, ADMIN | `.preview` | `POST …/payout/preview` |
 | GET | `/api/payouts/kira?status=&page=1&limit=20&fromDate=&toDate=` | autenticado | `.kiraHistory` | `GET /v1/payouts` |
 | GET | `/api/reference/countries` | autenticado | `ReferenceController.countries` | `GET /v1/countries` (cache 24 h) |
 | POST | `/api/auth/mfa/verify` | **público** (canjea el reto) | `AuthController.verifyMfa` → `MfaService.verify` | no |
@@ -1089,8 +1085,8 @@ Contrato campo a campo y ejemplos: [`API-GUIA.md`](API-GUIA.md).
 | GET | `/api/notifications?limit=50` | autenticado | `ActivityController.notifications` | no |
 | GET | `/api/notifications/unread-count` | autenticado | `.unreadCount` | no |
 | POST | `/api/notifications/read` → **204** | autenticado | `.markAllRead` | no |
-| GET | `/api/events?limit=100` | ADMIN, COMPLIANCE_INTERNAL | `.events` (sin payload) | no |
-| GET | `/api/audit?limit=100` | ADMIN, COMPLIANCE_INTERNAL | `.auditTrail` | no |
+| GET | `/api/events?limit=100` | ADMIN | `.events` (sin payload) | no |
+| GET | `/api/audit?limit=100` | ADMIN | `.auditTrail` | no |
 | GET | `/api/platform/tenants` | PLATFORM_OPERATOR | `PlatformController.tenants` | no |
 | GET | `/api/platform/tenants/{id}` | PLATFORM_OPERATOR | `.tenant` (auditado) | no |
 | POST | `/api/platform/tenants/{id}/refresh` | PLATFORM_OPERATOR | `.refresh` | `GET /v1/users/{id}` + cuentas |
@@ -1596,7 +1592,7 @@ Quedan **abiertos**, y son trabajo del BFF:
 | G-03 | ~~Las vistas solo traen `makerUserId`/`approverUserId`~~ Cerrado (16-sep): `PayoutView` lleva `makerName`, `approverName`, `firstApproverName` y `recipientName` (G-26) | — | — |
 | G-04 | JWT de 8 h sin revocación: el logout solo descarta el token en el navegador | Lista de revocación, o tokens cortos + refresh en cookie `HttpOnly` | Media |
 | G-06 | Sin CORS: obliga a mismo origen o reverse proxy en despliegue | Documentar el reverse proxy o CORS explícito por entorno | Media |
-| ~~G-13~~ | **Cerrado el 16-sep:** `GET /api/operators` (ADMIN y COMPLIANCE_INTERNAL), `POST` y `DELETE` (solo ADMIN, sin autodesactivación ni escalada a ADMIN/PLATFORM_OPERATOR) | — | — |
+| ~~G-13~~ | **Cerrado el 16-sep:** `GET`, `POST` y `DELETE` de `/api/operators` (todos exigen ADMIN, sin autodesactivación ni escalada a ADMIN/PLATFORM_OPERATOR) | — | — |
 | G-14 | Las listas locales solo aceptan `limit` y filtran en cliente (coincide con **D7**) | `page`, `status`, `from/to` en las listas locales | Media |
 | G-26 | `GET /api/recipients` solo devuelve activos: un pago antiguo se queda sin nombre de destinatario | Incluir `recipientName` en `PayoutView` | Baja |
 | G-28 | `transaction_countries` sin formato documentado (ISO-2 vs ISO-3, el catálogo del BFF es ISO-3) | Documentarlo y validarlo en el BFF | Baja |
@@ -1857,11 +1853,12 @@ No confundir con el "user" de Kira, que es la empresa misma en el KYB.
 RBAC B2B. El nombre tecnico (dbName) es el que vive en la tabla `roles` y el que
 lee el negocio; la constante es la que usan @PreAuthorize y el JWT.
 
-La segregacion de funciones exige separar quien prepara un pago (TREASURY_MAKER)
-de quien lo autoriza (TREASURY_APPROVER): la API de Kira no ofrece maker-checker
+El modelo simplificado a 2 roles de empresa concentra en ADMIN la operación completa (crear
+pagos, gestionar cumplimiento y operadores); TREASURY_APPROVER es el único rol segregado,
+dedicado exclusivamente a aprobar pagos (maker-checker): la API de Kira no ofrece maker-checker
 para integradores, asi que el control es del BFF.
 
-Valores: `ADMIN`, `TREASURY_MAKER`, `TREASURY_APPROVER`, `COMPLIANCE_INTERNAL`, `READ_ONLY`, `PLATFORM_OPERATOR`.
+Valores: `ADMIN`, `TREASURY_APPROVER`, `PLATFORM_OPERATOR`.
 
 | Método | Descripción |
 |---|---|
@@ -2839,7 +2836,7 @@ dibuja desde lo que Kira sigue pidiendo para el producto objetivo.
 
 Alta de un operador humano de la empresa.
 
-El rol viaja como el nombre de la constante (TREASURY_MAKER, no tesoreria_maker): es lo
+El rol viaja como el nombre de la constante (TREASURY_APPROVER, no tesoreria_approver): es lo
 que el portal ya recibe en el JWT y en /api/auth/me, asi que no hay dos vocabularios.
 La empresa NO viaja en el cuerpo: sale siempre de la sesion del ADMIN (aislamiento
 multiempresa), y admitirla aqui seria ofrecer un campo que el servicio va a ignorar.

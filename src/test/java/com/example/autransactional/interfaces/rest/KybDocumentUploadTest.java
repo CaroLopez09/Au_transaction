@@ -45,7 +45,7 @@ class KybDocumentUploadTest {
     }
 
     @Test
-    @WithMockUser(roles = "COMPLIANCE_INTERNAL")
+    @WithMockUser(roles = "ADMIN")
     void laParteTypesSeResuelveSinReventarLaCapaWeb() throws Exception {
         mockMvc.perform(multipart("/api/onboarding/documents")
                         .file(archivo())
@@ -57,7 +57,7 @@ class KybDocumentUploadTest {
     }
 
     @Test
-    @WithMockUser(roles = "COMPLIANCE_INTERNAL")
+    @WithMockUser(roles = "ADMIN")
     void unTypePorCadaFileOSeRechazaAntesDeLlamarAKira() throws Exception {
         mockMvc.perform(multipart("/api/onboarding/documents")
                         .file(archivo())
@@ -70,7 +70,7 @@ class KybDocumentUploadTest {
     }
 
     @Test
-    @WithMockUser(roles = "COMPLIANCE_INTERNAL")
+    @WithMockUser(roles = "ADMIN")
     void elMismoEngancheValeParaLosDocumentosDeUnBeneficiario() throws Exception {
         mockMvc.perform(multipart("/api/ubos/ubo-1/documents")
                         .file(archivo())
@@ -81,8 +81,8 @@ class KybDocumentUploadTest {
     }
 
     @Test
-    @WithMockUser(roles = "TREASURY_MAKER")
-    void tesoreriaNoSubeDocumentosDeCumplimiento() throws Exception {
+    @WithMockUser(roles = "TREASURY_APPROVER")
+    void unRolQueNoEsAdminNoSubeDocumentosDeCumplimiento() throws Exception {
         mockMvc.perform(multipart("/api/onboarding/documents")
                         .file(archivo())
                         .param("types", "front")

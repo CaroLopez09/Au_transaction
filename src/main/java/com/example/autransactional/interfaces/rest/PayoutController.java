@@ -4,7 +4,6 @@ import com.example.autransactional.application.treasury.PayoutCommands;
 import com.example.autransactional.application.treasury.ExecutePayoutService;
 import com.example.autransactional.application.treasury.KiraPayoutPage;
 import com.example.autransactional.application.treasury.PayoutEventView;
-import com.example.autransactional.application.treasury.PayoutPreviewView;
 import com.example.autransactional.application.treasury.PayoutView;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import jakarta.validation.Valid;
@@ -49,21 +48,13 @@ public class PayoutController {
         return payoutService.kiraHistory(operator, status, page, limit, fromDate, toDate);
     }
 
-    /** Coste del pago sin reservar precio. Para cerrarlo, cotiza en /api/quotations. */
-    @PostMapping("/preview")
-    @PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")
-    public PayoutPreviewView preview(@AuthenticationPrincipal AuthenticatedOperator operator,
-                                     @Valid @RequestBody PayoutCommands.PreviewPayout command) {
-        return payoutService.preview(operator, command);
-    }
-
     @GetMapping("/{id}")
     public PayoutView get(@AuthenticationPrincipal AuthenticatedOperator operator, @PathVariable String id) {
         return payoutService.get(operator, id);
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<PayoutView> create(@AuthenticationPrincipal AuthenticatedOperator operator,
                                              @RequestHeader(value = "Idempotency-Key", required = false)
                                              String idempotencyKey,
@@ -89,7 +80,7 @@ public class PayoutController {
 
     /** Renueva la cotizacion vencida de un pago pendiente; devuelve el pago con el precio nuevo. */
     @PostMapping("/{id}/requote")
-    @PreAuthorize("hasAnyRole('TREASURY_MAKER','TREASURY_APPROVER','ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_APPROVER')")
     public PayoutView requote(@AuthenticationPrincipal AuthenticatedOperator operator, @PathVariable String id) {
         return payoutService.requote(operator, id);
     }
@@ -110,7 +101,7 @@ public class PayoutController {
     }
 
     @PostMapping("/{id}/refresh")
-    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_APPROVER')")
     public PayoutView refresh(@AuthenticationPrincipal AuthenticatedOperator operator,
                               @PathVariable String id) {
         return payoutService.refreshFromKira(operator, id);

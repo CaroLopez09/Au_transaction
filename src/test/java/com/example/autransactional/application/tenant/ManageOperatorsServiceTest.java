@@ -50,12 +50,12 @@ class ManageOperatorsServiceTest {
     @Test
     void listaSoloLosOperadoresDeSuEmpresa() {
         when(users.findByTenant(juriscop)).thenReturn(List.of(
-                operador("u-1", juriscop, Role.TREASURY_MAKER, UserStatus.ACTIVE)));
+                operador("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.ACTIVE)));
 
         List<OperatorView> vista = service.list(admin);
 
         assertEquals(1, vista.size());
-        assertEquals("TREASURY_MAKER", vista.getFirst().role());
+        assertEquals("TREASURY_APPROVER", vista.getFirst().role());
         verify(users).findByTenant(juriscop);
     }
 
@@ -63,7 +63,7 @@ class ManageOperatorsServiceTest {
     void laVistaNuncaExponeElHashNiElSecretoMfa() {
         when(users.findByTenant(juriscop)).thenReturn(List.of(
                 new OperatorUser("u-1", juriscop, "ana@juriscop.test", "$2a$secreto", "Ana", "Gomez",
-                        Role.READ_ONLY, UserStatus.ACTIVE, "SECRETO-TOTP", true)));
+                        Role.TREASURY_APPROVER, UserStatus.ACTIVE, "SECRETO-TOTP", true)));
 
         OperatorView vista = service.list(admin).getFirst();
 
@@ -75,7 +75,7 @@ class ManageOperatorsServiceTest {
     @Test
     void creaElOperadorEnLaEmpresaDeLaSesionYConLaClaveCifrada() {
         var command = new OperatorCommands.CreateOperator(
-                "Nueva@Juriscop.test", " Ana ", " Gomez ", "contrasena-larga", "TREASURY_MAKER");
+                "Nueva@Juriscop.test", " Ana ", " Gomez ", "contrasena-larga", "TREASURY_APPROVER");
 
         OperatorView vista = service.create(admin, command);
 
@@ -93,7 +93,7 @@ class ManageOperatorsServiceTest {
         assertEquals(com.example.autransactional.domain.tenant.IdentityVerificationStatus.PENDING_DOCUMENTS,
             usuario.identity().status());
         assertFalse(usuario.mfaEnabled());
-        assertEquals("TREASURY_MAKER", vista.role());
+        assertEquals("TREASURY_APPROVER", vista.role());
         verify(passwordEncoder).encode("contrasena-larga");
         verify(audit).record(eq(admin), eq("operator.created"), eq("operator_user"), any(), any(),
                 eq("OK"), any());
@@ -103,7 +103,7 @@ class ManageOperatorsServiceTest {
     void rechazaUnCorreoYaRegistrado() {
         when(users.existsByEmail("ya@juriscop.test")).thenReturn(true);
         var command = new OperatorCommands.CreateOperator(
-                "ya@juriscop.test", "Ana", "Gomez", "contrasena-larga", "READ_ONLY");
+                "ya@juriscop.test", "Ana", "Gomez", "contrasena-larga", "TREASURY_APPROVER");
 
         DomainException e = assertThrows(DomainException.class, () -> service.create(admin, command));
 
@@ -133,19 +133,17 @@ class ManageOperatorsServiceTest {
     }
 
     @Test
-    void aceptaLosCuatroRolesDelegables() {
-        for (String rol : List.of("TREASURY_MAKER", "TREASURY_APPROVER", "COMPLIANCE_INTERNAL", "READ_ONLY")) {
-            var command = new OperatorCommands.CreateOperator(
-                    rol.toLowerCase() + "@juriscop.test", "Ana", "Gomez", "contrasena-larga", rol);
+    void aceptaElUnicoRolDelegable() {
+        var command = new OperatorCommands.CreateOperator(
+                "treasury.approver@juriscop.test", "Ana", "Gomez", "contrasena-larga", "TREASURY_APPROVER");
 
-            assertEquals(rol, service.create(admin, command).role());
-        }
+        assertEquals("TREASURY_APPROVER", service.create(admin, command).role());
     }
 
     @Test
     void suspendeAUnOperadorDeSuEmpresa() {
         when(users.findById("u-1")).thenReturn(Optional.of(
-                operador("u-1", juriscop, Role.TREASURY_MAKER, UserStatus.ACTIVE)));
+                operador("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.ACTIVE)));
 
         OperatorView vista = service.suspend(admin, "u-1");
 
@@ -180,7 +178,7 @@ class ManageOperatorsServiceTest {
     @Test
     void noSuspendeDosVecesAlMismoOperador() {
         when(users.findById("u-1")).thenReturn(Optional.of(
-                operador("u-1", juriscop, Role.READ_ONLY, UserStatus.SUSPENDED)));
+                operador("u-1", juriscop, Role.TREASURY_APPROVER, UserStatus.SUSPENDED)));
 
         assertThrows(DomainException.class, () -> service.suspend(admin, "u-1"));
         verify(users, never()).updateStatus(any(), any());

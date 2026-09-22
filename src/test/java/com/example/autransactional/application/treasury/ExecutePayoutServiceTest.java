@@ -79,7 +79,7 @@ class ExecutePayoutServiceTest {
     private final PayoutApprovalPolicy politica = new PayoutApprovalPolicy(new BigDecimal("5000"), null);
 
     private final AuthenticatedOperator maker =
-            new AuthenticatedOperator("maker-1", "treasury.maker@juriscop.test", TENANT, Role.TREASURY_MAKER);
+            new AuthenticatedOperator("maker-1", "admin@juriscop.test", TENANT, Role.ADMIN);
 
     private final AuthenticatedOperator approver =
             new AuthenticatedOperator("approver-2", "treasury.approver@juriscop.test", TENANT,
@@ -128,7 +128,7 @@ class ExecutePayoutServiceTest {
         when(kira.executePayout(anyString(), any(), any())).thenReturn(json(RESPUESTA_201));
 
         when(rfis.findOpenBlocking(any())).thenReturn(Optional.empty());
-        when(usuarios.findById("maker-1")).thenReturn(Optional.of(verifiedOperator("maker-1", Role.TREASURY_MAKER)));
+        when(usuarios.findById("maker-1")).thenReturn(Optional.of(verifiedOperator("maker-1", Role.ADMIN)));
         when(usuarios.findById("approver-2")).thenReturn(Optional.of(verifiedOperator("approver-2", Role.TREASURY_APPROVER)));
         service = new ExecutePayoutService(payouts, quotations, accounts, recipients, tenants, rfis, kira,
                 audit, mapper, politica, cotizador, usuarios);
@@ -205,7 +205,7 @@ class ExecutePayoutServiceTest {
 
     private static OperatorUser operador(String id, String nombre, String apellido) {
         return new OperatorUser(id, TENANT, id + "@juriscop.test", "hash", nombre, apellido,
-            Role.TREASURY_MAKER, UserStatus.ACTIVE, null, false,
+            Role.ADMIN, UserStatus.ACTIVE, null, false,
             new OperatorIdentity(IdentityVerificationStatus.VERIFIED, null, null, null, null,
                 null, null, Instant.now(), null));
     }
@@ -376,7 +376,7 @@ class ExecutePayoutServiceTest {
 
     @Test
     void elCreadorSigueSinPoderAprobarSuPropioPago() {
-        var maker = new AuthenticatedOperator("maker-1", "treasury.maker@juriscop.test", TENANT,
+        var maker = new AuthenticatedOperator("maker-1", "admin@juriscop.test", TENANT,
                 Role.ADMIN);
         conCotizacion();
 
@@ -557,28 +557,7 @@ class ExecutePayoutServiceTest {
         assertTrue(view.depositInstructions().contains("0xabc123"));
     }
 
-    // ---------- Vista previa, linea de tiempo e historial de Kira ----------
-
-    @Test
-    void laVistaPreviaUsaLosIdsDeKiraYElMargenDeLaPlataforma() {
-        when(kira.previewPayout(eq("kva-1"), any())).thenReturn(json("""
-                { "amount": "1030.00", "currency": "USD", "recipient_amount": "1000.00",
-                  "recipient_currency": "USD", "fees": { "total": "30.00" } }
-                """));
-
-        PayoutPreviewView vista = service.preview(maker,
-                new PayoutCommands.PreviewPayout("va-1", "rec-1", new BigDecimal("1000.00"), null));
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
-        verify(kira).previewPayout(eq("kva-1"), body.capture());
-        assertEquals("krec-1", body.getValue().get("recipient_id"));
-        // Por defecto, como al cotizar, el importe es lo que recibe el destinatario.
-        assertEquals(true, body.getValue().get("inverse_calculation"));
-        assertTrue(body.getValue().containsKey("client_markup"));
-        assertEquals("1030.00", vista.amount());
-        assertEquals("30.00", vista.fees().get("total"));
-    }
+    // ---------- Linea de tiempo e historial de Kira ----------
 
     @Test
     void laLineaDeTiempoSaleDeLosEventosDelPagoEnKira() {

@@ -41,9 +41,9 @@ class SubmitOnboardingServiceTest {
     private SubmitOnboardingService service;
     private Tenant empresa;
 
-    private final AuthenticatedOperator compliance =
-            new AuthenticatedOperator("u-1", "compliance.internal@juriscop.test", TENANT,
-                    Role.COMPLIANCE_INTERNAL);
+    private final AuthenticatedOperator admin =
+            new AuthenticatedOperator("u-1", "admin@juriscop.test", TENANT,
+                    Role.ADMIN);
 
     @BeforeEach
     void setUp() {
@@ -70,7 +70,7 @@ class SubmitOnboardingServiceTest {
                 { "id": "usr_9c1f", "status": "CREATED", "verification_triggered": false }
                 """));
 
-        service.register(compliance, alta());
+        service.register(admin, alta());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
@@ -90,7 +90,7 @@ class SubmitOnboardingServiceTest {
     void laClaveDeIdempotenciaSePersisteAntesDeLlamarAKira() {
         when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
 
-        service.register(compliance, alta());
+        service.register(admin, alta());
 
         // La reserva se consolida en su propia transaccion (para que un rollback no la borre)
         // y el resultado se guarda despues con el caso de uso.
@@ -103,23 +103,23 @@ class SubmitOnboardingServiceTest {
     void siLaLlamadaFallaLaClaveQuedaGuardadaParaElReintento() {
         when(kira.createUser(any(), any())).thenThrow(new IllegalStateException("timeout"));
 
-        assertThrows(IllegalStateException.class, () -> service.register(compliance, alta()));
+        assertThrows(IllegalStateException.class, () -> service.register(admin, alta()));
 
         String key = empresa.getOnboardingIdempotencyKey();
         assertNotNull(key);
         // El reintento reutiliza exactamente la misma clave: no crea una segunda empresa.
         assertEquals(key, empresa.reserveOnboardingKey().value());
-        verify(audit).record(eq(compliance), eq("tenant.onboarding_registered"), anyString(),
+        verify(audit).record(eq(admin), eq("tenant.onboarding_registered"), anyString(),
                 anyString(), eq(key), eq("ERROR"), anyString());
     }
 
     @Test
     void reenviarElAltaNoVuelveALlamarAKira() {
         when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
-        service.register(compliance, alta());
+        service.register(admin, alta());
         clearInvocations(kira);
 
-        var view = service.register(compliance, alta());
+        var view = service.register(admin, alta());
 
         verify(kira, never()).createUser(any(), any());
         assertEquals("usr_1", view.kiraUserId());
@@ -129,7 +129,7 @@ class SubmitOnboardingServiceTest {
     void elPutReenviaElObjetoCompletoNoSoloLoNuevo() {
         // G8: un PUT parcial borra en silencio lo que no viaje en el.
         when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
-        service.register(compliance, alta());
+        service.register(admin, alta());
 
         when(kira.updateUser(anyString(), any())).thenReturn(json("""
                 { "id": "usr_1", "status": "VERIFYING", "verification_triggered": true }
@@ -138,7 +138,7 @@ class SubmitOnboardingServiceTest {
                 { "id": "usr_1", "status": "VERIFYING", "missing_fields": {} }
                 """));
 
-        service.completeProfile(compliance,
+        service.completeProfile(admin,
                 new OnboardingCommands.CompleteProfile(Map.of("business_type", "sa_de_cv")));
 
         @SuppressWarnings("unchecked")
@@ -155,11 +155,11 @@ class SubmitOnboardingServiceTest {
     void elPutNoLlevaLasClavesQueSoloExistenEnElAlta() {
         // Sandbox 15-sep: type y external_id en el PUT dan 400 "Unrecognized key(s)".
         when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
-        service.register(compliance, alta());
+        service.register(admin, alta());
         when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
         when(kira.getUser("usr_1")).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
 
-        service.completeProfile(compliance,
+        service.completeProfile(admin,
                 new OnboardingCommands.CompleteProfile(Map.of("business_description", "Consultoria")));
 
         @SuppressWarnings("unchecked")
@@ -198,14 +198,14 @@ class SubmitOnboardingServiceTest {
     @Test
     void unaDireccionNuevaReemplazaALaGuardada() {
         when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
-        service.register(compliance, alta());
+        service.register(admin, alta());
         when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
         when(kira.getUser("usr_1")).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
 
-        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(Map.of(
+        service.completeProfile(admin, new OnboardingCommands.CompleteProfile(Map.of(
                 "registered_address", Map.of("street_line_1", "Calle 1", "city", "Bogota", "country", "COL"),
                 "representative_date_of_birth", "1985-04-12")));
-        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(Map.of(
+        service.completeProfile(admin, new OnboardingCommands.CompleteProfile(Map.of(
                 "registered_address", Map.of("street_line_1", "Carrera 7", "city", "Medellin", "country", "COL"),
                 "representative_date_of_birth", "1990-01-01")));
 
@@ -221,13 +221,13 @@ class SubmitOnboardingServiceTest {
     void unArrayNuevoReemplazaEnteroAlGuardado() {
         // associated_persons debe viajar completo: mezclar elemento a elemento perderia campos.
         when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
-        service.register(compliance, alta());
+        service.register(admin, alta());
         when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
         when(kira.getUser("usr_1")).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
 
-        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(
+        service.completeProfile(admin, new OnboardingCommands.CompleteProfile(
                 Map.of("associated_persons", List.of(Map.of("first_name", "Maria")))));
-        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(
+        service.completeProfile(admin, new OnboardingCommands.CompleteProfile(
                 Map.of("associated_persons", List.of(Map.of("first_name", "Ana"), Map.of("first_name", "Luis")))));
 
         @SuppressWarnings("unchecked")
@@ -239,7 +239,7 @@ class SubmitOnboardingServiceTest {
 
     @Test
     void completarElPerfilExigeAltaPrevia() {
-        var e = assertThrows(DomainException.class, () -> service.completeProfile(compliance,
+        var e = assertThrows(DomainException.class, () -> service.completeProfile(admin,
                 new OnboardingCommands.CompleteProfile(Map.of("business_type", "ltda"))));
 
         assertTrue(e.getMessage().contains("no esta dada de alta"), e.getMessage());
@@ -248,10 +248,10 @@ class SubmitOnboardingServiceTest {
 
     @Test
     void unRolDeTesoreriaNoGestionaElOnboarding() {
-        var maker = new AuthenticatedOperator("u-2", "treasury.maker@juriscop.test", TENANT,
-                Role.TREASURY_MAKER);
+        var approver = new AuthenticatedOperator("u-2", "treasury.approver@juriscop.test", TENANT,
+                Role.TREASURY_APPROVER);
 
-        assertThrows(DomainException.class, () -> service.register(maker, alta()));
+        assertThrows(DomainException.class, () -> service.register(approver, alta()));
         verify(kira, never()).createUser(any(), any());
     }
 
@@ -266,7 +266,7 @@ class SubmitOnboardingServiceTest {
 
     private void empresaDadaDeAlta() {
         when(kira.createUser(any(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
-        service.register(compliance, alta());
+        service.register(admin, alta());
         when(kira.getUser(anyString())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
         when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
     }
@@ -275,7 +275,7 @@ class SubmitOnboardingServiceTest {
     void elDocumentoViajaDentroDelPutDelExpediente() {
         empresaDadaDeAlta();
 
-        service.attachDocuments(compliance, acta());
+        service.attachDocuments(admin, acta());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
@@ -294,7 +294,7 @@ class SubmitOnboardingServiceTest {
     void elBase64NoSeGuardaEnElPayloadDeOnboarding() {
         empresaDadaDeAlta();
 
-        service.attachDocuments(compliance, acta());
+        service.attachDocuments(admin, acta());
 
         // Si se guardara, el siguiente PUT lo reenviaria y el cuerpo crece sin techo
         // hasta pasarse de los 10 MB que admite Kira.
@@ -306,9 +306,9 @@ class SubmitOnboardingServiceTest {
     @Test
     void elRegistroSobreviveAlSiguientePutDelPerfil() {
         empresaDadaDeAlta();
-        service.attachDocuments(compliance, acta());
+        service.attachDocuments(admin, acta());
 
-        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(
+        service.completeProfile(admin, new OnboardingCommands.CompleteProfile(
                 Map.of("business_type", "ltda")));
 
         @SuppressWarnings("unchecked")
@@ -326,7 +326,7 @@ class SubmitOnboardingServiceTest {
 
     @Test
     void subirDocumentosExigeAltaPrevia() {
-        var e = assertThrows(DomainException.class, () -> service.attachDocuments(compliance, acta()));
+        var e = assertThrows(DomainException.class, () -> service.attachDocuments(admin, acta()));
 
         assertTrue(e.getMessage().contains("no esta dada de alta"), e.getMessage());
         verify(kira, never()).updateUser(anyString(), any());
@@ -334,10 +334,10 @@ class SubmitOnboardingServiceTest {
 
     @Test
     void unRolDeTesoreriaNoSubeDocumentosKyb() {
-        var maker = new AuthenticatedOperator("u-2", "treasury.maker@juriscop.test", TENANT,
-                Role.TREASURY_MAKER);
+        var approver = new AuthenticatedOperator("u-2", "treasury.approver@juriscop.test", TENANT,
+                Role.TREASURY_APPROVER);
 
-        assertThrows(DomainException.class, () -> service.attachDocuments(maker, acta()));
+        assertThrows(DomainException.class, () -> service.attachDocuments(approver, acta()));
         verify(kira, never()).updateUser(anyString(), any());
     }
 
@@ -351,10 +351,10 @@ class SubmitOnboardingServiceTest {
     void aceptarLosTerminosVigentesLosMandaAKiraYQuedaAuditado() {
         registrada();
 
-        var vista = service.acceptTerms(compliance, new OnboardingCommands.AcceptTerms("2026-09"));
+        var vista = service.acceptTerms(admin, new OnboardingCommands.AcceptTerms("2026-09"));
 
         verify(kira).updateUser("usr_1", Map.of("tos_accepted_version", "2026-09"));
-        verify(audit).record(eq(compliance), eq("tenant.terms_accepted"), eq("tenant"), eq("juriscop"),
+        verify(audit).record(eq(admin), eq("tenant.terms_accepted"), eq("tenant"), eq("juriscop"),
                 isNull(), eq("OK"), eq("version=2026-09"));
         assertEquals("2026-09", vista.acceptedVersion());
         assertEquals("https://au.test/terminos", vista.url());
@@ -365,7 +365,7 @@ class SubmitOnboardingServiceTest {
         registrada();
 
         assertThrows(DomainException.class,
-                () -> service.acceptTerms(compliance, new OnboardingCommands.AcceptTerms("2026-01")));
+                () -> service.acceptTerms(admin, new OnboardingCommands.AcceptTerms("2026-01")));
         verify(kira, never()).updateUser(anyString(), any());
     }
 
@@ -375,14 +375,14 @@ class SubmitOnboardingServiceTest {
         when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
         when(kira.getUser("usr_1")).thenReturn(json("{ \"id\": \"usr_1\", \"status\": \"CREATED\" }"));
 
-        service.completeProfile(compliance, new OnboardingCommands.CompleteProfile(
+        service.completeProfile(admin, new OnboardingCommands.CompleteProfile(
                 Map.of("business_description", "Abogados", "tos_accepted_version", "2026-09")));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
         verify(kira).updateUser(eq("usr_1"), body.capture());
         assertFalse(body.getValue().containsKey("tos_accepted_version"));
-        assertNull(service.terms(compliance).acceptedVersion());
+        assertNull(service.terms(admin).acceptedVersion());
     }
 
     @Test

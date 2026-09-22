@@ -37,11 +37,11 @@ class OperatorControllerTest {
 
     private static final String ALTA = """
             {"email":"ana@juriscop.test","firstName":"Ana","lastName":"Gomez",
-             "password":"contrasena-larga","role":"TREASURY_MAKER"}""";
+             "password":"contrasena-larga","role":"TREASURY_APPROVER"}""";
 
     private static OperatorView vista() {
         return new OperatorView("u-1", "ana@juriscop.test", "Ana", "Gomez", "Ana Gomez",
-                                "TREASURY_MAKER", "Operador", "ACTIVE", true, false, "VERIFIED");
+                                "TREASURY_APPROVER", "Tesorero", "ACTIVE", true, false, "VERIFIED");
     }
 
     // --- F7: falta de sesion ---
@@ -70,7 +70,7 @@ class OperatorControllerTest {
 
     /** Un rol sin permiso sigue siendo 403 con codigo: el portal los distingue por el codigo. */
     @Test
-    @WithMockUser(roles = "READ_ONLY")
+    @WithMockUser(roles = "TREASURY_APPROVER")
     void unRolSinPermisoSigueSiendo403ConCodigo() throws Exception {
         mockMvc.perform(get("/api/operators"))
                 .andExpect(status().isForbidden())
@@ -90,7 +90,7 @@ class OperatorControllerTest {
 
         mockMvc.perform(get("/api/operators"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].role").value("TREASURY_MAKER"));
+                .andExpect(jsonPath("$[0].role").value("TREASURY_APPROVER"));
 
         mockMvc.perform(post("/api/operators").contentType(MediaType.APPLICATION_JSON).content(ALTA))
                 .andExpect(status().isOk());
@@ -103,26 +103,12 @@ class OperatorControllerTest {
     }
 
     @Test
-    @WithMockUser(roles = "COMPLIANCE_INTERNAL")
-    void cumplimientoLosConsultaPeroNoLosAdministra() throws Exception {
-        when(operators.list(any())).thenReturn(java.util.List.of(vista()));
-
-        mockMvc.perform(get("/api/operators")).andExpect(status().isOk());
-        mockMvc.perform(post("/api/operators").contentType(MediaType.APPLICATION_JSON).content(ALTA))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(delete("/api/operators/u-1")).andExpect(status().isForbidden());
-
-        verify(operators).list(any());
-        verify(operators, org.mockito.Mockito.never()).create(any(), any());
-        verify(operators, org.mockito.Mockito.never()).suspend(any(), any());
-    }
-
-    @Test
-    @WithMockUser(roles = "TREASURY_MAKER")
-    void tesoreriaNoAdministraOperadores() throws Exception {
+    @WithMockUser(roles = "TREASURY_APPROVER")
+    void elAprobadorNoAdministraOperadores() throws Exception {
         mockMvc.perform(get("/api/operators")).andExpect(status().isForbidden());
         mockMvc.perform(post("/api/operators").contentType(MediaType.APPLICATION_JSON).content(ALTA))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/operators/u-1")).andExpect(status().isForbidden());
 
         verifyNoInteractions(operators);
     }
@@ -132,7 +118,7 @@ class OperatorControllerTest {
     void unAltaSinCorreoValidoNoLlegaAlServicio() throws Exception {
         String invalido = """
                 {"email":"no-es-un-correo","firstName":"Ana","lastName":"Gomez",
-                 "password":"contrasena-larga","role":"TREASURY_MAKER"}""";
+                 "password":"contrasena-larga","role":"TREASURY_APPROVER"}""";
 
         mockMvc.perform(post("/api/operators").contentType(MediaType.APPLICATION_JSON).content(invalido))
                 .andExpect(status().isBadRequest())
@@ -146,7 +132,7 @@ class OperatorControllerTest {
     void unaContrasenaCortaNoLlegaAlServicio() throws Exception {
         String corta = """
                 {"email":"ana@juriscop.test","firstName":"Ana","lastName":"Gomez",
-                 "password":"corta","role":"TREASURY_MAKER"}""";
+                 "password":"corta","role":"TREASURY_APPROVER"}""";
 
         mockMvc.perform(post("/api/operators").contentType(MediaType.APPLICATION_JSON).content(corta))
                 .andExpect(status().isBadRequest())

@@ -42,7 +42,7 @@ class CapabilitiesControllerTest {
 
     @Test
     void cualquierRolDeEmpresaLasLee() throws Exception {
-        mockMvc.perform(get("/api/capabilities").with(authentication(sesion(Role.READ_ONLY, "juriscop"))))
+        mockMvc.perform(get("/api/capabilities").with(authentication(sesion(Role.TREASURY_APPROVER, "juriscop"))))
                 .andExpect(status().isOk())
                 // El perfil de pruebas si trae KIRA_*; sin ellas el portal dira "pendiente de configuracion".
                 .andExpect(jsonPath("$.providerConfigured").value(true))

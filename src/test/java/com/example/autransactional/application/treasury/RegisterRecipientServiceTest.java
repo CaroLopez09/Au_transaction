@@ -44,8 +44,8 @@ class RegisterRecipientServiceTest {
     private RegisterRecipientService service;
     private List<Recipient> registro;
 
-    private final AuthenticatedOperator maker =
-            new AuthenticatedOperator("u-1", "treasury.maker@juriscop.test", TENANT, Role.TREASURY_MAKER);
+    private final AuthenticatedOperator admin =
+            new AuthenticatedOperator("u-1", "admin@juriscop.test", TENANT, Role.ADMIN);
 
     @BeforeEach
     void setUp() {
@@ -101,7 +101,7 @@ class RegisterRecipientServiceTest {
 
     @Test
     void elTitularSeInfiereDeLosNombresPorqueNoExisteHolderName() {
-        service.register(maker, wire());
+        service.register(admin, wire());
 
         Map<String, Object> body = cuerpoEnviado();
         assertEquals("business", body.get("type"));
@@ -112,7 +112,7 @@ class RegisterRecipientServiceTest {
 
     @Test
     void enWireLaDireccionDelBancoEsUnObjeto() {
-        service.register(maker, wire());
+        service.register(admin, wire());
 
         Map<String, Object> cuenta = cuentaEnviada();
         assertEquals("WIRE", cuenta.get("account_type"));
@@ -127,7 +127,7 @@ class RegisterRecipientServiceTest {
                 "021000021", null, "1234567890", "savings", "Example Bank",
                 "1 Bank Plaza, NY", null, null, null, null, "ein", "12-3456789");
 
-        service.register(maker, ach);
+        service.register(admin, ach);
 
         Map<String, Object> cuenta = cuentaEnviada();
         assertEquals("ACH", cuenta.get("account_type"));
@@ -138,7 +138,7 @@ class RegisterRecipientServiceTest {
 
     @Test
     void unaWalletViajaConTokenYRed() {
-        service.register(maker, wallet("USDT", "tron"));
+        service.register(admin, wallet("USDT", "tron"));
 
         Map<String, Object> cuenta = cuentaEnviada();
         assertEquals("WALLET", cuenta.get("account_type"));
@@ -150,14 +150,14 @@ class RegisterRecipientServiceTest {
 
     @Test
     void unParTokenRedInvalidoSeCortaAntesDeLlamar() {
-        assertThrows(DomainException.class, () -> service.register(maker, wallet("USDC", "tron")));
+        assertThrows(DomainException.class, () -> service.register(admin, wallet("USDC", "tron")));
 
         verify(kira, never()).createRecipient(any(), any());
     }
 
     @Test
     void seLeeRecipientIdNoId() {
-        var view = service.register(maker, wire());
+        var view = service.register(admin, wire());
 
         assertEquals("krec_1", view.kiraRecipientId());
         assertTrue(view.registeredInKira());
@@ -169,7 +169,7 @@ class RegisterRecipientServiceTest {
         when(kira.createRecipient(any(), any())).thenReturn(
                 new KiraResponse(202, mapper.readTree("{\"recipient_id\":\"krec_ya_existia\"}")));
 
-        var view = service.register(maker, wire());
+        var view = service.register(admin, wire());
 
         assertTrue(view.alreadyExisted());
         assertEquals("krec_ya_existia", view.kiraRecipientId());
@@ -179,8 +179,8 @@ class RegisterRecipientServiceTest {
     void unReintentoConLaMismaClaveNoGuardaUnSegundoDestinatario() {
         String clave = "8c2b1d40-5e6f-4a7b-9c8d-2e3f4a5b6c7d";
 
-        var primero = service.register(maker, wire(), clave);
-        var segundo = service.register(maker, wire(), clave);
+        var primero = service.register(admin, wire(), clave);
+        var segundo = service.register(admin, wire(), clave);
 
         assertEquals(1, registro.size());
         assertEquals(primero.id(), segundo.id());
@@ -192,7 +192,7 @@ class RegisterRecipientServiceTest {
     @Test
     void elEstadoYElCodigoPostalSalenDelEspejoLocal() {
         // Kira los devuelve vacios aunque se hayan enviado.
-        var view = service.register(maker, wire());
+        var view = service.register(admin, wire());
 
         assertEquals("NY", view.bankAddress().state());
         assertEquals("10001", view.bankAddress().postalCode());
@@ -200,7 +200,7 @@ class RegisterRecipientServiceTest {
 
     @Test
     void laCuentaSeMuestraEnmascarada() {
-        var view = service.register(maker, wire());
+        var view = service.register(admin, wire());
 
         assertEquals("****7890", view.maskedDestination());
     }
@@ -211,16 +211,16 @@ class RegisterRecipientServiceTest {
         sinVerificar.linkKiraUser("usr_1");
         when(tenants.findById(TENANT)).thenReturn(Optional.of(sinVerificar));
 
-        assertThrows(DomainException.class, () -> service.register(maker, wire()));
+        assertThrows(DomainException.class, () -> service.register(admin, wire()));
         verify(kira, never()).createRecipient(any(), any());
     }
 
     @Test
     void archivarEnlazaConElReemplazo() {
-        var original = service.register(maker, wire());
-        var reemplazo = service.register(maker, wire());
+        var original = service.register(admin, wire());
+        var reemplazo = service.register(admin, wire());
 
-        var view = service.archive(maker, original.id(),
+        var view = service.archive(admin, original.id(),
                 new RecipientCommands.ArchiveRecipient(reemplazo.id()));
 
         assertEquals("ARCHIVED", view.status());
@@ -240,7 +240,7 @@ class RegisterRecipientServiceTest {
         Tenant empresa = tenants.findById(TENANT).orElseThrow();
         empresa.applySettings(new TenantSettings(EnumSet.of(Rail.ACH), EnumSet.allOf(WalletToken.class)));
 
-        DomainException ex = assertThrows(DomainException.class, () -> service.register(maker, wire()));
+        DomainException ex = assertThrows(DomainException.class, () -> service.register(admin, wire()));
         assertTrue(ex.getMessage().contains("WIRE"));
     }
 
@@ -250,13 +250,13 @@ class RegisterRecipientServiceTest {
         empresa.applySettings(new TenantSettings(EnumSet.allOf(Rail.class), EnumSet.of(WalletToken.USDT)));
 
         DomainException ex = assertThrows(DomainException.class,
-                () -> service.register(maker, wallet("USDC", "polygon")));
+                () -> service.register(admin, wallet("USDC", "polygon")));
         assertTrue(ex.getMessage().contains("USDC"));
     }
 
     @Test
     void losDestinatariosDeKiraSeEnmascaranYSeEnlazanConElDirectorio() {
-        service.register(maker, wire());
+        service.register(admin, wire());
         when(recipients.findByKiraRecipientId("krec_1")).thenAnswer(i -> registro.stream().findFirst());
         when(kira.listRecipients(eq("usr_1"), any())).thenReturn(mapper.readTree("""
                 { "recipients": [
@@ -267,7 +267,7 @@ class RegisterRecipientServiceTest {
                   "total": 2 }
                 """));
 
-        List<KiraRecipientView> enKira = service.listInKira(maker);
+        List<KiraRecipientView> enKira = service.listInKira(admin);
 
         assertEquals(2, enKira.size());
         assertEquals("****7890", enKira.getFirst().maskedDestination());

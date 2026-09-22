@@ -12,8 +12,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-
 /**
  * Cotizaciones de transferencia.
  *
@@ -32,12 +30,6 @@ public class QuotationController {
         this.quotes = quotes;
     }
 
-    @GetMapping
-    public List<QuotationView> list(@AuthenticationPrincipal AuthenticatedOperator operator,
-                                    @RequestParam(defaultValue = "50") int limit) {
-        return quotes.list(operator, limit);
-    }
-
     @GetMapping("/{id}")
     public QuotationView get(@AuthenticationPrincipal AuthenticatedOperator operator,
                              @PathVariable String id) {
@@ -45,7 +37,7 @@ public class QuotationController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<QuotationView> create(
             @AuthenticationPrincipal AuthenticatedOperator operator,
             @Valid @RequestBody QuotationCommands.CreateQuote command) {

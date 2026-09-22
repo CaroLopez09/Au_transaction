@@ -68,11 +68,9 @@ class OpenApiDocsTest {
         assertTrue(paths.has("/api/rfis/{id}/items/{itemId}/documents/{documentId}"));
         assertTrue(paths.has("/api/rfis/{id}/items/{itemId}/documents/{documentId}/link"));
         assertTrue(paths.has("/api/reference/countries"));
-        assertTrue(paths.has("/api/payouts/preview"));
         assertTrue(paths.has("/api/payouts/kira"));
         assertTrue(paths.has("/api/payouts/{id}/events"));
         assertTrue(paths.has("/api/recipients/kira"));
-        assertTrue(paths.has("/api/recipients/{id}/kira"));
         assertTrue(paths.has("/api/virtual-accounts/{id}/deposits/sync"));
         assertTrue(paths.has("/api/webhooks/kira"));
     }

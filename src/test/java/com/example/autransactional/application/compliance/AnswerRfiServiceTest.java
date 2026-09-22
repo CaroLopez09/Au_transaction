@@ -58,9 +58,10 @@ class AnswerRfiServiceTest {
     private List<Rfi> registro;
 
     private final AuthenticatedOperator cumplimiento =
-            new AuthenticatedOperator("u-1", "compliance@juriscop.test", TENANT, Role.COMPLIANCE_INTERNAL);
-    private final AuthenticatedOperator admin =
-            new AuthenticatedOperator("u-9", "admin@juriscop.test", TENANT, Role.ADMIN);
+            new AuthenticatedOperator("u-1", "admin@juriscop.test", TENANT, Role.ADMIN);
+    private final AuthenticatedOperator admin = cumplimiento;
+    private final AuthenticatedOperator approver =
+            new AuthenticatedOperator("u-2", "treasury.approver@juriscop.test", TENANT, Role.TREASURY_APPROVER);
 
     private static final String DETALLE = detalle("pending", "pending");
 
@@ -339,10 +340,7 @@ class AnswerRfiServiceTest {
     @Test
     void tesoreriaNoPuedeResponderRfis() {
         Rfi rfi = sincronizarUno();
-        AuthenticatedOperator maker =
-                new AuthenticatedOperator("u-2", "treasury.maker@juriscop.test", TENANT, Role.TREASURY_MAKER);
-
-        assertThrows(DomainException.class, () -> service.answer(maker, rfi.getId(),
+        assertThrows(DomainException.class, () -> service.answer(approver, rfi.getId(),
                 new RfiCommands.AnswerItems(List.of(new RfiCommands.ItemAnswer("i-ein", "1")))));
     }
 
@@ -498,12 +496,12 @@ class AnswerRfiServiceTest {
     }
 
     @Test
-    void cumplimientoNoPuedeBorrarDocumentosSoloAdmin() {
+    void unRolQueNoEsAdminNoPuedeBorrarDocumentos() {
         // Borrar es destructivo: se separa de la gestion general de RFIs (guia de arquitectura §2.5).
         Rfi rfi = sincronizarUno();
 
         assertThrows(DomainException.class, () ->
-                service.removeDocument(cumplimiento, rfi.getId(), "i-doc", "doc-1"));
+                service.removeDocument(approver, rfi.getId(), "i-doc", "doc-1"));
         verify(kira, never()).removeRfiDocument(any(), any(), any());
     }
 

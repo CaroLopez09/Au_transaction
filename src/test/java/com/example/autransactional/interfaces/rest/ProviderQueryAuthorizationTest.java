@@ -44,18 +44,6 @@ class ProviderQueryAuthorizationTest {
     private AnswerRfiService rfis;
 
     @Test
-    @WithMockUser(roles = "READ_ONLY")
-    void soloLecturaNoConsultaAKira() throws Exception {
-        mockMvc.perform(post("/api/onboarding/refresh")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/virtual-accounts/va-1/refresh")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/virtual-accounts/va-1/balance")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/virtual-accounts/va-1/deposits/sync")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/payouts/p-1/refresh")).andExpect(status().isForbidden());
-
-        verifyNoInteractions(onboarding, accounts, deposits, payouts);
-    }
-
-    @Test
     @WithMockUser(roles = "TREASURY_APPROVER")
     void tesoreriaSiConsultaElEstadoDeSusOperaciones() throws Exception {
         mockMvc.perform(post("/api/virtual-accounts/va-1/balance")).andExpect(status().isOk());
@@ -64,7 +52,7 @@ class ProviderQueryAuthorizationTest {
     }
 
     @Test
-    @WithMockUser(roles = "TREASURY_MAKER")
+    @WithMockUser(roles = "TREASURY_APPROVER")
     void elEnlaceDeUnDocumentoDeRfiEsDeCumplimiento() throws Exception {
         mockMvc.perform(get("/api/rfis/r-1/items/i-1/documents/d-1/link")).andExpect(status().isForbidden());
 

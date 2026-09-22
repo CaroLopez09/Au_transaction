@@ -35,10 +35,10 @@ class OnboardingDraftServiceTest {
     private OnboardingDraftService service;
     private Tenant empresa;
 
-    private final AuthenticatedOperator compliance =
-            new AuthenticatedOperator("u-1", "compliance.internal@juriscop.test", TENANT, Role.COMPLIANCE_INTERNAL);
-    private final AuthenticatedOperator consulta =
-            new AuthenticatedOperator("u-2", "read.only@juriscop.test", TENANT, Role.READ_ONLY);
+    private final AuthenticatedOperator admin =
+            new AuthenticatedOperator("u-1", "admin@juriscop.test", TENANT, Role.ADMIN);
+    private final AuthenticatedOperator approver =
+            new AuthenticatedOperator("u-2", "treasury.approver@juriscop.test", TENANT, Role.TREASURY_APPROVER);
 
     @BeforeEach
     void setUp() {
@@ -50,7 +50,7 @@ class OnboardingDraftServiceTest {
 
     @Test
     void sinBorradorDevuelveVacioYSinFecha() {
-        OnboardingDraftView view = service.get(consulta);
+        OnboardingDraftView view = service.get(approver);
 
         assertTrue(view.draft().isEmpty());
         assertNull(view.updatedAt());
@@ -62,20 +62,20 @@ class OnboardingDraftServiceTest {
                 "company", Map.of("business_legal_name", "Juriscop S.A.S.", "business_type", "corporation"),
                 "activity", Map.of("expected_monthly_volume", "less_than_50000"));
 
-        OnboardingDraftView saved = service.save(compliance, new OnboardingCommands.SaveDraft(draft));
+        OnboardingDraftView saved = service.save(admin, new OnboardingCommands.SaveDraft(draft));
 
         assertNotNull(saved.updatedAt());
         assertNotNull(empresa.getOnboardingDraft());
-        assertEquals(draft, service.get(consulta).draft());
+        assertEquals(draft, service.get(approver).draft());
         // Kira no aparece: el borrador no sale del BFF.
         verify(tenants).save(empresa);
-        verify(audit).record(eq(compliance), eq("tenant.onboarding_draft_saved"), eq("tenant"), eq("juriscop"),
+        verify(audit).record(eq(admin), eq("tenant.onboarding_draft_saved"), eq("tenant"), eq("juriscop"),
                 isNull(), eq("OK"), contains("company"));
     }
 
     @Test
     void laBitacoraNoGuardaDatosDeLaEmpresa() {
-        service.save(compliance, new OnboardingCommands.SaveDraft(
+        service.save(admin, new OnboardingCommands.SaveDraft(
                 Map.of("company", Map.of("ein", "12-3456789"))));
 
         verify(audit).record(any(), anyString(), anyString(), anyString(), isNull(), anyString(),
@@ -84,12 +84,12 @@ class OnboardingDraftServiceTest {
 
     @Test
     void unObjetoVacioBorraElBorrador() {
-        service.save(compliance, new OnboardingCommands.SaveDraft(Map.of("company", Map.of("email", "a@b.co"))));
+        service.save(admin, new OnboardingCommands.SaveDraft(Map.of("company", Map.of("email", "a@b.co"))));
 
-        service.save(compliance, new OnboardingCommands.SaveDraft(Map.of()));
+        service.save(admin, new OnboardingCommands.SaveDraft(Map.of()));
 
         assertNull(empresa.getOnboardingDraft());
-        assertTrue(service.get(consulta).draft().isEmpty());
+        assertTrue(service.get(approver).draft().isEmpty());
     }
 
     @Test
@@ -98,7 +98,7 @@ class OnboardingDraftServiceTest {
                 List.of(Map.of("type", "file_bylaws", "file", "data:application/pdf;base64,JVBERi0=")));
 
         DomainException error = assertThrows(DomainException.class,
-                () -> service.save(compliance, new OnboardingCommands.SaveDraft(draft)));
+                () -> service.save(admin, new OnboardingCommands.SaveDraft(draft)));
 
         assertTrue(error.getMessage().contains("no admite archivos"));
         verify(tenants, never()).save(any());
@@ -108,14 +108,14 @@ class OnboardingDraftServiceTest {
     void rechazaUnBorradorDemasiadoGrande() {
         Map<String, Object> draft = Map.of("company", Map.of("business_description", "x".repeat(Tenant.MAX_DRAFT_CHARS)));
 
-        assertThrows(DomainException.class, () -> service.save(compliance, new OnboardingCommands.SaveDraft(draft)));
+        assertThrows(DomainException.class, () -> service.save(admin, new OnboardingCommands.SaveDraft(draft)));
         verify(tenants, never()).save(any());
     }
 
     @Test
     void unRolSinPermisoDeCumplimientoNoGuarda() {
         assertThrows(DomainException.class,
-                () -> service.save(consulta, new OnboardingCommands.SaveDraft(Map.of("company", Map.of()))));
+                () -> service.save(approver, new OnboardingCommands.SaveDraft(Map.of("company", Map.of()))));
         verify(tenants, never()).save(any());
     }
 
@@ -125,14 +125,14 @@ class OnboardingDraftServiceTest {
                 List.of(), MissingFields.empty(), true, null, null, null, null, null);
 
         assertThrows(DomainException.class,
-                () -> service.save(compliance, new OnboardingCommands.SaveDraft(Map.of("company", Map.of()))));
+                () -> service.save(admin, new OnboardingCommands.SaveDraft(Map.of("company", Map.of()))));
     }
 
     @Test
     void unBorradorIlegibleEnBaseSeDegradaAVacio() {
         empresa.restoreOnboardingDraft("{no es json", null);
 
-        assertTrue(service.get(consulta).draft().isEmpty());
+        assertTrue(service.get(approver).draft().isEmpty());
     }
 
     // --- Rehidratacion desde el expediente ya enviado ---
@@ -162,7 +162,7 @@ class OnboardingDraftServiceTest {
     void sinBorradorElFormularioSeRellenaConLoYaEnviado() {
         conExpedienteEnviado();
 
-        Map<String, Object> draft = service.get(consulta).draft();
+        Map<String, Object> draft = service.get(approver).draft();
 
         Map<String, Object> company = (Map<String, Object>) draft.get("company");
         assertEquals("Juriscop S.A.S.", company.get("business_legal_name"));
@@ -192,12 +192,12 @@ class OnboardingDraftServiceTest {
     @SuppressWarnings("unchecked")
     void unBorradorRecienEmpezadoNoBorraLoYaEnviado() {
         conExpedienteEnviado();
-        service.save(compliance, new OnboardingCommands.SaveDraft(Map.of(
+        service.save(admin, new OnboardingCommands.SaveDraft(Map.of(
                 "company", new java.util.LinkedHashMap<>(Map.of("business_legal_name", "Otra Razon S.A.S.",
                         "email", "", "business_type", "")),
                 "activity", Map.of("source_of_funds", ""))));
 
-        Map<String, Object> draft = service.get(consulta).draft();
+        Map<String, Object> draft = service.get(approver).draft();
 
         Map<String, Object> company = (Map<String, Object>) draft.get("company");
         // Lo tecleado manda...
@@ -210,15 +210,15 @@ class OnboardingDraftServiceTest {
 
     @Test
     void sinExpedienteNiBorradorSigueDevolviendoVacio() {
-        assertTrue(service.get(consulta).draft().isEmpty());
-        assertNull(service.get(consulta).updatedAt());
+        assertTrue(service.get(approver).draft().isEmpty());
+        assertNull(service.get(approver).updatedAt());
     }
 
     @Test
     void unExpedienteIlegibleNoRompeElFormulario() {
         empresa.recordOnboardingPayload("{no es json");
-        service.save(compliance, new OnboardingCommands.SaveDraft(Map.of("company", Map.of("email", "a@b.co"))));
+        service.save(admin, new OnboardingCommands.SaveDraft(Map.of("company", Map.of("email", "a@b.co"))));
 
-        assertEquals(Map.of("company", Map.of("email", "a@b.co")), service.get(consulta).draft());
+        assertEquals(Map.of("company", Map.of("email", "a@b.co")), service.get(approver).draft());
     }
 }

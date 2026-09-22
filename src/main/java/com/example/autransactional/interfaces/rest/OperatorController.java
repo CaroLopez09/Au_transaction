@@ -32,7 +32,7 @@ public class OperatorController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Operadores de la empresa",
             description = "Cumplimiento tambien los ve: necesita saber quien firma cada operacion.")
     public List<OperatorView> list(@AuthenticationPrincipal AuthenticatedOperator operator) {

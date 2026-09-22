@@ -57,9 +57,9 @@ class SyncUbosServiceTest {
     private Tenant empresa;
     private List<Ubo> registro;
 
-    private final AuthenticatedOperator compliance =
-            new AuthenticatedOperator("u-1", "compliance.internal@juriscop.test", TENANT,
-                    Role.COMPLIANCE_INTERNAL);
+    private final AuthenticatedOperator admin =
+            new AuthenticatedOperator("u-1", "admin@juriscop.test", TENANT,
+                    Role.ADMIN);
 
     @BeforeEach
     void setUp() {
@@ -101,11 +101,11 @@ class SyncUbosServiceTest {
         registrar("Ana", true, "60");
         when(onboarding.completeProfile(any(), any())).thenReturn(null);
 
-        service.syncToKira(compliance);
+        service.syncToKira(admin);
 
         ArgumentCaptor<OnboardingCommands.CompleteProfile> captor =
                 ArgumentCaptor.forClass(OnboardingCommands.CompleteProfile.class);
-        verify(onboarding).completeProfile(eq(compliance), captor.capture());
+        verify(onboarding).completeProfile(eq(admin), captor.capture());
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> personas =
@@ -133,14 +133,14 @@ class SyncUbosServiceTest {
     void laPersonaViajaConLosDatosQueKiraPideYSinPersonReferenceId() {
         Ubo ana = registrar("Ana", true, "60");
         ana.linkKiraPerson("per_ana");
-        service.save(compliance, edicion("Ana", "Ana"));
+        service.save(admin, edicion("Ana", "Ana"));
         when(onboarding.completeProfile(any(), any())).thenReturn(null);
 
-        service.syncToKira(compliance);
+        service.syncToKira(admin);
 
         ArgumentCaptor<OnboardingCommands.CompleteProfile> captor =
                 ArgumentCaptor.forClass(OnboardingCommands.CompleteProfile.class);
-        verify(onboarding).completeProfile(eq(compliance), captor.capture());
+        verify(onboarding).completeProfile(eq(admin), captor.capture());
         @SuppressWarnings("unchecked")
         Map<String, Object> persona = ((List<Map<String, Object>>) captor.getValue().profile()
                 .get("associated_persons")).getFirst();
@@ -160,7 +160,7 @@ class SyncUbosServiceTest {
     void editarCorrigeNombreApellidoYCargo() {
         registrar("Ana", true, "60");
 
-        UboView vista = service.save(compliance, edicion("Ana", "Anna"));
+        UboView vista = service.save(admin, edicion("Ana", "Anna"));
 
         assertEquals("Anna", vista.firstName());
         assertEquals("Gomez", vista.lastName());
@@ -173,10 +173,10 @@ class SyncUbosServiceTest {
         registrar("Ana", true, "60");
         doAnswer(i -> registro.remove((Ubo) i.getArgument(0))).when(ubos).delete(any());
 
-        UboView.Roster grupo = service.delete(compliance, "Ana");
+        UboView.Roster grupo = service.delete(admin, "Ana");
 
         assertTrue(grupo.members().isEmpty());
-        verify(audit).record(eq(compliance), eq("tenant.ubo_deleted"), anyString(), eq("Ana"), any(), eq("OK"), anyString());
+        verify(audit).record(eq(admin), eq("tenant.ubo_deleted"), anyString(), eq("Ana"), any(), eq("OK"), anyString());
     }
 
     @Test
@@ -188,7 +188,7 @@ class SyncUbosServiceTest {
                 true, new BigDecimal("40"), false, false, false, "COL", null,
                 null, null, null, null, null, null, null);
 
-        assertThrows(DomainException.class, () -> service.save(compliance, otra));
+        assertThrows(DomainException.class, () -> service.save(admin, otra));
         verify(ubos, never()).save(any());
     }
 
@@ -197,17 +197,17 @@ class SyncUbosServiceTest {
         Ubo ana = registrar("Ana", true, "60");
         when(onboarding.completeProfile(any(), any())).thenReturn(null);
 
-        service.syncToKira(compliance);
+        service.syncToKira(admin);
 
         assertTrue(ana.isKnownToKira());
-        assertThrows(DomainException.class, () -> service.delete(compliance, "Ana"));
+        assertThrows(DomainException.class, () -> service.delete(admin, "Ana"));
     }
 
     @Test
     void noSeBorraUnBeneficiarioQueKiraYaConoce() {
         registrar("Ana", true, "60").linkKiraPerson("per_ana");
 
-        assertThrows(DomainException.class, () -> service.delete(compliance, "Ana"));
+        assertThrows(DomainException.class, () -> service.delete(admin, "Ana"));
         verify(ubos, never()).delete(any());
     }
 
@@ -218,7 +218,7 @@ class SyncUbosServiceTest {
         registrar("Luis", true, "40");
         when(onboarding.completeProfile(any(), any())).thenReturn(null);
 
-        service.syncToKira(compliance);
+        service.syncToKira(admin);
 
         ArgumentCaptor<OnboardingCommands.CompleteProfile> captor =
                 ArgumentCaptor.forClass(OnboardingCommands.CompleteProfile.class);
@@ -230,7 +230,7 @@ class SyncUbosServiceTest {
     void sinBeneficiarioNoSeGastaLaLlamadaAKira() {
         registrar("Ana", false, "0");
 
-        assertThrows(DomainException.class, () -> service.syncToKira(compliance));
+        assertThrows(DomainException.class, () -> service.syncToKira(admin));
 
         verify(onboarding, never()).completeProfile(any(), any());
     }
@@ -242,7 +242,7 @@ class SyncUbosServiceTest {
         registrar("Ana", true, "60");
 
         assertThrows(DomainException.class,
-                () -> service.requestLivenessLinks(compliance, CONSENTIDO));
+                () -> service.requestLivenessLinks(admin, CONSENTIDO));
 
         verify(kira, never()).requestLivenessLink(anyString(), any());
     }
@@ -255,7 +255,7 @@ class SyncUbosServiceTest {
                 Set.of(FeatureFlag.RFIS)));
 
         assertThrows(DomainException.class,
-                () -> service.requestLivenessLinks(compliance, CONSENTIDO));
+                () -> service.requestLivenessLinks(admin, CONSENTIDO));
 
         verify(kira, never()).requestLivenessLink(anyString(), any());
     }
@@ -272,7 +272,7 @@ class SyncUbosServiceTest {
                                "expires_at": "2026-09-17T20:30:00.000Z" } ] }
                 """));
 
-        service.requestLivenessLinks(compliance,
+        service.requestLivenessLinks(admin,
                 new UboCommands.RequestLivenessLinks("https://portal/ok", "https://portal/ko", true));
 
         assertEquals("https://kira/l/ana", ana.getLivenessLink());
@@ -290,7 +290,7 @@ class SyncUbosServiceTest {
                                           "liveness_link": "https://kira/l/ana" } ] } }
                 """));
 
-        service.requestLivenessLinks(compliance, CONSENTIDO);
+        service.requestLivenessLinks(admin, CONSENTIDO);
 
         assertEquals("per_nueva", ana.getPersonReferenceId());
         assertNotNull(ana.getLivenessLink());
@@ -304,7 +304,7 @@ class SyncUbosServiceTest {
         registrar("Ana", true, "60");
         when(kira.requestLivenessLink(anyString(), any())).thenReturn(json("{ \"links\": [] }"));
 
-        service.requestLivenessLinks(compliance, CONSENTIDO);
+        service.requestLivenessLinks(admin, CONSENTIDO);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
@@ -336,10 +336,10 @@ class SyncUbosServiceTest {
 
     @Test
     void unRolDeTesoreriaNoGestionaBeneficiarios() {
-        var maker = new AuthenticatedOperator("u-2", "treasury.maker@juriscop.test", TENANT,
-                Role.TREASURY_MAKER);
+        var approver = new AuthenticatedOperator("u-2", "treasury.approver@juriscop.test", TENANT,
+                Role.TREASURY_APPROVER);
 
-        assertThrows(DomainException.class, () -> service.syncToKira(maker));
+        assertThrows(DomainException.class, () -> service.syncToKira(approver));
     }
 
     // --- Documentos de identidad de una persona ---
@@ -349,10 +349,10 @@ class SyncUbosServiceTest {
         kybEnCurso();
         registrar("Ana", true, "60");
 
-        var e = assertThrows(DomainException.class, () -> service.attachDocuments(compliance, "ana", pasaporte(), false));
+        var e = assertThrows(DomainException.class, () -> service.attachDocuments(admin, "ana", pasaporte(), false));
         assertEquals(SyncUbosService.BIOMETRIC_CONSENT_REQUIRED, e.getMessage());
-        assertThrows(DomainException.class, () -> service.requestLivenessLinks(compliance, null));
-        assertThrows(DomainException.class, () -> service.requestLivenessLinks(compliance,
+        assertThrows(DomainException.class, () -> service.requestLivenessLinks(admin, null));
+        assertThrows(DomainException.class, () -> service.requestLivenessLinks(admin,
                 new UboCommands.RequestLivenessLinks(null, null, false)));
 
         verifyNoInteractions(kira);
@@ -364,9 +364,9 @@ class SyncUbosServiceTest {
         registrar("Ana", true, "60");
         when(kira.requestLivenessLink(anyString(), any())).thenReturn(json("{ \"links\": [] }"));
 
-        service.requestLivenessLinks(compliance, CONSENTIDO);
+        service.requestLivenessLinks(admin, CONSENTIDO);
 
-        verify(audit).record(eq(compliance), eq("tenant.biometric_consent_recorded"), eq("tenant"), anyString(),
+        verify(audit).record(eq(admin), eq("tenant.biometric_consent_recorded"), eq("tenant"), anyString(),
                 isNull(), eq("OK"), eq("liveness"));
     }
 
@@ -385,7 +385,7 @@ class SyncUbosServiceTest {
         ana.describeEmail("ana@juriscop.co");
         when(kira.updateUser(anyString(), any())).thenReturn(json("{ \"id\": \"usr_1\" }"));
 
-        service.attachDocuments(compliance, "ana", pasaporte(), true);
+        service.attachDocuments(admin, "ana", pasaporte(), true);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> body = ArgumentCaptor.forClass(Map.class);
@@ -415,7 +415,7 @@ class SyncUbosServiceTest {
         registrar("ana", true, "60");
 
         var e = assertThrows(DomainException.class,
-                () -> service.attachDocuments(compliance, "ana", pasaporte(), true));
+                () -> service.attachDocuments(admin, "ana", pasaporte(), true));
 
         assertTrue(e.getMessage().contains("email"), e.getMessage());
         verify(kira, never()).updateUser(anyString(), any());
@@ -426,7 +426,7 @@ class SyncUbosServiceTest {
         kybEnCurso();
 
         assertThrows(DomainException.class,
-                () -> service.attachDocuments(compliance, "de-otra-empresa", pasaporte(), true));
+                () -> service.attachDocuments(admin, "de-otra-empresa", pasaporte(), true));
         verify(kira, never()).updateUser(anyString(), any());
     }
 
@@ -436,7 +436,7 @@ class SyncUbosServiceTest {
         Ubo ana = registrar("ana", true, "60");
         ana.describeEmail("ana@juriscop.co");
 
-        service.syncToKira(compliance);
+        service.syncToKira(admin);
 
         ArgumentCaptor<OnboardingCommands.CompleteProfile> perfil =
                 ArgumentCaptor.forClass(OnboardingCommands.CompleteProfile.class);

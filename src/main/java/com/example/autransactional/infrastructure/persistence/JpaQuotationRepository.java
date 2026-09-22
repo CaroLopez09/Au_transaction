@@ -53,14 +53,6 @@ public class JpaQuotationRepository implements QuotationRepository {
     }
 
     @Override
-    public List<Quotation> findByTenant(TenantId tenantId, int limit) {
-        return jpa.findByTenantIdOrderByCreatedAtDesc(tenantId.value()).stream()
-                .limit(limit)
-                .map(JpaQuotationRepository::toDomain)
-                .toList();
-    }
-
-    @Override
     public List<Quotation> findActiveExpiredBefore(Instant cutoff) {
         return jpa.findByStatusAndQuoteExpiresAtBefore(QuotationStatus.ACTIVE, cutoff).stream()
                 .map(JpaQuotationRepository::toDomain)

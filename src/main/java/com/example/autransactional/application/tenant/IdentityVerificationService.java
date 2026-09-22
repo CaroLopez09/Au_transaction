@@ -15,9 +15,9 @@ import com.example.autransactional.infrastructure.security.AuthenticatedOperator
 import com.example.autransactional.infrastructure.security.JwtService;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.JsonNode;
@@ -38,16 +38,18 @@ public class IdentityVerificationService {
     private final BiometryProperties properties;
     private final ObjectMapper objectMapper;
     private final AuditTrail audit;
+    private final RestClient restClient;
 
     public IdentityVerificationService(OperatorUserRepository users, IdentityVerificationAttemptJpaRepository attempts,
                                        JwtService jwt, BiometryProperties properties, ObjectMapper objectMapper,
-                                       AuditTrail audit) {
+                                       AuditTrail audit, RestClient biometryRestClient) {
         this.users = users;
         this.attempts = attempts;
         this.jwt = jwt;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.audit = audit;
+        this.restClient = biometryRestClient;
     }
 
     @Transactional
@@ -117,7 +119,7 @@ public class IdentityVerificationService {
 
         Instant now = Instant.now();
         OperatorIdentity identity = new OperatorIdentity(status, null, blankToNull(documentType),
-                lastFour(text(response.path("documentData"), "documentNumber", "number")),
+                lastFour(text(response.path("customerDocumentData"), "documentNumber", "number")),
                 blankToNull(countryCode), now, now, status.isVerified() ? now : null,
                 status == IdentityVerificationStatus.REJECTED ? "El proveedor no aprobo la identidad." : null);
         users.updateIdentity(user.id(), identity, status.isVerified() ? UserStatus.ACTIVE : UserStatus.PENDING_IDENTITY);
@@ -128,38 +130,54 @@ public class IdentityVerificationService {
 
     private JsonNode callProvider(MultipartFile front, MultipartFile back, MultipartFile selfie, String documentType,
                                   String countryCode, JwtService.IdentityChallenge challenge, String livenessSessionId) {
-        MultipartBodyBuilder body = new MultipartBodyBuilder();
-        part(body, "documentFrontImage", front);
-        part(body, "documentBackImage", back);
-        part(body, "selfieImage", selfie);
-        body.part("documentType", documentType == null ? "" : documentType);
-        body.part("countryCode", countryCode == null ? "" : countryCode);
-        body.part("challengeId", challenge.challengeId());
-        if (livenessSessionId != null && !livenessSessionId.isBlank()) {
-            body.part("livenessSessionId", livenessSessionId);
-        }
+        org.springframework.util.LinkedMultiValueMap<String, Object> parts = new org.springframework.util.LinkedMultiValueMap<>();
+        part(parts, "documentFrontImage", front);
+        part(parts, "documentBackImage", back);
+        part(parts, "selfieImage", selfie);
+        parts.add("documentType", documentType == null ? "" : documentType);
+        parts.add("countryCode", countryCode == null || countryCode.isBlank() ? "CO" : countryCode);
+        parts.add("clientId", challenge.userId());
         try {
-            String raw = RestClient.builder().baseUrl(properties.baseUrl()).build().post()
-                    .uri("/identity/validate")
+            String raw = restClient.post()
+                    .uri("/api/v1/identity/validate")
                     .contentType(MediaType.MULTIPART_FORM_DATA)
                     .headers(headers -> {
                         if (properties.apiKey() != null && !properties.apiKey().isBlank()) {
                             headers.set("X-Api-Key", properties.apiKey());
                         }
                     })
-                    .body(body.build()).retrieve().body(String.class);
+                    .body(parts).retrieve().body(String.class);
             JsonNode parsed = objectMapper.readTree(raw);
             return parsed.has("data") ? parsed.get("data") : parsed;
+        } catch (HttpStatusCodeException e) {
+            // El proveedor devuelve 4xx con un mensaje de negocio util (p. ej. "no se detecto un
+            // rostro"): lo mostramos al usuario en vez de un mensaje generico que oculta la causa.
+            String providerMessage = e.getStatusCode().is4xxClientError() ? extractMessage(e.getResponseBodyAsString()) : null;
+            throw new DomainException(providerMessage != null ? providerMessage
+                    : "No fue posible validar la identidad con el proveedor.");
         } catch (RuntimeException e) {
             throw new DomainException("No fue posible validar la identidad con el proveedor.");
         }
     }
 
-    private static void part(MultipartBodyBuilder body, String name, MultipartFile file) {
+    private String extractMessage(String body) {
+        try {
+            JsonNode node = objectMapper.readTree(body);
+            JsonNode message = node.get("message");
+            return message != null && message.isTextual() && !message.asText().isBlank() ? message.asText() : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static void part(org.springframework.util.LinkedMultiValueMap<String, Object> parts, String name,
+                             MultipartFile file) {
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(file.getContentType()));
         ByteArrayResource content = new ByteArrayResource(bytes(file)) {
             @Override public String getFilename() { return file.getOriginalFilename(); }
         };
-        body.part(name, content).contentType(MediaType.parseMediaType(file.getContentType()));
+        parts.add(name, new org.springframework.http.HttpEntity<>(content, headers));
     }
 
     private static void validateImage(MultipartFile file, String label) {

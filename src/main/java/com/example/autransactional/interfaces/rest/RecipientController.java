@@ -44,12 +44,6 @@ public class RecipientController {
         return recipients.listInKira(operator);
     }
 
-    @GetMapping("/{id}/kira")
-    public KiraRecipientView getInKira(@AuthenticationPrincipal AuthenticatedOperator operator,
-                                       @PathVariable String id) {
-        return recipients.getInKira(operator, id);
-    }
-
     @GetMapping("/{id}")
     public RecipientView get(@AuthenticationPrincipal AuthenticatedOperator operator,
                              @PathVariable String id) {
@@ -58,7 +52,7 @@ public class RecipientController {
 
     /** `alreadyExisted: true` significa que Kira devolvio un 202: el destino ya estaba. */
     @PostMapping
-    @PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<RecipientView> register(
             @AuthenticationPrincipal AuthenticatedOperator operator,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
@@ -69,7 +63,7 @@ public class RecipientController {
 
     /** Archiva el destinatario. Con `replacedByRecipientId` queda enlazado a su sustituto. */
     @PostMapping("/{id}/archive")
-    @PreAuthorize("hasAnyRole('TREASURY_MAKER','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public RecipientView archive(@AuthenticationPrincipal AuthenticatedOperator operator,
                                  @PathVariable String id,
                                  @RequestBody(required = false) RecipientCommands.ArchiveRecipient command) {

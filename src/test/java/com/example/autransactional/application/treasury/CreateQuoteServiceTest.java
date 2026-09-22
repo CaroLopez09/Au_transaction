@@ -55,8 +55,8 @@ class CreateQuoteServiceTest {
     private VirtualAccount cuenta;
     private Recipient destinatario;
 
-    private final AuthenticatedOperator maker =
-            new AuthenticatedOperator("u-1", "treasury.maker@juriscop.test", TENANT, Role.TREASURY_MAKER);
+    private final AuthenticatedOperator admin =
+            new AuthenticatedOperator("u-1", "admin@juriscop.test", TENANT, Role.ADMIN);
 
     /** 1.000 al destinatario, 15 de Kira + 15 de la plataforma, 1.030 debitados. */
     private static final String RESPUESTA_KIRA = """
@@ -120,7 +120,7 @@ class CreateQuoteServiceTest {
 
     @Test
     void seCotizaEnModoRedimibleYCompensandoHaciaArriba() {
-        service.create(maker, peticion(null));
+        service.create(admin, peticion(null));
 
         Map<String, Object> body = cuerpoEnviado();
         // virtual_account_id y quote_for son excluyentes: con quote_for el quote_id es nulo.
@@ -136,7 +136,7 @@ class CreateQuoteServiceTest {
 
     @Test
     void elMarkupDeLaPlataformaViajaEnUnidadesMenores() {
-        service.create(maker, peticion(null));
+        service.create(admin, peticion(null));
 
         @SuppressWarnings("unchecked")
         Map<String, Object> markup = (Map<String, Object>) cuerpoEnviado().get("client_markup");
@@ -146,7 +146,7 @@ class CreateQuoteServiceTest {
 
     @Test
     void lasComisionesRealesSonLasQueLiquidaKiraNoLaEstimacion() {
-        var view = service.create(maker, peticion(null));
+        var view = service.create(admin, peticion(null));
 
         assertEquals(0, new BigDecimal("15.0000").compareTo(view.kiraFee()));
         assertEquals(0, new BigDecimal("15.0000").compareTo(view.platformFee()));
@@ -155,7 +155,7 @@ class CreateQuoteServiceTest {
 
     @Test
     void elDestinatarioRecibeElImporteExactoYLaCuentaPagaMas() {
-        var view = service.create(maker, peticion(null));
+        var view = service.create(admin, peticion(null));
 
         assertEquals(0, new BigDecimal("1000.00").compareTo(view.originAmount()));
         assertEquals(0, new BigDecimal("1000.00").compareTo(view.destinationAmount()));
@@ -165,7 +165,7 @@ class CreateQuoteServiceTest {
 
     @Test
     void elRielSeDerivaDelDestinatarioNoDelFormulario() {
-        service.create(maker, peticion(null));
+        service.create(admin, peticion(null));
 
         assertEquals("WIRE_DOMESTIC", cuerpoEnviado().get("rail"));
     }
@@ -173,7 +173,7 @@ class CreateQuoteServiceTest {
     @Test
     void unRielQueNoCorrespondeSeCortaAntesDeCotizar() {
         // Kira solo lo detectaria al ejecutar el pago, con 422 y el viaje ya perdido.
-        var e = assertThrows(DomainException.class, () -> service.create(maker, peticion("ACH_SAME_DAY")));
+        var e = assertThrows(DomainException.class, () -> service.create(admin, peticion("ACH_SAME_DAY")));
 
         assertTrue(e.getMessage().contains("WIRE_DOMESTIC"), e.getMessage());
         verify(kira, never()).createQuotation(any());
@@ -184,13 +184,13 @@ class CreateQuoteServiceTest {
         // 'approved' no significa fondos disponibles.
         cuenta = new VirtualAccount("va-1", TENANT, "USD", VirtualAccountMode.FIAT, "jp_morgan", null);
 
-        assertThrows(DomainException.class, () -> service.create(maker, peticion(null)));
+        assertThrows(DomainException.class, () -> service.create(admin, peticion(null)));
         verify(kira, never()).createQuotation(any());
     }
 
     @Test
     void elVencimientoEsElQueDiceKiraNoElCalculado() {
-        var view = service.create(maker, peticion(null));
+        var view = service.create(admin, peticion(null));
 
         assertEquals(Instant.parse("2026-09-10T18:15:00.000Z"), view.expiresAt());
     }
@@ -201,7 +201,7 @@ class CreateQuoteServiceTest {
                 { "quote_id": null, "source": { "amount": 103000, "currency": "USD", "precision": 2 } }
                 """));
 
-        var e = assertThrows(DomainException.class, () -> service.create(maker, peticion(null)));
+        var e = assertThrows(DomainException.class, () -> service.create(admin, peticion(null)));
         assertTrue(e.getMessage().contains("redimible"), e.getMessage());
     }
 
@@ -210,7 +210,7 @@ class CreateQuoteServiceTest {
         // El saldo local no alcanza para cubrir los 1.030 que Kira va a debitar (1.000 + comisiones).
         cuenta.refreshBalance(new BigDecimal("10.00"), Instant.now());
 
-        var view = service.create(maker, peticion(null));
+        var view = service.create(admin, peticion(null));
 
         assertFalse(view.balanceSufficient());
         ArgumentCaptor<Quotation> guardada = ArgumentCaptor.forClass(Quotation.class);
@@ -224,12 +224,12 @@ class CreateQuoteServiceTest {
         when(kira.createQuotation(any())).thenReturn(json(
                 RESPUESTA_KIRA.replace("\"rate_source\": \"kraken\"", "\"rate_source\": \"stale_at_peg\"")));
 
-        assertTrue(service.create(maker, peticion(null)).fallbackRate());
+        assertTrue(service.create(admin, peticion(null)).fallbackRate());
     }
 
     @Test
     void seGuardaLaCopiaDelPrecioMostrado() {
-        service.create(maker, peticion(null));
+        service.create(admin, peticion(null));
 
         ArgumentCaptor<Quotation> guardada = ArgumentCaptor.forClass(Quotation.class);
         verify(quotations).save(guardada.capture());
@@ -250,7 +250,7 @@ class CreateQuoteServiceTest {
         Tenant empresa = tenants.findById(TENANT).orElseThrow();
         empresa.applySettings(new TenantSettings(EnumSet.of(Rail.ACH), EnumSet.allOf(WalletToken.class)));
 
-        DomainException ex = assertThrows(DomainException.class, () -> service.create(maker, peticion(null)));
+        DomainException ex = assertThrows(DomainException.class, () -> service.create(admin, peticion(null)));
         assertTrue(ex.getMessage().contains("WIRE"));
     }
 }

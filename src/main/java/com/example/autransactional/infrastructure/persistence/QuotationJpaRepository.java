@@ -11,7 +11,5 @@ public interface QuotationJpaRepository extends JpaRepository<QuotationEntity, S
 
     Optional<QuotationEntity> findByIdAndTenantId(String id, String tenantId);
 
-    List<QuotationEntity> findByTenantIdOrderByCreatedAtDesc(String tenantId);
-
     List<QuotationEntity> findByStatusAndQuoteExpiresAtBefore(QuotationStatus status, Instant cutoff);
 }

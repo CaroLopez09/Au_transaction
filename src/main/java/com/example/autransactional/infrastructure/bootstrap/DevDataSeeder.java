@@ -130,7 +130,7 @@ public class DevDataSeeder implements ApplicationRunner {
             log.warn("Semilla de desarrollo aplicada: {} organizaciones y {} operadores nuevos. "
                             + "Todos con la contrasena '{}'. Nunca actives bff.dev.seed fuera de local.",
                     nuevosTenants, nuevosOperadores, properties.seedPassword());
-            log.info("Ejemplo de acceso: treasury.maker@juriscop.test / treasury.approver@juriscop.test");
+            log.info("Ejemplo de acceso: admin@juriscop.test / treasury.approver@juriscop.test");
         } else {
             log.info("Semilla de desarrollo: sin cambios, los datos ya existian.");
         }
@@ -153,10 +153,7 @@ public class DevDataSeeder implements ApplicationRunner {
     private static String nombreDe(Role role) {
         return switch (role) {
             case ADMIN -> "Admin";
-            case TREASURY_MAKER -> "Operador";
             case TREASURY_APPROVER -> "Tesorero";
-            case COMPLIANCE_INTERNAL -> "Cumplimiento";
-            case READ_ONLY -> "Consulta";
             case PLATFORM_OPERATOR -> "Operaciones";
         };
     }

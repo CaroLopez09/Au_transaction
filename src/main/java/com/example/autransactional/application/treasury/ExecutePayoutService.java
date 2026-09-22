@@ -90,40 +90,6 @@ public class ExecutePayoutService {
         this.approvalPolicy = approvalPolicy;
     }
 
-    /**
-     * Vista previa de comisiones contra POST /v1/virtual-accounts/{id}/payout/preview.
-     *
-     * No reserva precio ni crea nada: sirve para mostrar el coste mientras el operador teclea.
-     * El margen de la plataforma viaja igual que en el pago sin cotizacion, para que lo que se
-     * muestra aqui sea lo que se cobraria.
-     */
-    @Transactional(readOnly = true)
-    public PayoutPreviewView preview(AuthenticatedOperator operator, PayoutCommands.PreviewPayout command) {
-        if (!operator.role().canCreatePayout()) {
-            throw new DomainException("Tu rol no puede preparar pagos.");
-        }
-        assertIdentityVerified(operator);
-        VirtualAccount account = loadAccount(operator.tenantId(), command.virtualAccountId());
-        Recipient recipient = loadRecipient(operator.tenantId(), command.recipientId());
-        recipient.assertUsable();
-        if (recipient.getKiraRecipientId() == null) {
-            throw new DomainException("El destinatario no esta registrado en Kira.");
-        }
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("amount", KiraAmounts.amountString(command.amount()));
-        body.put("recipient_id", recipient.getKiraRecipientId());
-        body.put("inverse_calculation", command.recipientReceivesAmount() == null || command.recipientReceivesAmount());
-        body.put("client_markup", KiraAmounts.markupForPayout(FeeBreakdown.standard().platformFee(), 0));
-
-        JsonNode data = unwrap(kira.previewPayout(account.getKiraAccountId(), body));
-        JsonNode fees = data.path("fees");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> feeMap = fees.isObject() ? objectMapper.convertValue(fees, Map.class) : Map.of();
-        return new PayoutPreviewView(text(data, "amount"), text(data, "currency"),
-                text(data, "recipient_amount"), text(data, "recipient_currency"), feeMap);
-    }
-
     /** Linea de tiempo del pago (events[] de GET /v1/payouts/{id}). Vacia si aun no se envio. */
     @Transactional(readOnly = true)
     public List<PayoutEventView> events(AuthenticatedOperator operator, String payoutId) {

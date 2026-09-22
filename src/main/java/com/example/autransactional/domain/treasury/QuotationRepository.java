@@ -12,8 +12,6 @@ public interface QuotationRepository {
 
     Optional<Quotation> findByIdAndTenant(String id, TenantId tenantId);
 
-    List<Quotation> findByTenant(TenantId tenantId, int limit);
-
     /** Cotizaciones ACTIVE cuyo TTL ya paso: el reconciliador las cierra. */
     List<Quotation> findActiveExpiredBefore(Instant cutoff);
 }

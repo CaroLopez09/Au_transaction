@@ -27,6 +27,7 @@ spring:
 # --- Integracion con KiraFin (https://docs.kirafin.ai) ---
 # Las credenciales NUNCA llevan valor por defecto: si faltan, el perfil las exige o falla.
 kira:
+  
   api-key: ${KIRA_API_KEY:}
   client-id: ${KIRA_CLIENT_ID:}
   password: ${KIRA_PASSWORD:}

@@ -52,23 +52,23 @@ class DevDataSeederTest {
 
     @Test
     void laContrasenaQuedaCifradaNoEnClaro() {
-        var maker = operators.findByEmailIgnoreCase("treasury.maker@juriscop.test").orElseThrow();
+        var admin = operators.findByEmailIgnoreCase("admin@juriscop.test").orElseThrow();
 
-        assertNotEquals("Prueba123!", maker.getPasswordHash());
-        assertTrue(passwordEncoder.matches("Prueba123!", maker.getPasswordHash()));
+        assertNotEquals("Prueba123!", admin.getPasswordHash());
+        assertTrue(passwordEncoder.matches("Prueba123!", admin.getPasswordHash()));
     }
 
     @Test
-    void makerYApproverSonOperadoresDistintosDelMismoTenant() {
-        var maker = operators.findByEmailIgnoreCase("treasury.maker@juriscop.test").orElseThrow();
+    void adminYApproverSonOperadoresDistintosDelMismoTenant() {
+        var admin = operators.findByEmailIgnoreCase("admin@juriscop.test").orElseThrow();
         var approver = operators.findByEmailIgnoreCase("treasury.approver@juriscop.test").orElseThrow();
 
-        assertEquals(Role.TREASURY_MAKER, Role.fromDbName(maker.getRole().getName()));
+        assertEquals(Role.ADMIN, Role.fromDbName(admin.getRole().getName()));
         assertEquals(Role.TREASURY_APPROVER, Role.fromDbName(approver.getRole().getName()));
         // El nombre tecnico es el del esquema v2, no el de la constante Java.
-        assertEquals("tesoreria_maker", maker.getRole().getName());
-        assertEquals(maker.getTenantId(), approver.getTenantId());
-        assertNotEquals(maker.getId(), approver.getId());
+        assertEquals("admin", admin.getRole().getName());
+        assertEquals(admin.getTenantId(), approver.getTenantId());
+        assertNotEquals(admin.getId(), approver.getId());
     }
 
     @Test

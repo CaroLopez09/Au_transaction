@@ -33,8 +33,7 @@ import java.util.UUID;
 public class ManageOperatorsService {
 
     /** Roles que un ADMIN puede repartir dentro de su empresa. */
-    private static final Set<Role> ASSIGNABLE = Set.of(
-            Role.TREASURY_MAKER, Role.TREASURY_APPROVER, Role.COMPLIANCE_INTERNAL, Role.READ_ONLY);
+    private static final Set<Role> ASSIGNABLE = Set.of(Role.TREASURY_APPROVER);
 
     private final OperatorUserRepository users;
     private final PasswordEncoder passwordEncoder;

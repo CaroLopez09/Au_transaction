@@ -30,13 +30,6 @@ public final class PayoutCommands {
      * Vista previa de comisiones. Por defecto 'amount' es lo que RECIBE el destinatario, igual
      * que al cotizar; con recipientReceivesAmount=false es lo que sale de la cuenta.
      */
-    public record PreviewPayout(
-            @NotBlank String virtualAccountId,
-            @NotBlank String recipientId,
-            @NotNull @DecimalMin(value = "0.01") BigDecimal amount,
-            Boolean recipientReceivesAmount) {
-    }
-
     /**
      * Datos que solo se conocen al autorizar.
      *

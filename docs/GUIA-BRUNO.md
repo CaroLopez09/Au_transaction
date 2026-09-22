@@ -192,7 +192,7 @@ docs/bruno/AuTransactional/
 |---|---|
 | **Params** | parámetros de *query* (`limit`, `open`, `page`…) |
 | **Body** | el JSON de ejemplo, o el multipart con `files` |
-| **Auth** | `Bearer Token` con la variable del rol que debe llamar, p. ej. `{{tokenMaker}}` |
+| **Auth** | `Bearer Token` con la variable del rol que debe llamar, p. ej. `{{tokenAdmin}}` |
 | **Script** | *Pre Request*: prepara el cuerpo (pagos, webhooks). *Post Response*: guarda ids |
 | **Tests** | comprueba el código HTTP cuando no depende de Kira |
 | **Docs** | qué esperar y por qué |
@@ -206,7 +206,7 @@ Para verlas: icono 👁 junto al selector de entorno → *Runtime Variables*.
 
 | Variable | La guarda | La usan |
 |---|---|---|
-| `tokenAdmin`, `tokenMaker`, `tokenApprover`, `tokenCompliance`, `tokenReadOnly` | `00/01`–`00/05` | cada petición según su rol |
+| `tokenAdmin`, `tokenApprover` | `00/01`–`00/02` | cada petición según su rol |
 | `tokenOtraEmpresa` | `00/06` | pruebas de aislamiento |
 | `uboId` | `02/02 Alta UBO` | `02/03 Editar UBO` |
 | `rfiId` | `03/01 Bandeja` (primero de la lista) | `03/04`–`03/14` |
@@ -231,11 +231,8 @@ Correo `<rol>@<organización>.test`, contraseña `Dev12345!`, en `juriscop`, `ba
 
 | Correo (en `juriscop`) | Rol (`role`) | Puede |
 |---|---|---|
-| `admin@juriscop.test` | `ADMIN` | todo |
-| `treasury.maker@juriscop.test` | `TREASURY_MAKER` | abrir cuentas, destinatarios, cotizar, vista previa y **crear** pagos |
+| `admin@juriscop.test` | `ADMIN` | todo: abrir cuentas, destinatarios, cotizar, crear pagos, onboarding, UBOs, RFIs |
 | `treasury.approver@juriscop.test` | `TREASURY_APPROVER` | **aprobar / rechazar** pagos |
-| `compliance.internal@juriscop.test` | `COMPLIANCE_INTERNAL` | onboarding, UBOs, **RFIs y sus documentos**, abrir cuentas |
-| `read.only@juriscop.test` | `READ_ONLY` | lecturas, `refresh` y sincronizaciones de lectura |
 
 ### 6.2 Forma de los errores (verificada)
 
@@ -275,12 +272,12 @@ Clic derecho sobre **00 Sesion → Run → Run Collection**. Deja guardados los 
 |---|---|---|---|
 | 01–05 | `POST /api/auth/login` | `{"email":"<rol>@{{empresa}}.test","password":"{{password}}"}` | `200` + guarda `token*` |
 | 06 | `POST /api/auth/login` | compliance de `{{otraEmpresa}}` | `200` + `tokenOtraEmpresa` |
-| 07 | `GET /api/auth/me` | token maker | `200` |
+| 07 | `GET /api/auth/me` | token admin | `200` |
 | 08 | `POST /api/auth/login` | password incorrecta | `422` "Credenciales invalidas." |
 | 09 | `POST /api/auth/login` | email `no-es-un-email`, password vacía | `400` con `details` |
 | 10 | `GET /api/auth/me` | **sin** Authorization | `403`, cuerpo vacío |
 | 11 | `GET /api/auth/me` | `Bearer abc.def.ghi` | `401` "Token invalido o expirado." |
-| 12 | `GET /api/no-existe` | token read.only | `404` `{"code":"not_found","message":"La ruta no existe."}` |
+| 12 | `GET /api/no-existe` | token approver | `404` `{"code":"not_found","message":"La ruta no existe."}` |
 
 Respuesta de `01`:
 
@@ -297,11 +294,11 @@ Respuesta de `01`:
 
 | # | Petición | Rol | Modo A | Modo B |
 |---|---|---|---|---|
-| 01 | `GET /api/onboarding` | read.only | `200`, `status: CREATED` | `200` |
+| 01 | `GET /api/onboarding` | approver | `200`, `status: CREATED` | `200` |
 | 02 | `POST /api/onboarding` | compliance | **`503 kira_not_configured`** | `201` con `kiraUserId` |
 | 03 | `PUT /api/onboarding` | compliance | `422` "no dada de alta en Kira" | `200` con `pendingFields` |
-| 04 | `POST /api/onboarding/refresh` | read.only | `422` "no dada de alta en Kira" | `200` con el estado real |
-| 05 | `POST /api/onboarding` | **maker** | `403` | `403` |
+| 04 | `POST /api/onboarding/refresh` | approver | `422` "no dada de alta en Kira" | `200` con el estado real |
+| 05 | `POST /api/onboarding` | **approver** | `403` | `403` |
 | 06 | `POST /api/onboarding` sin `sourceOfFunds` | compliance | `400`, `details.sourceOfFunds` | `400` |
 
 Cuerpo de `02`:
@@ -328,7 +325,7 @@ Cuerpo de `03` (ajústalo a lo que pida `pendingFields`, con los nombres de Kira
 
 | # | Petición | Rol | Modo A | Modo B |
 |---|---|---|---|---|
-| 01 | `GET /api/ubos` | read.only | `200` con el grupo | `200` |
+| 01 | `GET /api/ubos` | approver | `200` con el grupo | `200` |
 | 02 | `POST /api/ubos` (sin `id`) | compliance | `200` + `uboId` | `200` |
 | 03 | `POST /api/ubos` (con `id`) | compliance | `200`, `ownershipPercentage: 55.0` | `200` |
 | 04 | `POST /api/ubos/sync` | compliance | `422` "no dada de alta en Kira" | `200` con `OnboardingView` |
@@ -356,18 +353,18 @@ Kira genera los RFIs; el portal los sincroniza y responde. Sin Kira la bandeja e
 
 | # | Petición | Rol | Sin RFI | Con RFI de prueba (§8) | Modo B |
 |---|---|---|---|---|---|
-| 01 | `GET /api/rfis` | read.only | `200 []` | `200` + guarda `rfiId` | `200` |
-| 02 | `GET /api/rfis?open=true` | read.only | `200 []` | `200` | `200` |
+| 01 | `GET /api/rfis` | approver | `200 []` | `200` + guarda `rfiId` | `200` |
+| 02 | `GET /api/rfis?open=true` | approver | `200 []` | `200` | `200` |
 | 03 | `POST /api/rfis/sync` | compliance | `422` "no dada de alta en Kira" | ídem | `200` |
-| 04 | `GET /api/rfis/{{rfiId}}` | read.only | `422` "RFI no encontrado." | `200` + guarda ids de items | `200` |
+| 04 | `GET /api/rfis/{{rfiId}}` | approver | `422` "RFI no encontrado." | `200` + guarda ids de items | `200` |
 | 05 | `POST /api/rfis/{{rfiId}}/refresh` | compliance | `422` | `503` | `200` |
 | 06 | `PATCH …/items` item de texto | compliance | `422` | `503` (validó y llamó a Kira) | `200` |
 | 07 | `PATCH …/items` item documento + item inventado | compliance | `422` | **`422 rfi_answer_rejected`** | `422` |
 | 08 | `PATCH …/items` con `items: []` | compliance | `400` | `400` | `400` |
-| 09 | `PATCH …/items` | **maker** | `403` | `403` | `403` |
+| 09 | `PATCH …/items` | **approver** | `403` | `403` | `403` |
 | 10 | `GET /api/rfis/{{rfiId}}` | **otra empresa** | `422` | `422` "RFI no encontrado." | `422` |
 | 11 | `POST …/items/{{rfiDocItemId}}/documents` (PDF) | compliance | `422` | `503` (validó y llamó a Kira) | `200` con el RFI releído |
-| 12 | `GET …/documents/{{rfiDocumentId}}/link` | read.only | `422` | `503` | `200` `{downloadUrl, expiresAt}` |
+| 12 | `GET …/documents/{{rfiDocumentId}}/link` | approver | `422` | `503` | `200` `{downloadUrl, expiresAt}` |
 | 13 | `DELETE …/documents/{{rfiDocumentId}}` | compliance | `422` | `503` | `200`, o `422` si es el último |
 | 14 | `POST …/items/{{rfiTextItemId}}/documents` | compliance | `422` | **`422`** "El item no es de tipo documento." | `422` |
 
@@ -433,11 +430,11 @@ guardes. Si caduca, vuelve a pedirlo.
 
 | # | Petición | Rol | Modo A | Modo B |
 |---|---|---|---|---|
-| 01 | `GET /api/virtual-accounts` | read.only | `200 []` | `200` + `vaId` si hay |
-| 02 | `POST /api/virtual-accounts` | maker | `422` "La empresa todavia no puede abrir cuentas: revisa el estado del KYB…" | `201` + `vaId` |
-| 03–06 | detalle, `refresh`, `balance`, `simulate-deposit` | read.only / maker | `422` "Cuenta virtual no encontrada." | `200` |
+| 01 | `GET /api/virtual-accounts` | approver | `200 []` | `200` + `vaId` si hay |
+| 02 | `POST /api/virtual-accounts` | admin | `422` "La empresa todavia no puede abrir cuentas: revisa el estado del KYB…" | `201` + `vaId` |
+| 03–06 | detalle, `refresh`, `balance`, `simulate-deposit` | approver / admin | `422` "Cuenta virtual no encontrada." | `200` |
 | 07 | `POST /api/virtual-accounts` | **approver** | `403` | `403` |
-| 08 | `simulate-deposit` con `amount: 0`, `paymentType: "swift"` | maker | `400` con 2 campos | `400` |
+| 08 | `simulate-deposit` con `amount: 0`, `paymentType: "swift"` | admin | `400` con 2 campos | `400` |
 
 Cuerpos: `02` → `{"description":"Operativa Juriscop","mode":"fiat","currency":"USD"}` ·
 `06` → `{"amount":5000.00,"paymentType":"wire"}` (monto **`11`** = depósito `refunded`).
@@ -451,9 +448,9 @@ activarse, `activationDelayed: true`: el sandbox se colgó, no es un fallo del B
 
 | # | Petición | Rol | Modo A | Modo B |
 |---|---|---|---|---|
-| 01 | `GET /api/deposits?limit=50` | read.only | `200 []` | `200` |
-| 02 | `GET /api/virtual-accounts/{{vaId}}/deposits` | read.only | `422` "Cuenta virtual no encontrada." | `200` |
-| 03 | `POST /api/virtual-accounts/{{vaId}}/deposits/sync` | read.only | `422` "Cuenta virtual no encontrada." | `200` con los depósitos sincronizados |
+| 01 | `GET /api/deposits?limit=50` | approver | `200 []` | `200` |
+| 02 | `GET /api/virtual-accounts/{{vaId}}/deposits` | approver | `422` "Cuenta virtual no encontrada." | `200` |
+| 03 | `POST /api/virtual-accounts/{{vaId}}/deposits/sync` | approver | `422` "Cuenta virtual no encontrada." | `200` con los depósitos sincronizados |
 
 `03` trae de Kira los depósitos de la cuenta y los asienta junto a los del webhook, en las mismas
 filas. Es la red de seguridad de un webhook perdido. En el sandbox Kira no devuelve depósitos aquí.
@@ -464,15 +461,15 @@ filas. Es la red de seguridad de un webhook perdido. En el sandbox Kira no devue
 
 | # | Petición | Rol | Modo A | Modo B |
 |---|---|---|---|---|
-| 01 | `GET /api/recipients` | read.only | `200 []` | `200` |
-| 02–04 | `POST /api/recipients` WIRE / ACH / WALLET | maker | `422` "…no supero la verificacion (estado CREATED)." | `201` + ids |
-| 05 | `GET /api/recipients/{{recipientId}}` | read.only | `422` "Destinatario no encontrado." | `200` |
-| 06 | `POST …/{{recipientAchId}}/archive` | maker | `422` | `200` |
-| 07 | WIRE con `routingNumber: "123"` | maker | `400` "El routing number debe tener 9 digitos" | `400` |
-| 08 | WALLET **USDC en tron** | maker | `422` "…no supero la verificacion" ⚠️ | `422` "USDC no esta soportado en la red 'tron'…" |
+| 01 | `GET /api/recipients` | approver | `200 []` | `200` |
+| 02–04 | `POST /api/recipients` WIRE / ACH / WALLET | admin | `422` "…no supero la verificacion (estado CREATED)." | `201` + ids |
+| 05 | `GET /api/recipients/{{recipientId}}` | approver | `422` "Destinatario no encontrado." | `200` |
+| 06 | `POST …/{{recipientAchId}}/archive` | admin | `422` | `200` |
+| 07 | WIRE con `routingNumber: "123"` | admin | `400` "El routing number debe tener 9 digitos" | `400` |
+| 08 | WALLET **USDC en tron** | admin | `422` "…no supero la verificacion" ⚠️ | `422` "USDC no esta soportado en la red 'tron'…" |
 | 09 | WIRE | **approver** | `403` | `403` |
-| 10 | `GET /api/recipients/kira` | read.only | `422` "no dada de alta en Kira" | `200` lista tal como la tiene Kira |
-| 11 | `GET /api/recipients/{{recipientId}}/kira` | read.only | `422` | `200` |
+| 10 | `GET /api/recipients/kira` | approver | `422` "no dada de alta en Kira" | `200` lista tal como la tiene Kira |
+| 11 | `GET /api/recipients/{{recipientId}}/kira` | approver | `422` | `200` |
 
 Respuesta de `10` (modo B): `localRecipientId: null` = existe en Kira pero no se dio de alta desde el portal.
 
@@ -501,10 +498,9 @@ bancarios. Los tres cuerpos completos están en la colección.
 
 | # | Petición | Rol | Modo A | Modo B |
 |---|---|---|---|---|
-| 01 | `POST /api/quotations` | maker | `422` "…no supero la verificacion" | `201` + `quotationId` |
-| 02 | `GET /api/quotations?limit=50` | read.only | `200 []` | `200` |
-| 03 | `GET /api/quotations/{{quotationId}}` | read.only | `422` "Cotizacion no encontrada." | `200` |
-| 04 | `POST /api/quotations` con `{"amount":0}` | maker | `400` con 3 campos | `400` |
+| 01 | `POST /api/quotations` | admin | `422` "…no supero la verificacion" | `201` + `quotationId` |
+| 03 | `GET /api/quotations/{{quotationId}}` | approver | `422` "Cotizacion no encontrada." | `200` |
+| 04 | `POST /api/quotations` con `{"amount":0}` | admin | `400` con 3 campos | `400` |
 
 Cuerpo de `01`: `{"virtualAccountId":"{{vaId}}","recipientId":"{{recipientId}}","amount":1000.00}`.
 `amount` es lo que **recibe** el destinatario; `totalDebitAmount`, lo que sale de la cuenta.
@@ -514,22 +510,21 @@ Cuerpo de `01`: `{"virtualAccountId":"{{vaId}}","recipientId":"{{recipientId}}",
 
 ### 7.8 `08 Pagos`
 
-Maker-checker: el maker prepara, el approver autoriza.
+Maker-checker: el admin prepara, el approver autoriza.
 
 | # | Petición | Rol | Modo A | Modo B |
 |---|---|---|---|---|
-| 01 | `POST /api/payouts` | maker | `422` "…no supero la verificacion" | `201` + `payoutId` |
-| 02 | `GET /api/payouts?limit=50` | read.only | `200 []` | `200` |
-| 03 | `GET /api/payouts/{{payoutId}}` | read.only | `422` "Pago no encontrado." | `200` |
-| 04 | `POST …/approve` | **maker** | `403` | `403` |
+| 01 | `POST /api/payouts` | admin | `422` "…no supero la verificacion" | `201` + `payoutId` |
+| 02 | `GET /api/payouts?limit=50` | approver | `200 []` | `200` |
+| 03 | `GET /api/payouts/{{payoutId}}` | approver | `422` "Pago no encontrado." | `200` |
+| 04 | `POST …/approve` | **admin** | `403` | `403` |
 | 05 | `POST …/approve` | approver | `422` | `200`, `approvalState: SUBMITTED` |
-| 06 | `POST …/refresh` | read.only | `422` | `200` con el estado de Kira |
+| 06 | `POST …/refresh` | approver | `422` | `200` con el estado de Kira |
 | 07 | `POST …/reject` con `{}` | approver | `400`, `details.reason` | `400` |
 | 08 | `POST …/reject` | approver | `422` | `200` o `422` si ya se envió |
 | 09 | `GET /api/payouts/{{payoutId}}` | **otra empresa** | `422` | `422` |
-| 10 | `POST /api/payouts/preview` | maker | `422` "La cuenta virtual no existe." | `200` con el coste |
-| 11 | `GET /api/payouts/kira?page=1&limit=20` | read.only | `422` "no dada de alta en Kira" | `200` historial en Kira |
-| 12 | `GET /api/payouts/{{payoutId}}/events` | read.only | `422` | `200` línea de tiempo |
+| 11 | `GET /api/payouts/kira?page=1&limit=20` | approver | `422` "no dada de alta en Kira" | `200` historial en Kira |
+| 12 | `GET /api/payouts/{{payoutId}}/events` | approver | `422` | `200` línea de tiempo |
 
 Cuerpo de `01` — **ids del portal**, no de Kira (el script quita `quotationId` si no cotizaste):
 
@@ -571,7 +566,7 @@ Respuesta de `12` (modo B):
 
 | # | Petición | Rol | Modo A | Modo B |
 |---|---|---|---|---|
-| 01 | `GET /api/reference/countries` | read.only | `503 kira_not_configured` | `200` (cacheado 24 h) |
+| 01 | `GET /api/reference/countries` | approver | `503 kira_not_configured` | `200` (cacheado 24 h) |
 
 ```json
 [ { "name": "Colombia", "alpha3": "COL", "postalCodeFormat": "\\A\\d{6}\\Z",
@@ -647,24 +642,24 @@ Arranca con las credenciales (§3.1) y sigue este orden:
 | Paso | Petición | Rol | Continúa cuando… |
 |---|---|---|---|
 | 1 | `00 Sesion` → Run | — | 6 tokens guardados |
-| 2 | `09/01 Paises` | read.only | `200`: las credenciales funcionan |
+| 2 | `09/01 Paises` | approver | `200`: las credenciales funcionan |
 | 3 | `01/02 Alta minima en Kira` | compliance | la respuesta trae `kiraUserId` |
 | 4 | `01/03 Completar perfil` | compliance | — |
-| 5 | `01/04 Refrescar` | read.only | mira `pendingFields`; si no está vacío, vuelve al paso 4 |
+| 5 | `01/04 Refrescar` | approver | mira `pendingFields`; si no está vacío, vuelve al paso 4 |
 | 6 | `02/02 Alta UBO` (una vez) | compliance | `hasBeneficialOwner: true` |
 | 7 | `02/04 Sincronizar con Kira` | compliance | `200` |
 | 8 | `02/05 Enlaces de liveness` | compliance | abre cada enlace y completa la prueba en el sandbox |
-| 9 | `01/04 Refrescar` (repetir) | read.only | `status: VERIFIED` **y** `readyForVirtualAccounts: true` |
-| 10 | `04/02 Abrir cuenta` | maker | `201` |
-| 11 | `04/04 Refrescar estado` (repetir) | read.only | **`fundsReady: true`** |
-| 12 | `04/06 Simular deposito` → `04/05 Refrescar saldo` | maker / read.only | `availableBalance` > 0 |
-| 13 | `06/02 Alta WIRE` | maker | `recipientId` guardado |
-| 14 | `08/10 Vista previa` | maker | el coste cuadra |
-| 15 | `07/01 Cotizar` | maker | `balanceSufficient: true`; tienes 15 min |
-| 16 | `08/01 Crear pago` | maker | `PENDING_APPROVAL`, `priceLocked: true` |
+| 9 | `01/04 Refrescar` (repetir) | approver | `status: VERIFIED` **y** `readyForVirtualAccounts: true` |
+| 10 | `04/02 Abrir cuenta` | admin | `201` |
+| 11 | `04/04 Refrescar estado` (repetir) | approver | **`fundsReady: true`** |
+| 12 | `04/06 Simular deposito` → `04/05 Refrescar saldo` | admin / approver | `availableBalance` > 0 |
+| 13 | `06/02 Alta WIRE` | admin | `recipientId` guardado |
+| 14 | `08/10 Vista previa` | admin | el coste cuadra |
+| 15 | `07/01 Cotizar` | admin | `balanceSufficient: true`; tienes 15 min |
+| 16 | `08/01 Crear pago` | admin | `PENDING_APPROVAL`, `priceLocked: true` |
 | 17 | `08/05 Aprobar y enviar` | **approver** | `SUBMITTED`, `kiraPayoutId` |
-| 18 | `08/12 Linea de tiempo` y `08/06 Refrescar` | read.only | estado terminal y `referenceNumber` |
-| 19 | `08/11 Historial en Kira` | read.only | el pago aparece con `localPayoutId` |
+| 18 | `08/12 Linea de tiempo` y `08/06 Refrescar` | approver | estado terminal y `referenceNumber` |
+| 19 | `08/11 Historial en Kira` | approver | el pago aparece con `localPayoutId` |
 | 20 | `03/03 Sincronizar RFIs` | compliance | si hay RFIs, la bandeja se llena |
 
 > **Webhooks reales:** Kira sólo llama a una URL pública registrada. En local no llegarán sin un
@@ -771,7 +766,7 @@ Ejemplo: RFIs abiertos con el rol de cumplimiento.
 1. Clic derecho sobre **03 RFIs → New Request** · **Name:** `15 Abiertos como compliance` ·
    **URL:** `{{baseUrl}}/api/rfis` → **Create**.
 2. Método `GET`. **Params** → `open` = `true`.
-3. **Auth** → **Bearer Token** → `{{tokenCompliance}}`.
+3. **Auth** → **Bearer Token** → `{{tokenAdmin}}`.
 4. **Tests**:
    ```javascript
    test("responde 200", function () { expect(res.getStatus()).to.equal(200); });

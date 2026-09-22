@@ -46,7 +46,7 @@ public class OnboardingController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<OnboardingView> register(
             @AuthenticationPrincipal AuthenticatedOperator operator,
             @Valid @RequestBody OnboardingCommands.RegisterBusiness command) {
@@ -55,7 +55,7 @@ public class OnboardingController {
 
     /** Envia el perfil completo. Se puede repetir; cada llamada reenvia el objeto entero. */
     @PutMapping
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public OnboardingView completeProfile(
             @AuthenticationPrincipal AuthenticatedOperator operator,
             @Valid @RequestBody OnboardingCommands.CompleteProfile command) {
@@ -76,7 +76,7 @@ public class OnboardingController {
      * content-type llega como application/octet-stream y @RequestPart no sabe convertirla.
      */
     @PostMapping(value = "/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public OnboardingView attachDocuments(@AuthenticationPrincipal AuthenticatedOperator operator,
                                           @RequestParam String informationType,
                                           @RequestParam String issuingCountry,
@@ -96,7 +96,7 @@ public class OnboardingController {
 
     /** Acepta los terminos vigentes; exige el expediente creado en Kira. */
     @PostMapping("/terms")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public SubmitOnboardingService.TermsView acceptTerms(
             @AuthenticationPrincipal AuthenticatedOperator operator,
             @Valid @RequestBody OnboardingCommands.AcceptTerms command) {
@@ -104,7 +104,7 @@ public class OnboardingController {
     }
 
     @PostMapping("/refresh")
-    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_APPROVER')")
     public OnboardingView refresh(@AuthenticationPrincipal AuthenticatedOperator operator) {
         return onboarding.refresh(operator);
     }

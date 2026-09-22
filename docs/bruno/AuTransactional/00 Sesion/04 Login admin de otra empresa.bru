@@ -1,7 +1,7 @@
 meta {
-  name: 02 Login treasury.maker
+  name: 04 Login admin de otra empresa
   type: http
-  seq: 2
+  seq: 4
 }
 
 post {
@@ -12,14 +12,14 @@ post {
 
 body:json {
   {
-    "email": "treasury.maker@{{empresa}}.test",
+    "email": "admin@{{otraEmpresa}}.test",
     "password": "{{password}}"
   }
 }
 
 script:post-response {
   if (res.getStatus() < 300 && res.getBody().accessToken) {
-    bru.setVar("tokenMaker", res.getBody().accessToken);
+    bru.setVar("tokenOtraEmpresa", res.getBody().accessToken);
   }
 }
 
@@ -30,5 +30,5 @@ tests {
 }
 
 docs {
-  Guarda `tokenMaker`.
+  Sirve para comprobar el aislamiento entre organizaciones. Guarda `tokenOtraEmpresa`.
 }

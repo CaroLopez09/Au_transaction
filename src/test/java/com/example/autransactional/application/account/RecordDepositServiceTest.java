@@ -310,7 +310,7 @@ class RecordDepositServiceTest {
                     "currency": "USD", "status": "COMPLETED" } ]
                 """.formatted(idDelWebhook)));
 
-        service.syncFromKira(new AuthenticatedOperator("u-1", "read.only@juriscop.test", TENANT, Role.READ_ONLY),
+        service.syncFromKira(new AuthenticatedOperator("u-1", "treasury.approver@juriscop.test", TENANT, Role.TREASURY_APPROVER),
                 "va-1");
 
         assertEquals(1, registro.size());

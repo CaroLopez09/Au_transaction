@@ -233,11 +233,8 @@ constante Java que usan `@PreAuthorize` y el JWT.
 
 | `roles.name` | Constante | Puede |
 |---|---|---|
-| `admin` | `ADMIN` | todo |
-| `tesoreria_maker` | `TREASURY_MAKER` | destinatarios, cotizar, preparar pagos |
-| `tesoreria_approver` | `TREASURY_APPROVER` | aprobar / rechazar pagos |
-| `compliance_internal` | `COMPLIANCE_INTERNAL` | KYB, UBOs, liveness, RFIs |
-| `read_only` | `READ_ONLY` | sólo lectura (sin consultas que gasten cuota de Kira) |
+| `admin` | `ADMIN` | todo: crea y aprueba pagos, gestiona cumplimiento y operadores |
+| `tesoreria_approver` | `TREASURY_APPROVER` | aprobar / rechazar pagos (maker-checker) |
 | `platform_operator` | `PLATFORM_OPERATOR` | consola multiempresa de solo lectura y métricas; sin empresa (`TenantId.PLATFORM`) |
 
 - **JWT propio del BFF** (HMAC256, 8 h). El token de Kira nunca sale del servidor.

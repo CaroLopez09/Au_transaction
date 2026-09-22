@@ -46,7 +46,7 @@ public class VirtualAccountController {
 
     /** Exige KYB VERIFIED y producto elegible. Un 409 de Kira reutiliza la cuenta existente. */
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<VirtualAccountView> open(
             @AuthenticationPrincipal AuthenticatedOperator operator,
             @Valid @RequestBody VirtualAccountCommands.OpenAccount command) {
@@ -55,14 +55,14 @@ public class VirtualAccountController {
 
     /** Relee la cuenta. Cubre el hueco de un virtual_account.activated que nunca llego. */
     @PostMapping("/{id}/refresh")
-    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_APPROVER')")
     public VirtualAccountView refresh(@AuthenticationPrincipal AuthenticatedOperator operator,
                                       @PathVariable String id) {
         return accounts.refresh(operator, id);
     }
 
     @PostMapping("/{id}/balance")
-    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_APPROVER')")
     public VirtualAccountView refreshBalance(@AuthenticationPrincipal AuthenticatedOperator operator,
                                              @PathVariable String id) {
         return accounts.refreshBalance(operator, id);
@@ -70,7 +70,7 @@ public class VirtualAccountController {
 
     /** Solo sandbox: en produccion responde 422 sin llamar a Kira. */
     @PostMapping("/{id}/simulate-deposit")
-    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER')")
+    @PreAuthorize("hasRole('ADMIN')")
     public VirtualAccountView simulateDeposit(
             @AuthenticationPrincipal AuthenticatedOperator operator,
             @PathVariable String id,

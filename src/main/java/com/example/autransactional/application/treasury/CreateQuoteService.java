@@ -65,12 +65,6 @@ public class CreateQuoteService {
     }
 
     @Transactional(readOnly = true)
-    public List<QuotationView> list(AuthenticatedOperator operator, int limit) {
-        return quotations.findByTenant(operator.tenantId(), Math.min(limit, 100))
-                .stream().map(QuotationView::from).toList();
-    }
-
-    @Transactional(readOnly = true)
     public QuotationView get(AuthenticatedOperator operator, String quotationId) {
         return QuotationView.from(load(operator.tenantId(), quotationId));
     }

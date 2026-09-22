@@ -72,7 +72,7 @@ class IdempotencyKeyPersistenceTest {
         when(kira.createUser(any(), any()))
                 .thenThrow(new KiraApiException(504, null, "timeout hablando con Kira", null));
 
-        assertThrows(KiraApiException.class, () -> onboarding.register(operador(tenantId, Role.COMPLIANCE_INTERNAL),
+        assertThrows(KiraApiException.class, () -> onboarding.register(operador(tenantId, Role.ADMIN),
                 new OnboardingCommands.RegisterBusiness("Empresa Idem S.A.S.", "finanzas@idem.co",
                         "sales_of_goods_and_services")));
 
@@ -80,7 +80,7 @@ class IdempotencyKeyPersistenceTest {
         assertNotNull(clave, "el rollback del caso de uso no debe borrar la clave ya reservada");
 
         // El reintento reutiliza exactamente la misma clave: Kira no crea una segunda empresa.
-        assertThrows(KiraApiException.class, () -> onboarding.register(operador(tenantId, Role.COMPLIANCE_INTERNAL),
+        assertThrows(KiraApiException.class, () -> onboarding.register(operador(tenantId, Role.ADMIN),
                 new OnboardingCommands.RegisterBusiness("Empresa Idem S.A.S.", "finanzas@idem.co",
                         "sales_of_goods_and_services")));
         assertEquals(clave, tenants.findById(tenantId).orElseThrow().getOnboardingIdempotencyKey());
@@ -97,7 +97,7 @@ class IdempotencyKeyPersistenceTest {
         when(kira.createVirtualAccount(any(), any()))
                 .thenThrow(new KiraApiException(504, null, "timeout hablando con Kira", null));
 
-        assertThrows(KiraApiException.class, () -> accountsService.open(operador(tenantId, Role.TREASURY_MAKER),
+        assertThrows(KiraApiException.class, () -> accountsService.open(operador(tenantId, Role.ADMIN),
                 new VirtualAccountCommands.OpenAccount("Operativa", "fiat", "USD")));
 
         List<VirtualAccount> guardadas = accounts.findByTenant(tenantId);

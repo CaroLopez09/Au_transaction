@@ -85,17 +85,6 @@ public class RegisterRecipientService {
         return views;
     }
 
-    /** Un destinatario del directorio, leido de Kira. */
-    @Transactional(readOnly = true)
-    public KiraRecipientView getInKira(AuthenticatedOperator operator, String recipientId) {
-        Recipient recipient = load(operator.tenantId(), recipientId);
-        if (recipient.getKiraRecipientId() == null) {
-            throw new DomainException("El destinatario no esta registrado en Kira.");
-        }
-        JsonNode response = kira.getRecipient(recipient.getKiraRecipientId());
-        return toKiraView(operator.tenantId(), response.has("data") ? response.get("data") : response);
-    }
-
     private KiraRecipientView toKiraView(TenantId tenantId, JsonNode row) {
         String kiraId = text(row, "recipient_id");
         String localId = kiraId == null ? null : recipients.findByKiraRecipientId(kiraId)

@@ -96,11 +96,8 @@ que usan el JWT y `@PreAuthorize`.
 
 | Rol (`roles.name`) | Constante | Correo de ejemplo | Puede |
 |---|---|---|---|
-| `admin` | `ADMIN` | `admin@juriscop.test` | crear y aprobar |
-| `tesoreria_maker` | `TREASURY_MAKER` | `treasury.maker@juriscop.test` | crear pagos |
-| `tesoreria_approver` | `TREASURY_APPROVER` | `treasury.approver@juriscop.test` | aprobar / rechazar |
-| `compliance_internal` | `COMPLIANCE_INTERNAL` | `compliance.internal@juriscop.test` | Ficha 360, UBOs, liveness y RFIs |
-| `read_only` | `READ_ONLY` | `read.only@juriscop.test` | sólo lectura |
+| `admin` | `ADMIN` | `admin@juriscop.test` | crear y aprobar pagos, gestionar cumplimiento y operadores |
+| `tesoreria_approver` | `TREASURY_APPROVER` | `treasury.approver@juriscop.test` | aprobar / rechazar pagos (maker-checker) |
 
 ### 1.4 Abrir la colección de Bruno
 
@@ -163,7 +160,7 @@ Todas las respuestas de error tienen la misma forma (`RestExceptionHandler`):
 #### `POST /api/auth/login` *(público)*
 
 ```json
-{ "email": "treasury.maker@juriscop.test", "password": "Dev12345!" }
+{ "email": "admin@juriscop.test", "password": "Dev12345!" }
 ```
 
 `200`:
@@ -172,8 +169,8 @@ Todas las respuestas de error tienen la misma forma (`RestExceptionHandler`):
 {
   "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
   "expiresIn": 28800,
-  "email": "treasury.maker@juriscop.test",
-  "role": "TREASURY_MAKER",
+  "email": "admin@juriscop.test",
+  "role": "ADMIN",
   "tenantId": "juriscop",
   "tenantName": "Juriscop"
 }
@@ -199,13 +196,13 @@ para el producto objetivo (`usa-virtual-accounts`).
 | Método | Ruta | Rol requerido |
 |---|---|---|
 | `GET` | `/api/onboarding` | cualquiera autenticado |
-| `POST` | `/api/onboarding` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `PUT` | `/api/onboarding` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `POST` | `/api/onboarding/refresh` | todos menos `READ_ONLY` (consulta a Kira) |
+| `POST` | `/api/onboarding` | `ADMIN` |
+| `PUT` | `/api/onboarding` | `ADMIN` |
+| `POST` | `/api/onboarding/refresh` | `ADMIN` o `TREASURY_APPROVER` (consulta a Kira) |
 | `GET` | `/api/onboarding/draft` | cualquiera autenticado |
-| `PUT` | `/api/onboarding/draft` | `ADMIN` o `COMPLIANCE_INTERNAL` |
+| `PUT` | `/api/onboarding/draft` | `ADMIN` |
 | `GET` | `/api/onboarding/terms` | cualquiera autenticado |
-| `POST` | `/api/onboarding/terms` | `ADMIN` o `COMPLIANCE_INTERNAL` |
+| `POST` | `/api/onboarding/terms` | `ADMIN` |
 
 #### `POST /api/onboarding` — alta mínima
 
@@ -371,10 +368,10 @@ admiten** (`422`): para Kira serían la misma persona y aquí sumarían dos vece
 | Método | Ruta | Rol requerido |
 |---|---|---|
 | `GET` | `/api/ubos` | cualquiera autenticado |
-| `POST` | `/api/ubos` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `DELETE` | `/api/ubos/{id}` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `POST` | `/api/ubos/sync` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `POST` | `/api/ubos/liveness-links` | `ADMIN` o `COMPLIANCE_INTERNAL` |
+| `POST` | `/api/ubos` | `ADMIN` |
+| `DELETE` | `/api/ubos/{id}` | `ADMIN` |
+| `POST` | `/api/ubos/sync` | `ADMIN` |
+| `POST` | `/api/ubos/liveness-links` | `ADMIN` |
 
 #### `POST /api/ubos` — alta o edición local
 
@@ -505,10 +502,10 @@ mover fondos no hay cotización ni pago.
 |---|---|---|
 | `GET` | `/api/virtual-accounts` | cualquiera autenticado |
 | `GET` | `/api/virtual-accounts/{id}` | cualquiera autenticado |
-| `POST` | `/api/virtual-accounts` | `ADMIN`, `TREASURY_MAKER` o `COMPLIANCE_INTERNAL` |
-| `POST` | `/api/virtual-accounts/{id}/refresh` | todos menos `READ_ONLY` (consulta a Kira) |
-| `POST` | `/api/virtual-accounts/{id}/balance` | todos menos `READ_ONLY` (consulta a Kira) |
-| `POST` | `/api/virtual-accounts/{id}/simulate-deposit` | `ADMIN` o `TREASURY_MAKER` *(sólo sandbox)* |
+| `POST` | `/api/virtual-accounts` | `ADMIN` |
+| `POST` | `/api/virtual-accounts/{id}/refresh` | `ADMIN` o `TREASURY_APPROVER` (consulta a Kira) |
+| `POST` | `/api/virtual-accounts/{id}/balance` | `ADMIN` o `TREASURY_APPROVER` (consulta a Kira) |
+| `POST` | `/api/virtual-accounts/{id}/simulate-deposit` | `ADMIN` *(sólo sandbox)* |
 
 #### `POST /api/virtual-accounts`
 
@@ -602,7 +599,7 @@ como red de seguridad, se sincronizan desde Kira.
 |---|---|---|
 | `GET` | `/api/deposits?limit=50` | cualquiera autenticado |
 | `GET` | `/api/virtual-accounts/{id}/deposits?limit=50` | cualquiera autenticado |
-| `POST` | `/api/virtual-accounts/{id}/deposits/sync` | todos menos `READ_ONLY` (consulta a Kira) |
+| `POST` | `/api/virtual-accounts/{id}/deposits/sync` | `ADMIN` o `TREASURY_APPROVER` (consulta a Kira) |
 
 `POST …/deposits/sync` trae de Kira (`GET /v1/virtual-accounts/{id}/deposits`, `limit`+`offset`)
 los depósitos de la cuenta y los asienta con la misma proyección que los webhooks, así que
@@ -678,10 +675,9 @@ cotización ni el pago lo determinan. Es el punto de decisión más importante d
 |---|---|---|
 | `GET` | `/api/recipients` | cualquiera autenticado |
 | `GET` | `/api/recipients/{id}` | cualquiera autenticado |
-| `POST` | `/api/recipients` | `TREASURY_MAKER` o `ADMIN` |
-| `POST` | `/api/recipients/{id}/archive` | `TREASURY_MAKER` o `ADMIN` |
+| `POST` | `/api/recipients` | `ADMIN` |
+| `POST` | `/api/recipients/{id}/archive` | `ADMIN` |
 | `GET` | `/api/recipients/kira` | cualquiera autenticado |
-| `GET` | `/api/recipients/{id}/kira` | cualquiera autenticado |
 
 `GET /api/recipients/kira` lista los destinatarios de la empresa **tal como los tiene Kira**
 (`GET /v1/recipients?user_id=…`, sin paginar) para conciliar con el directorio:
@@ -693,7 +689,6 @@ cotización ni el pago lo determinan. Es el punto de decisión más importante d
 ```
 
 `localRecipientId: null` significa que existe en Kira pero no se dio de alta desde el portal.
-`GET /api/recipients/{id}/kira` hace lo mismo con uno solo del directorio.
 
 **No hay `PUT`.** Kira no expone actualización ni borrado de destinatarios: para corregir
 uno se da de alta el reemplazo y se archiva el anterior apuntando al nuevo.
@@ -800,9 +795,8 @@ Precio en firme de una transferencia, con **TTL de 15 minutos exactos**.
 
 | Método | Ruta | Rol requerido |
 |---|---|---|
-| `GET` | `/api/quotations?limit=50` | cualquiera autenticado |
 | `GET` | `/api/quotations/{id}` | cualquiera autenticado |
-| `POST` | `/api/quotations` | `TREASURY_MAKER` o `ADMIN` |
+| `POST` | `/api/quotations` | `ADMIN` |
 
 #### `POST /api/quotations`
 
@@ -883,13 +877,12 @@ Kira no ofrece esto a los integradores, así que vive aquí.
 |---|---|---|
 | `GET` | `/api/payouts?limit=50` | cualquiera autenticado |
 | `GET` | `/api/payouts/{id}` | cualquiera autenticado |
-| `POST` | `/api/payouts` | `TREASURY_MAKER` o `ADMIN` |
+| `POST` | `/api/payouts` | `ADMIN` |
 | `POST` | `/api/payouts/{id}/approve` | `TREASURY_APPROVER` o `ADMIN` |
-| `POST` | `/api/payouts/{id}/requote` | `TREASURY_MAKER`, `TREASURY_APPROVER` o `ADMIN` |
+| `POST` | `/api/payouts/{id}/requote` | `ADMIN` o `TREASURY_APPROVER` |
 | `POST` | `/api/payouts/{id}/reject` | `TREASURY_APPROVER` o `ADMIN` |
-| `POST` | `/api/payouts/{id}/refresh` | todos menos `READ_ONLY` (consulta a Kira) |
+| `POST` | `/api/payouts/{id}/refresh` | `ADMIN` o `TREASURY_APPROVER` (consulta a Kira) |
 | `GET` | `/api/payouts/{id}/events` | cualquiera autenticado |
-| `POST` | `/api/payouts/preview` | `TREASURY_MAKER` o `ADMIN` |
 | `GET` | `/api/payouts/kira?status=&page=1&limit=20&fromDate=&toDate=` | cualquiera autenticado |
 
 `limit` se recorta a 100 en el servidor. Todas las consultas filtran por `tenantId` dentro
@@ -933,7 +926,7 @@ Respuesta `201` con la proyección `PayoutView`:
   "kiraFee": 15.0000, "platformFee": 15.0000, "totalFee": 30.0000,
   "totalDebitAmount": 155.5000,
   "approvalState": "PENDING_APPROVAL", "status": "NOT_SUBMITTED", "terminal": false,
-  "makerUserId": "juriscop:treasury_maker", "makerName": "Ana Restrepo",
+  "makerUserId": "juriscop:admin", "makerName": "Ana Restrepo",
   "approverUserId": null,
   "firstApproverUserId": null, "requiredApprovals": 1,
   "priceLocked": true,
@@ -1004,8 +997,8 @@ gastado y sigue siendo redimible.
 
 Aprueba **y ejecuta** contra Kira (`POST /v1/virtual-accounts/{id}/payout`). Casos:
 
-- El mismo operador que lo creó → rechazado (además, un `TREASURY_MAKER` recibe `403` en
-  la cadena de seguridad antes de llegar a la regla de dominio).
+- El mismo operador que lo creó → rechazado (maker-checker: incluso un `ADMIN` que crea un
+  pago no puede aprobarlo él mismo; la regla vive en el dominio, no en `@PreAuthorize`).
 - Sin credenciales de Kira **configuradas** (`KIRA_API_KEY` vacía) → `500 internal_error`
   (verificado el 11-sep). Si Kira rechaza la llamada → `502`/`422` con `code` `kira_*`. **Ojo:**
   el método es transaccional, así que la aprobación se revierte y el pago sigue en
@@ -1021,23 +1014,6 @@ Aprueba **y ejecuta** contra Kira (`POST /v1/virtual-accounts/{id}/payout`). Cas
 
 `blockedByRfiId` no es nulo cuando un RFI abierto de Kira tiene el pago detenido: el portal lo
 marca como "detenido" y enlaza a `/api/rfis/{blockedByRfiId}`.
-
-#### `POST /api/payouts/preview`
-
-```json
-{ "virtualAccountId": "9c1f…", "recipientId": "4b7e…", "amount": 1000.00, "recipientReceivesAmount": true }
-```
-
-Coste del pago **sin reservar precio** (`POST /v1/virtual-accounts/{id}/payout/preview`), para
-mostrarlo mientras el operador teclea. Por defecto `amount` es lo que recibe el destinatario, como
-al cotizar. Viaja el mismo margen de plataforma que en un pago sin cotización:
-
-```json
-{ "amount": "1030.00", "currency": "USD", "recipientAmount": "1000.00",
-  "recipientCurrency": "USD", "fees": { "…": "desglose de Kira, depende del riel" } }
-```
-
-Para cerrar el precio, cotiza con `POST /api/quotations`.
 
 #### `GET /api/payouts/{id}/events`
 
@@ -1184,12 +1160,12 @@ sigue bloqueado.
 |---|---|---|
 | `GET` | `/api/rfis` (`?open=true` sólo abiertos) | cualquiera autenticado |
 | `GET` | `/api/rfis/{id}` | cualquiera autenticado |
-| `POST` | `/api/rfis/sync` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `POST` | `/api/rfis/{id}/refresh` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `PATCH` | `/api/rfis/{id}/items` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `POST` | `/api/rfis/{id}/items/{itemId}/documents` *(multipart)* | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `DELETE` | `/api/rfis/{id}/items/{itemId}/documents/{documentId}` | `ADMIN` o `COMPLIANCE_INTERNAL` |
-| `GET` | `/api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | `ADMIN`, `COMPLIANCE_INTERNAL` (queda auditado) |
+| `POST` | `/api/rfis/sync` | `ADMIN` |
+| `POST` | `/api/rfis/{id}/refresh` | `ADMIN` |
+| `PATCH` | `/api/rfis/{id}/items` | `ADMIN` |
+| `POST` | `/api/rfis/{id}/items/{itemId}/documents` *(multipart)* | `ADMIN` |
+| `DELETE` | `/api/rfis/{id}/items/{itemId}/documents/{documentId}` | `ADMIN` |
+| `GET` | `/api/rfis/{id}/items/{itemId}/documents/{documentId}/link` | `ADMIN` (queda auditado) |
 
 #### Respuesta (`RfiView`)
 
@@ -1376,7 +1352,6 @@ usar cada endpoint del BFF y qué mockear si quieres probar sin sandbox.
 | `POST` | `/v1/recipients` | `POST /api/recipients` |
 | `GET` | `/v1/recipients`, `/v1/recipients/{id}` | `GET /api/recipients/kira`, `GET /api/recipients/{id}/kira` |
 | `POST` | `/v1/quotations` | `POST /api/quotations` |
-| `POST` | `/v1/virtual-accounts/{id}/payout/preview` | `POST /api/payouts/preview` |
 | `POST` | **`/v1/virtual-accounts/{id}/payout`** | `POST /api/payouts/{id}/approve` |
 | `GET` | `/v1/payouts/{id}` | `POST /api/payouts/{id}/refresh`, `GET …/{id}/events` |
 | `GET` | `/v1/payouts` | `GET /api/payouts/kira` |
@@ -1411,7 +1386,7 @@ versión, y las cuentas virtuales devuelven `pending`, `activating`, `active`, `
 BASE=http://localhost:8080
 tok() { curl -sS -X POST $BASE/api/auth/login -H 'Content-Type: application/json' \
   -d "{\"email\":\"$1@juriscop.test\",\"password\":\"Dev12345!\"}" | jq -r .accessToken; }
-COMPLIANCE=$(tok compliance.internal); MAKER=$(tok treasury.maker); APPROVER=$(tok treasury.approver)
+ADMIN=$(tok admin); APPROVER=$(tok treasury.approver)
 J='Content-Type: application/json'
 
 # KYB
@@ -1419,12 +1394,10 @@ curl -sS -X POST $BASE/api/onboarding -H "Authorization: Bearer $COMPLIANCE" -H 
   -d '{"businessLegalName":"Juriscop S.A.S.","email":"finanzas@juriscop.co","sourceOfFunds":"sales_of_goods_and_services"}' | jq
 # ... PUT /api/onboarding + POST /api/onboarding/refresh hasta readyForVirtualAccounts: true
 
-# Cuenta, destinatario, vista previa, cotizacion y pago
+# Cuenta, destinatario, cotizacion y pago
 VA=$(curl -sS -X POST $BASE/api/virtual-accounts -H "Authorization: Bearer $MAKER" -H "$J" \
   -d '{"description":"Operativa","mode":"fiat","currency":"USD"}' | jq -r .id)
 REC=$(curl -sS -X POST $BASE/api/recipients -H "Authorization: Bearer $MAKER" -H "$J" -d @recipient-wire.json | jq -r .id)
-curl -sS -X POST $BASE/api/payouts/preview -H "Authorization: Bearer $MAKER" -H "$J" \
-  -d "{\"virtualAccountId\":\"$VA\",\"recipientId\":\"$REC\",\"amount\":1000}" | jq
 Q=$(curl -sS -X POST $BASE/api/quotations -H "Authorization: Bearer $MAKER" -H "$J" \
   -d "{\"virtualAccountId\":\"$VA\",\"recipientId\":\"$REC\",\"amount\":1000}" | jq -r .id)
 P=$(curl -sS -X POST $BASE/api/payouts -H "Authorization: Bearer $MAKER" -H "$J" \
@@ -1440,8 +1413,8 @@ curl -sS $BASE/api/payouts/$P/events -H "Authorization: Bearer $APPROVER" | jq
 
 | Síntoma | Causa |
 |---|---|
-| `401 unauthorized` en todo | token caducado (8 h) o `Bearer ` mal formado |
-| `403` sin cuerpo | falta la cabecera `Authorization` |
+| `401 unauthorized` en todo | token caducado (8 h), token mal formado, o falta la cabecera `Authorization` |
+| `403` sin cuerpo | credencial valida pero el rol no tiene permiso (F7) |
 | `503 kira_not_configured` | arrancaste sin `KIRA_API_KEY`, `KIRA_CLIENT_ID` o `KIRA_PASSWORD` |
 | `503 OUT_OF_SERVICE` en `/actuator/health` | la app acaba de arrancar; vuelve a consultar en un segundo |
 | `403 forbidden` al crear un pago | estás usando el token del approver |
@@ -1489,8 +1462,8 @@ usado no vale dentro de su ventana de 30 s. `GET /api/auth/me` añade `tenantNam
 | `GET` | `/api/notifications?limit=50` | cualquiera → `{ items[], unread }` |
 | `GET` | `/api/notifications/unread-count` | cualquiera → `{ unread }` |
 | `POST` | `/api/notifications/read` | cualquiera → `204` (marca todo como visto para ese usuario) |
-| `GET` | `/api/events?limit=100` | `ADMIN`, `COMPLIANCE_INTERNAL` — eventos de Kira **sin payload** |
-| `GET` | `/api/audit?limit=100` | `ADMIN`, `COMPLIANCE_INTERNAL` — bitácora con el actor por nombre |
+| `GET` | `/api/events?limit=100` | `ADMIN` — eventos de Kira **sin payload** |
+| `GET` | `/api/audit?limit=100` | `ADMIN` — bitácora con el actor por nombre |
 
 Los avisos se generan al proyectar webhooks, solo cuando el estado cambia. `severity`: `info`,
 `success`, `attention` o `critical`; `resourceType`/`resourceId` indican a qué pantalla llevar.
@@ -1536,23 +1509,23 @@ recibe `422` aquí: sus rutas son las de la consola (§5.3).
 
 | Método | Ruta | Rol |
 |---|---|---|
-| `GET` | `/api/operators` | `ADMIN`, `COMPLIANCE_INTERNAL` — cumplimiento necesita saber quién firma cada operación |
+| `GET` | `/api/operators` | `ADMIN` — necesita saber quién firma cada operación |
 | `POST` | `/api/operators` | `ADMIN` |
 | `DELETE` | `/api/operators/{id}` | `ADMIN` — desactiva, no borra |
 
 #### `POST /api/operators`
 
 ```json
-{ "email": "tesoreria.maker@juriscop.test", "firstName": "Ana", "lastName": "Ruiz",
-  "password": "una-clave-de-12-o-mas", "role": "TREASURY_MAKER" }
+{ "email": "treasury.approver@juriscop.test", "firstName": "Ana", "lastName": "Ruiz",
+  "password": "una-clave-de-12-o-mas", "role": "TREASURY_APPROVER" }
 ```
 
-El `role` viaja como el nombre de la constante (`TREASURY_MAKER`, no `tesoreria_maker`): es lo
+El `role` viaja como el nombre de la constante (`TREASURY_APPROVER`, no `tesoreria_approver`): es lo
 mismo que el portal ya recibe en el JWT y en `/api/auth/me`. **La empresa no viaja en el cuerpo**:
 sale de la sesión del administrador.
 
-Sólo se pueden asignar **`TREASURY_MAKER`, `TREASURY_APPROVER`, `COMPLIANCE_INTERNAL` y
-`READ_ONLY`**. Un `ADMIN` no puede fabricar otro `ADMIN` ni un `PLATFORM_OPERATOR` (`422`):
+Sólo se puede asignar **`TREASURY_APPROVER`**. Un `ADMIN` no puede fabricar otro `ADMIN` ni un
+`PLATFORM_OPERATOR` (`422`):
 escalar privilegios desde el portal dejaría el RBAC en decorativo, y esos dos siguen siendo alta
 controlada. La contraseña es de **12 caracteres como mínimo**, se guarda con BCrypt y no vuelve a
 salir en ninguna respuesta. El correo es **único en toda la plataforma**, no por empresa: uno
@@ -1561,8 +1534,8 @@ repetido devuelve `422 "Ya existe un usuario con ese correo."` en vez del `500` 
 #### Respuesta (`OperatorView`), la misma en los tres endpoints
 
 ```json
-{ "id": "…", "email": "tesoreria.maker@juriscop.test", "firstName": "Ana", "lastName": "Ruiz",
-  "fullName": "Ana Ruiz", "role": "TREASURY_MAKER",
+{ "id": "…", "email": "treasury.approver@juriscop.test", "firstName": "Ana", "lastName": "Ruiz",
+  "fullName": "Ana Ruiz", "role": "TREASURY_APPROVER",
   "roleDescription": "Operador: Registra borradores, destinatarios y cotiza transferencias",
   "status": "ACTIVE", "active": true, "mfaEnabled": false }
 ```

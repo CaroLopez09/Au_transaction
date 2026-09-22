@@ -1,8 +1,13 @@
 # Estado del proyecto
 
-**Fecha:** 16 de septiembre de 2026
-**Build:** `Tests run: 424, Failures: 0, Errors: 0` — BUILD SUCCESS
+**Fecha:** 22 de septiembre de 2026
+**Build:** `Tests run: 468, Failures: 0, Errors: 0` — BUILD SUCCESS (`./mvnw clean test`, 22-sep)
 **Rama:** `develop` (se sube a GitHub por SSH) · `main`, `certificacion` y `produccion` detrás
+
+> **Corte del 22-sep:** [`INFORME-2026-09-22.md`](INFORME-2026-09-22.md) — estado de los dos repos
+> frente a los requisitos, con el trabajo del 17 al 22 (identidad biométrica, importación de
+> empresas del Sandbox, ajustes por empresa, financiación cripto) que **todavía no está recogido en
+> las secciones 3 y 4 de este documento**.
 
 > Arquitectura: [`ARQUITECTURA.md`](ARQUITECTURA.md) · Contrato HTTP: [`API-GUIA.md`](API-GUIA.md) · Pruebas con Bruno: [`GUIA-BRUNO.md`](GUIA-BRUNO.md)
 
@@ -13,7 +18,7 @@
 ```bash
 cd ~/Documentos/AuTransactional
 git status                                   # rama develop
-./mvnw clean test                            # 424 verdes
+./mvnw clean test                            # 468 verdes (22-sep)
 ./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-Xmx768m"   # los secretos salen de .env (§3.7)
 ```
 
@@ -308,7 +313,7 @@ Decisiones de Carolina tras [`REVISION-REQUISITOS-VS-CODIGO.md`](REVISION-REQUIS
 
 | P0 | Qué cambió |
 |---|---|
-| **G-09** permisos | `refresh`, `balance`, `deposits/sync` y `payouts/{id}/refresh` excluyen `READ_ONLY` (gastan cuota de Kira). El enlace de descarga de un documento RFI es solo de Administración y Cumplimiento y queda auditado (`compliance.rfi_document_link_issued`). Front: capacidad `provider.refresh` |
+| **G-09** permisos | `refresh`, `balance`, `deposits/sync` y `payouts/{id}/refresh` exigen `ADMIN` o `TREASURY_APPROVER` (gastan cuota de Kira). El enlace de descarga de un documento RFI es solo de `ADMIN` y queda auditado (`compliance.rfi_document_link_issued`). Front: capacidad `provider.refresh` |
 | **D3** banco | `slovak_savings_bank` y `portage` **no existen** en la documentación: solo `jp_morgan` y `austin_capital_trust`, válidos en sandbox y producción. Por defecto `jp_morgan` (producto `usa-virtual-accounts`; `-act` es Austin). `KiraProperties` **no arranca** con otro banco. El alta declara `capabilities.requested_banks`. No se pudo abrir una cuenta de prueba: ningún user del sandbox está `VERIFIED` y Kira valida el estado antes que el banco |
 | **V1** versión única | `2026-06-01` en todas las peticiones; `KiraProperties` rechaza otra. Entre las dos versiones solo cambian los estados de cuenta (y la cotización, que ya iba en `2026-06-01`). `activating` ya no cuenta como activa; `active` habilita fondos. Verificado en sandbox: refresco de empresa, sincronización de beneficiarios y de RFIs responden 200 |
 | **D4** consentimiento | `GET/POST /api/onboarding/terms`: la empresa acepta la versión vigente (`BFF_TERMS_VERSION`, `BFF_TERMS_URL`), viaja como `tos_accepted_version` y queda auditada. Kira la acepta pero **no la devuelve** en el GET. Consentimiento biométrico obligatorio para pedir enlaces de prueba de vida y para subir una selfie (`tenant.biometric_consent_recorded`). Front: casillas en «Enviar», «Verificación» y el cajón de documentos |
@@ -340,7 +345,7 @@ las credenciales de Kira y el despliegue a cert (§4.8).
 
 | Cambio | Qué se hizo |
 |---|---|
-| **G-13** gestión de operadores | `/api/operators`: `GET` (`ADMIN`, `COMPLIANCE_INTERNAL`), `POST` y `DELETE` (`ADMIN`). Hasta ahora los usuarios sólo entraban por la semilla de `dev` o por SQL. Tres reglas viven en `ManageOperatorsService`, no en el controlador: la empresa sale de la sesión y nunca del cuerpo; un `ADMIN` no puede crear otro `ADMIN` ni un `PLATFORM_OPERATOR`; nadie se desactiva a sí mismo. La baja deja `SUSPENDED`, no borra: la persona sigue siendo el actor de lo que ya firmó. Contrato en `API-GUIA.md` §5.5 |
+| **G-13** gestión de operadores | `/api/operators`: `GET`, `POST` y `DELETE` (todos exigen `ADMIN`). Hasta ahora los usuarios sólo entraban por la semilla de `dev` o por SQL. Tres reglas viven en `ManageOperatorsService`, no en el controlador: la empresa sale de la sesión y nunca del cuerpo; un `ADMIN` no puede crear otro `ADMIN` ni un `PLATFORM_OPERATOR`; nadie se desactiva a sí mismo. La baja deja `SUSPENDED`, no borra: la persona sigue siendo el actor de lo que ya firmó. Contrato en `API-GUIA.md` §5.5 |
 | **F7** `401` sin credencial | `UnauthorizedEntryPoint`: sin cabecera `Authorization` la respuesta era un `403` con cuerpo vacío y el portal tenía que adivinar por el hueco si era falta de sesión o de permiso. Ahora es `401 unauthorized`, el mismo código que ya emitía `JwtTenantFilter` para un token inválido, y el `403` queda sólo para el rol sin permiso |
 | **G-23** reintento de apertura | Una apertura de cuenta virtual que reservó la clave de idempotencia pero que Kira nunca confirmó se retoma en el siguiente intento (misma fila, misma clave) en vez de crear otra. Si lo que se perdió fue la respuesta y la cuenta sí existía, una clave nueva habría abierto una segunda |
 
@@ -369,6 +374,37 @@ dice **si** hay credenciales de Kira, no cuáles. El front eliminó `environment
 
 **Cifras:** **430** pruebas (6 nuevas), 0 fallos · 73 operaciones REST · front: 178 unitarias,
 lint limpio, E2E 34/34 (1 omitida).
+
+### 3.19 Reducción de roles a 2 (ADMIN, TREASURY_APPROVER) e identidad biométrica *(sesión actual)*
+
+**Simplificación de RBAC.** Se eliminaron `TREASURY_MAKER`, `COMPLIANCE_INTERNAL` y `READ_ONLY`
+del enum `Role`: el modelo de empresa queda en **2 roles** (`ADMIN` hace todo — crea pagos,
+gestiona cumplimiento y operadores —, `TREASURY_APPROVER` sólo aprueba/rechaza pagos,
+maker-checker). `PLATFORM_OPERATOR` sigue igual (consola multiempresa de solo lectura). Se
+actualizaron 11 controladores (`@PreAuthorize`), `ManageOperatorsService` (sólo se puede asignar
+`TREASURY_APPROVER`), el seeder de `dev` y 16 archivos de test. Se limpiaron los usuarios y roles
+obsoletos de la base de datos de desarrollo y se actualizó toda la colección de Bruno (login files,
+tokens, casos negativos). **468/468 pruebas de backend en verde**; Bruno **96/97 peticiones, 61/62
+tests** (la única falla restante es una condición preexistente del sandbox de Kira sin relación con
+roles: `usa-virtual-accounts` sigue `eligible:false` para `juriscop` por documentos KYB
+faltantes).
+
+**Se eliminaron 3 endpoints sin uso** desde el front (depuración solicitada antes de esta sesión).
+
+**Identidad biométrica.** Se corrigió `IdentityVerificationService` para consumir el servicio real
+de BankVision (`legacy-digital-validation-face`): usa el `RestClient` inyectado (antes construía
+uno inline), envía el multipart con `LinkedMultiValueMap` + `HttpEntity` (se cambió desde
+`MultipartBodyBuilder` por un `NoClassDefFoundError: org/reactivestreams/Publisher` al testear con
+`MockRestServiceServer`), agrega `clientId`, `documentType` y `countryCode`, y lee el número de
+documento desde `customerDocumentData`. Nuevo `IdentityVerificationServiceTest` (3 pruebas:
+`APPROVED`→`VERIFIED`, `REJECTED`→`PENDING_IDENTITY`, sin consentimiento biométrico→rechazo).
+**Pendiente:** aún no se probó contra una instancia real de BankVision (queda a la espera de que
+se comparta una URL/API key alcanzable); por ahora sólo está validado a nivel de contrato con
+`MockRestServiceServer`.
+
+**Pendiente de esta sesión:** actualizar el front (`au-transactional-web`: `capabilities.ts`,
+formularios de creación de operadores, fixtures de Playwright) al modelo de 2 roles, y hacer commit
++ push de todo el trabajo.
 
 ---
 
@@ -623,8 +659,11 @@ class TempDdlDumpTest { @Test void dump() {} }
 
 ## 8. Cifras
 
+Medidas el 22-sep (ver [`INFORME-2026-09-22.md`](INFORME-2026-09-22.md) §1).
+
 | | |
 |---|---|
-| Pruebas | 430 |
-| Endpoints REST | 73 operaciones |
-| Colección Bruno | 104 peticiones en 13 carpetas |
+| Pruebas del BFF | 468 en 59 clases, 0 fallos |
+| Endpoints REST | 79 operaciones en 17 controladores |
+| Colección Bruno | 104 peticiones en 13 carpetas — **sin cubrir lo nuevo** (operadores, capacidades, import-sandbox, identidad, borrador, MFA setup/enable/disable, recotizar, ajustes por empresa, incidencias) |
+| Pruebas del front | 205 unitarias en 13 ficheros, lint limpio |

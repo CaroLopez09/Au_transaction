@@ -133,10 +133,6 @@ public class KiraApiClient {
         return exchange(HttpMethod.GET, withQuery("/v1/recipients", query), null, null);
     }
 
-    public JsonNode getRecipient(String recipientId) {
-        return exchange(HttpMethod.GET, "/v1/recipients/" + recipientId, null, null);
-    }
-
     /**
      * Devuelve el codigo de estado porque un 202 significa "ya existia": es un exito y hay
      * que poder distinguirlo del 201 de alta nueva.
@@ -147,11 +143,6 @@ public class KiraApiClient {
 
     public JsonNode createQuotation(Object body) {
         return exchangeWithStatus(HttpMethod.POST, "/v1/quotations", body, null).body();
-    }
-
-    public JsonNode previewPayout(String virtualAccountId, Object body) {
-        return exchange(HttpMethod.POST,
-                "/v1/virtual-accounts/" + virtualAccountId + "/payout/preview", body, null);
     }
 
     /** El 201 responde status "created" en minusculas y el identificador en el campo id. */

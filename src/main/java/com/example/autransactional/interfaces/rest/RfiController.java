@@ -50,13 +50,13 @@ public class RfiController {
 
     /** Trae de Kira los RFIs de la empresa. Red de seguridad del webhook rfi.*. */
     @PostMapping("/sync")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public List<RfiView> sync(@AuthenticationPrincipal AuthenticatedOperator operator) {
         return rfis.sync(operator);
     }
 
     @PostMapping("/{id}/refresh")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public RfiView refresh(@AuthenticationPrincipal AuthenticatedOperator operator, @PathVariable String id) {
         return rfis.refresh(operator, id);
     }
@@ -66,7 +66,7 @@ public class RfiController {
      * significa que no se guardo ninguno.
      */
     @PatchMapping("/{id}/items")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public RfiView answer(@AuthenticationPrincipal AuthenticatedOperator operator,
                           @PathVariable String id,
                           @Valid @RequestBody RfiCommands.AnswerItems command) {
@@ -78,7 +78,7 @@ public class RfiController {
      * (maximo 20, 30 MB cada uno; PDF, JPEG, PNG, HEIC o WebP salvo que el item diga otra cosa).
      */
     @PostMapping(value = "/{id}/items/{itemId}/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public RfiView uploadDocuments(@AuthenticationPrincipal AuthenticatedOperator operator,
                                    @PathVariable String id, @PathVariable String itemId,
                                    @RequestPart("files") List<MultipartFile> files) {
@@ -99,7 +99,7 @@ public class RfiController {
      * caduca en torno a una hora. Si el item ya trae url, se devuelve esa.
      */
     @PostMapping("/{id}/items/{itemId}/ubo-link")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public RfiUboLink mintUboLink(@AuthenticationPrincipal AuthenticatedOperator operator,
                                   @PathVariable String id, @PathVariable String itemId) {
         return rfis.mintUboLink(operator, id, itemId);
@@ -107,7 +107,7 @@ public class RfiController {
 
     /** Enlace temporal (minutos). Abrirlo al momento; si caduca, pedir otro. */
     @GetMapping("/{id}/items/{itemId}/documents/{documentId}/link")
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public RfiDocumentLink documentLink(@AuthenticationPrincipal AuthenticatedOperator operator,
                                         @PathVariable String id, @PathVariable String itemId,
                                         @PathVariable String documentId) {

@@ -8,22 +8,19 @@ import java.util.Locale;
  * RBAC B2B. El nombre tecnico (dbName) es el que vive en la tabla `roles` y el que
  * lee el negocio; la constante es la que usan @PreAuthorize y el JWT.
  *
- * La segregacion de funciones exige separar quien prepara un pago (TREASURY_MAKER)
- * de quien lo autoriza (TREASURY_APPROVER): la API de Kira no ofrece maker-checker
- * para integradores, asi que el control es del BFF.
+ * Modelo simplificado a 2 roles de empresa: ADMIN concentra la operacion completa
+ * (crear pagos, gestionar cumplimiento, administrar operadores) y TREASURY_APPROVER
+ * es el unico rol segregado, dedicado exclusivamente a aprobar/autorizar pagos
+ * (maker-checker): quien crea un pago como ADMIN no puede sustituir la aprobacion
+ * de un TREASURY_APPROVER salvo que tambien tenga ese rol. La API de Kira no ofrece
+ * maker-checker para integradores, asi que el control es del BFF.
  */
 public enum Role {
 
     ADMIN("admin", RoleScope.TENANT,
-            "Administrador General de la Empresa Cliente"),
-    TREASURY_MAKER("tesoreria_maker", RoleScope.TENANT,
-            "Operador: Registra borradores, destinatarios y cotiza transferencias"),
+            "Administrador General de la Empresa Cliente: crea pagos, gestiona cumplimiento y operadores"),
     TREASURY_APPROVER("tesoreria_approver", RoleScope.TENANT,
             "Tesorero: Aprueba y autoriza la ejecucion de pagos (Maker-Checker)"),
-    COMPLIANCE_INTERNAL("compliance_internal", RoleScope.TENANT,
-            "Oficial de Cumplimiento: Revisa Ficha 360, UBOs, Liveness y responde RFIs"),
-    READ_ONLY("read_only", RoleScope.TENANT,
-            "Solo lectura de saldos, cuentas y movimientos"),
     PLATFORM_OPERATOR("platform_operator", RoleScope.SYSTEM,
             "Operaciones y cumplimiento AU: consola multiempresa de solo lectura");
 
@@ -62,7 +59,7 @@ public enum Role {
     }
 
     public boolean canCreatePayout() {
-        return this == TREASURY_MAKER || this == ADMIN;
+        return this == ADMIN;
     }
 
     public boolean canApprovePayout() {
@@ -75,7 +72,7 @@ public enum Role {
 
     /** Ficha 360, UBOs, liveness y RFIs. */
     public boolean canManageCompliance() {
-        return this == COMPLIANCE_INTERNAL || this == ADMIN;
+        return this == ADMIN;
     }
 
     /**

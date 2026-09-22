@@ -12,7 +12,7 @@ public final class OperatorCommands {
     /**
      * Alta de un operador humano de la empresa.
      *
-     * El rol viaja como el nombre de la constante (TREASURY_MAKER, no tesoreria_maker): es lo
+     * El rol viaja como el nombre de la constante (TREASURY_APPROVER, no tesoreria_approver): es lo
      * que el portal ya recibe en el JWT y en /api/auth/me, asi que no hay dos vocabularios.
      * La empresa NO viaja en el cuerpo: sale siempre de la sesion del ADMIN (aislamiento
      * multiempresa), y admitirla aqui seria ofrecer un campo que el servicio va a ignorar.

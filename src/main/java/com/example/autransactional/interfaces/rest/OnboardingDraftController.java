@@ -32,7 +32,7 @@ public class OnboardingDraftController {
 
     /** Reemplaza el borrador completo. Sin archivos: un data URI se rechaza con 422. */
     @PutMapping
-    @PreAuthorize("hasAnyRole('ADMIN','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasRole('ADMIN')")
     public OnboardingDraftView save(@AuthenticationPrincipal AuthenticatedOperator operator,
                                     @RequestBody OnboardingCommands.SaveDraft command) {
         return drafts.save(operator, command);

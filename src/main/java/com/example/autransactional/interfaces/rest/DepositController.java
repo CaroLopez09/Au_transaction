@@ -36,7 +36,7 @@ public class DepositController {
 
     /** Trae de Kira los depositos de la cuenta y los asienta. Idempotente por id de deposito. */
     @PostMapping("/virtual-accounts/{id}/deposits/sync")
-    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_MAKER','TREASURY_APPROVER','COMPLIANCE_INTERNAL')")
+    @PreAuthorize("hasAnyRole('ADMIN','TREASURY_APPROVER')")
     public List<DepositView> syncFromKira(@AuthenticationPrincipal AuthenticatedOperator operator,
                                           @PathVariable String id) {
         return deposits.syncFromKira(operator, id);

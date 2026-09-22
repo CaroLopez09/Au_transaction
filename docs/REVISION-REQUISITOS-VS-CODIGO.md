@@ -138,7 +138,7 @@ Recomendación de orden para lo que queda hasta el 15-oct, en §7.
 
 | Servicio ARQ | Estado | Evidencia / falta |
 |---|---|---|
-| Autenticación propia y RBAC | ✅ | JWT, 6 roles, MFA TOTP, `@PreAuthorize`. G-09 cerrado el 15-sep: los refrescos que consultan a Kira excluyen `READ_ONLY` y el enlace de documento RFI es de cumplimiento y queda auditado |
+| Autenticación propia y RBAC | ✅ | JWT, 2 roles de empresa (ADMIN, TREASURY_APPROVER) + PLATFORM_OPERATOR, MFA TOTP, `@PreAuthorize`. G-09 cerrado el 15-sep: los refrescos que consultan a Kira exigen ADMIN o TREASURY_APPROVER y el enlace de documento RFI es sólo de ADMIN y queda auditado |
 | Kira credential manager | ✅ | `KiraCredentialManager`. Caché fija de 3300 s que no honra `expires_in` (seguro, pero impreciso). Credenciales del sandbox por rotar |
 | Kira API adapter | ◐ | **Versión mezclada**: `2026-04-14` por defecto y `2026-06-01` para RFIs y cotizaciones; el go-live checklist exige una sola |
 | Base de datos de dominio | ✅ | Borradores, campos no devueltos, razones, archivados. Sin Flyway: DDL a mano (ESTADO §7) |
