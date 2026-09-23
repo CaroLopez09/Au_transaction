@@ -9,7 +9,19 @@ import com.example.autransactional.domain.shared.TenantId;
  */
 public record OperatorUser(String id, TenantId tenantId, String email, String passwordHash,
                            String firstName, String lastName, Role role, UserStatus status,
-                           String mfaSecret, boolean mfaEnabled, OperatorIdentity identity) {
+                           String mfaSecret, boolean mfaEnabled, OperatorIdentity identity,
+                           boolean mustChangePassword, boolean passwordResetByAdmin) {
+
+    /**
+     * Compatibilidad para llamadas existentes que aun no conocen la contrasena temporal:
+     * asume que no hay cambio obligatorio pendiente ni reset de administrador en curso.
+     */
+    public OperatorUser(String id, TenantId tenantId, String email, String passwordHash,
+                        String firstName, String lastName, Role role, UserStatus status,
+                        String mfaSecret, boolean mfaEnabled, OperatorIdentity identity) {
+        this(id, tenantId, email, passwordHash, firstName, lastName, role, status, mfaSecret,
+                mfaEnabled, identity, false, false);
+    }
 
     /** Compatibilidad para operadores ya creados: su identidad queda pendiente de documentacion. */
     public OperatorUser(String id, TenantId tenantId, String email, String passwordHash,

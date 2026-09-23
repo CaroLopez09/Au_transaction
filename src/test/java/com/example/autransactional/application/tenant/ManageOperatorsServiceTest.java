@@ -8,7 +8,9 @@ import com.example.autransactional.domain.tenant.OperatorUser;
 import com.example.autransactional.domain.tenant.OperatorUserRepository;
 import com.example.autransactional.domain.tenant.Role;
 import com.example.autransactional.domain.tenant.UserStatus;
+import com.example.autransactional.application.auth.PasswordService;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
+import com.example.autransactional.infrastructure.email.EmailNotificationService;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,8 @@ class ManageOperatorsServiceTest {
     private final OperatorUserRepository users = mock(OperatorUserRepository.class);
     private final AuditTrail audit = mock(AuditTrail.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+    private final PasswordService passwords = mock(PasswordService.class);
+    private final EmailNotificationService email = mock(EmailNotificationService.class);
 
     private final TenantId juriscop = TenantId.of("juriscop");
     private final AuthenticatedOperator admin =
@@ -39,8 +43,9 @@ class ManageOperatorsServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ManageOperatorsService(users, passwordEncoder, audit);
+        service = new ManageOperatorsService(users, passwordEncoder, audit, passwords, email);
         when(passwordEncoder.encode(any())).thenReturn("$2a$hash");
+        when(passwords.generateTemporary()).thenReturn("Temp-Password-1234!");
         when(users.existsByEmail(any())).thenReturn(false);
         when(users.create(any())).thenAnswer(i -> i.getArgument(0));
     }
@@ -85,7 +90,7 @@ class ManageOperatorsServiceTest {
     @Test
     void creaElOperadorEnLaEmpresaDeLaSesionYConLaClaveCifrada() {
         var command = new OperatorCommands.CreateOperator(
-                "Nueva@Juriscop.test", " Ana ", " Gomez ", "contrasena-larga", "TREASURY_APPROVER");
+                "Nueva@Juriscop.test", " Ana ", " Gomez ", "TREASURY_APPROVER");
 
         OperatorView vista = service.create(admin, command);
 
@@ -98,13 +103,15 @@ class ManageOperatorsServiceTest {
         assertEquals("Ana", usuario.firstName());
         assertEquals("Gomez", usuario.lastName());
         assertEquals("$2a$hash", usuario.passwordHash());
-        assertNotEquals("contrasena-larga", usuario.passwordHash());
+        assertNotEquals("Temp-Password-1234!", usuario.passwordHash());
+        assertTrue(usuario.mustChangePassword(), "la contrasena temporal exige cambio obligatorio");
         assertEquals(UserStatus.PENDING_IDENTITY, usuario.status());
         assertEquals(com.example.autransactional.domain.tenant.IdentityVerificationStatus.PENDING_DOCUMENTS,
             usuario.identity().status());
         assertFalse(usuario.mfaEnabled());
         assertEquals("TREASURY_APPROVER", vista.role());
-        verify(passwordEncoder).encode("contrasena-larga");
+        verify(passwordEncoder).encode("Temp-Password-1234!");
+        verify(email).sendAccountCreatedEmail(eq("nueva@juriscop.test"), any(), eq("Temp-Password-1234!"));
         verify(audit).record(eq(admin), eq("operator.created"), eq("operator_user"), any(), any(),
                 eq("OK"), any());
     }
@@ -113,7 +120,7 @@ class ManageOperatorsServiceTest {
     void rechazaUnCorreoYaRegistrado() {
         when(users.existsByEmail("ya@juriscop.test")).thenReturn(true);
         var command = new OperatorCommands.CreateOperator(
-                "ya@juriscop.test", "Ana", "Gomez", "contrasena-larga", "TREASURY_APPROVER");
+                "ya@juriscop.test", "Ana", "Gomez", "TREASURY_APPROVER");
 
         DomainException e = assertThrows(DomainException.class, () -> service.create(admin, command));
 
@@ -124,7 +131,7 @@ class ManageOperatorsServiceTest {
     @Test
     void unAdminPuedeCrearOtroAdminPeroNoUnOperadorDePlataforma() {
         var adminCommand = new OperatorCommands.CreateOperator(
-                "otro-admin@juriscop.test", "Ana", "Gomez", "contrasena-larga", "ADMIN");
+                "otro-admin@juriscop.test", "Ana", "Gomez", "ADMIN");
         when(users.create(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.create(admin, adminCommand);
@@ -132,7 +139,7 @@ class ManageOperatorsServiceTest {
         verify(users).create(argThat(nuevo -> nuevo.role() == Role.ADMIN));
 
         var platformCommand = new OperatorCommands.CreateOperator(
-                "operador@juriscop.test", "Ana", "Gomez", "contrasena-larga", "PLATFORM_OPERATOR");
+                "operador@juriscop.test", "Ana", "Gomez", "PLATFORM_OPERATOR");
 
         DomainException e = assertThrows(DomainException.class, () -> service.create(admin, platformCommand));
         assertTrue(e.getMessage().contains("No puedes asignar"), e.getMessage());
@@ -141,7 +148,7 @@ class ManageOperatorsServiceTest {
     @Test
     void rechazaUnRolInexistente() {
         var command = new OperatorCommands.CreateOperator(
-                "ana@juriscop.test", "Ana", "Gomez", "contrasena-larga", "SUPERUSUARIO");
+                "ana@juriscop.test", "Ana", "Gomez", "SUPERUSUARIO");
 
         assertThrows(DomainException.class, () -> service.create(admin, command));
         verify(users, never()).create(any());
@@ -150,7 +157,7 @@ class ManageOperatorsServiceTest {
     @Test
     void aceptaElUnicoRolDelegable() {
         var command = new OperatorCommands.CreateOperator(
-                "treasury.approver@juriscop.test", "Ana", "Gomez", "contrasena-larga", "TREASURY_APPROVER");
+                "treasury.approver@juriscop.test", "Ana", "Gomez", "TREASURY_APPROVER");
 
         assertEquals("TREASURY_APPROVER", service.create(admin, command).role());
     }

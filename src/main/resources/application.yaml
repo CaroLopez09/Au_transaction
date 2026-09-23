@@ -52,6 +52,13 @@ biometry:
   base-url: ${BIOMETRY_BASE_URL:}
   api-key: ${BIOMETRY_API_KEY:}
 
+# Servicio corporativo de correo/OTP (mismo proveedor que la biometria). Envia credenciales
+# temporales y codigos OTP de recuperacion de contrasena; ninguna credencial viaja al navegador.
+email:
+  base-url: ${EMAIL_BASE_URL:}
+  api-key: ${EMAIL_API_KEY:}
+  from-name: ${EMAIL_FROM_NAME:AU Transactional}
+
 # --- Configuracion propia del BFF ---
 bff:
   # Workers que cubren el hueco de un webhook perdido: Kira entrega una sola vez y sin reintentos.

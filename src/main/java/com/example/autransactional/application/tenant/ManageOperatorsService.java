@@ -1,5 +1,6 @@
 package com.example.autransactional.application.tenant;
 
+import com.example.autransactional.application.auth.PasswordService;
 import com.example.autransactional.domain.shared.DomainException;
 import com.example.autransactional.domain.shared.TenantId;
 import com.example.autransactional.domain.tenant.IdentityVerificationStatus;
@@ -9,6 +10,7 @@ import com.example.autransactional.domain.tenant.OperatorUserRepository;
 import com.example.autransactional.domain.tenant.Role;
 import com.example.autransactional.domain.tenant.UserStatus;
 import com.example.autransactional.infrastructure.audit.AuditTrail;
+import com.example.autransactional.infrastructure.email.EmailNotificationService;
 import com.example.autransactional.infrastructure.security.AuthenticatedOperator;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -40,12 +42,16 @@ public class ManageOperatorsService {
     private final OperatorUserRepository users;
     private final PasswordEncoder passwordEncoder;
     private final AuditTrail audit;
+    private final PasswordService passwords;
+    private final EmailNotificationService email;
 
     public ManageOperatorsService(OperatorUserRepository users, PasswordEncoder passwordEncoder,
-                                  AuditTrail audit) {
+                                  AuditTrail audit, PasswordService passwords, EmailNotificationService email) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
         this.audit = audit;
+        this.passwords = passwords;
+        this.email = email;
     }
 
     /** Operadores de la empresa del solicitante. La consola de plataforma no entra por aqui. */
@@ -69,22 +75,53 @@ public class ManageOperatorsService {
             throw new DomainException("Ya existe un usuario con ese correo.");
         }
 
+        // La contrasena SIEMPRE la genera el backend: nadie la escribe ni Angular la conoce.
+        // No aparece en logs ni en la respuesta HTTP; solo viaja al correo del operador.
+        String temporaryPassword = passwords.generateTemporary();
+
         OperatorUser nuevo = new OperatorUser(
                 UUID.randomUUID().toString(),
                 operator.tenantId(),
                 email,
-                passwordEncoder.encode(command.password()),
+                passwordEncoder.encode(temporaryPassword),
                 command.firstName().trim(),
                 command.lastName().trim(),
                 role,
                 UserStatus.PENDING_IDENTITY,
                 null,
+                false,
+                OperatorIdentity.pendingDocuments(),
+                true,
                 false);
 
         OperatorUser creado = users.create(nuevo);
         audit.record(operator, "operator.created", "operator_user", creado.id(), null, "OK",
                 "rol=" + role.name());
+        this.email.sendAccountCreatedEmail(creado.email(), creado.fullName(), temporaryPassword);
         return OperatorView.from(creado);
+    }
+
+    /**
+     * Reset administrativo: genera una nueva contrasena temporal, invalida la anterior, marca el
+     * cambio obligatorio y la envia por correo. Nunca se devuelve en la respuesta HTTP: la unica
+     * forma de conocerla es el correo del operador (regla de seguridad del portal).
+     */
+    @Transactional
+    public void resetPassword(AuthenticatedOperator operator, String userId) {
+        assertTenantOperator(operator);
+
+        OperatorUser objetivo = users.findById(userId)
+                .orElseThrow(() -> new DomainException("El operador no existe."));
+        if (!objetivo.tenantId().equals(operator.tenantId())) {
+            throw new DomainException("El operador no existe.");
+        }
+
+        String temporaryPassword = passwords.generateTemporary();
+        passwords.applyTemporaryPassword(objetivo, temporaryPassword, true);
+
+        audit.record(operator, "operator.password_reset", "operator_user", objetivo.id(), null, "OK",
+                "rol=" + objetivo.role().name());
+        this.email.sendPasswordResetEmail(objetivo.email(), objetivo.fullName(), temporaryPassword);
     }
 
     /**

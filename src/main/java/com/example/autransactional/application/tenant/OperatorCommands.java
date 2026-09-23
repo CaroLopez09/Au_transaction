@@ -16,13 +16,14 @@ public final class OperatorCommands {
      * que el portal ya recibe en el JWT y en /api/auth/me, asi que no hay dos vocabularios.
      * La empresa NO viaja en el cuerpo: sale siempre de la sesion del ADMIN (aislamiento
      * multiempresa), y admitirla aqui seria ofrecer un campo que el servicio va a ignorar.
+     *
+     * La contrasena NO viaja en el cuerpo: el backend siempre genera una temporal aleatoria
+     * (PasswordService) y la envia por correo. Ni Angular ni quien crea la cuenta la eligen.
      */
     public record CreateOperator(
             @NotBlank @Email @Size(max = 255) String email,
             @NotBlank @Size(max = 100) String firstName,
             @NotBlank @Size(max = 100) String lastName,
-            /** En claro solo aqui: se guarda con BCrypt y no vuelve a salir en ninguna vista. */
-            @NotBlank @Size(min = 12, max = 100) String password,
             @NotBlank String role) {
     }
 }

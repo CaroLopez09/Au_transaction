@@ -22,6 +22,7 @@ public class JwtService {
     private static final String CLAIM_PURPOSE = "purpose";
     private static final String PURPOSE_MFA = "mfa";
     private static final String PURPOSE_IDENTITY = "identity";
+    private static final String PURPOSE_PASSWORD_CHANGE = "password_change";
 
     private final Algorithm algorithm;
     private final JWTVerifier verifier;
@@ -101,6 +102,35 @@ public class JwtService {
     }
 
     public record IdentityChallenge(String userId, String attemptId, String challengeId) {
+    }
+
+    /**
+     * Reto de un solo proposito emitido cuando el login detecta una contrasena temporal
+     * pendiente de cambio. No autentica ninguna ruta de negocio: solo habilita
+     * POST /api/auth/change-password para fijar la contrasena definitiva.
+     */
+    public String issuePasswordChangeChallenge(OperatorUser user) {
+        Instant now = Instant.now();
+        return JWT.create()
+                .withIssuer(properties.jwtIssuer())
+                .withSubject(user.email())
+                .withJWTId(java.util.UUID.randomUUID().toString())
+                .withClaim(CLAIM_USER_ID, user.id())
+                .withClaim(CLAIM_PURPOSE, PURPOSE_PASSWORD_CHANGE)
+                .withIssuedAt(now)
+                .withExpiresAt(now.plusMillis(properties.mfaChallengeTtlMs()))
+                .sign(algorithm);
+    }
+
+    public PasswordChangeChallenge verifyPasswordChangeChallenge(String token) {
+        DecodedJWT decoded = verifier.verify(token);
+        if (!PURPOSE_PASSWORD_CHANGE.equals(decoded.getClaim(CLAIM_PURPOSE).asString())) {
+            throw new IllegalArgumentException("No es un reto de cambio de contrasena.");
+        }
+        return new PasswordChangeChallenge(decoded.getClaim(CLAIM_USER_ID).asString());
+    }
+
+    public record PasswordChangeChallenge(String userId) {
     }
 
     public long expiresInSeconds() {

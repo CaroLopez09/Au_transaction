@@ -74,4 +74,13 @@ public class OperatorController {
                                         @PathVariable String id) {
         return operators.relaunchIdentity(operator, id);
     }
+
+    @PostMapping("/{id}/reset-password")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Restablecer la contrasena de un operador",
+            description = "Genera una contrasena temporal aleatoria y la envia por correo. Nunca se devuelve en la respuesta.")
+    public void resetPassword(@AuthenticationPrincipal AuthenticatedOperator operator,
+                             @PathVariable String id) {
+        operators.resetPassword(operator, id);
+    }
 }

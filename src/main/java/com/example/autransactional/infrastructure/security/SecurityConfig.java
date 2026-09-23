@@ -29,6 +29,10 @@ public class SecurityConfig {
                         // Validan el reto del login (o la sesion) dentro del servicio.
                         .requestMatchers("/api/auth/mfa/verify", "/api/auth/mfa/setup", "/api/auth/mfa/enable")
                         .permitAll()
+                        // Cambio obligatorio: valida el reto de contrasena temporal dentro del servicio.
+                        .requestMatchers("/api/auth/change-password").permitAll()
+                        // "Olvide mi contrasena": el usuario aun no tiene sesion, se valida por OTP/token.
+                        .requestMatchers("/api/auth/forgot-password/**").permitAll()
                         // Se autentica dentro de IdentityVerificationService con un JWT de proposito restringido.
                         .requestMatchers("/api/operators/*/verify-identity").permitAll()
                         .requestMatchers("/api/webhooks/**").permitAll()

@@ -1,5 +1,6 @@
 package com.example.autransactional.interfaces.rest;
 
+import com.example.autransactional.application.auth.ForgotPasswordService;
 import com.example.autransactional.application.auth.LoginUseCase;
 import com.example.autransactional.application.auth.MfaService;
 import com.example.autransactional.domain.tenant.OperatorUserRepository;
@@ -24,18 +25,48 @@ public class AuthController {
     private final MfaService mfa;
     private final OperatorUserRepository users;
     private final TenantRepository tenants;
+    private final ForgotPasswordService forgotPassword;
 
     public AuthController(LoginUseCase loginUseCase, MfaService mfa, OperatorUserRepository users,
-                          TenantRepository tenants) {
+                          TenantRepository tenants, ForgotPasswordService forgotPassword) {
         this.loginUseCase = loginUseCase;
         this.mfa = mfa;
         this.users = users;
         this.tenants = tenants;
+        this.forgotPassword = forgotPassword;
     }
 
     @PostMapping("/login")
     public ResponseEntity<LoginUseCase.LoginResult> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(loginUseCase.login(request.email(), request.password()));
+    }
+
+    /** Completa el cambio obligatorio de contrasena (alta o reset administrativo) y continua el login. */
+    @PostMapping("/change-password")
+    public LoginUseCase.LoginResult changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        return loginUseCase.completeMandatoryPasswordChange(request.challenge(), request.newPassword(),
+                request.confirmNewPassword());
+    }
+
+    /** Paso 1 de "olvide mi contrasena": pide el envio de un OTP al correo indicado. */
+    @PostMapping("/forgot-password/start")
+    public ResponseEntity<Void> forgotPasswordStart(@Valid @RequestBody ForgotPasswordStartRequest request) {
+        forgotPassword.start(request.email());
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Paso 2: valida el OTP recibido y devuelve un token de restablecimiento de un solo uso (10 min). */
+    @PostMapping("/forgot-password/verify")
+    public Map<String, String> forgotPasswordVerify(@Valid @RequestBody ForgotPasswordVerifyRequest request) {
+        String token = forgotPassword.verify(request.email(), request.otp());
+        return Map.of("resetToken", token);
+    }
+
+    /** Paso 3: fija la nueva contrasena elegida por el usuario. Debera iniciar sesion de nuevo. */
+    @PostMapping("/forgot-password/reset")
+    public ResponseEntity<Void> forgotPasswordReset(@Valid @RequestBody ForgotPasswordResetRequest request) {
+        forgotPassword.reset(request.resetToken(), request.newPassword(), request.confirmNewPassword());
+        return ResponseEntity.noContent().build();
     }
 
     /** Paso 2 del inicio de sesion con segundo factor. */
@@ -93,5 +124,19 @@ public class AuthController {
 
     /** `challenge` solo cuando se configura durante el inicio de sesion. */
     public record MfaEnableRequest(String challenge, @NotBlank String code) {
+    }
+
+    public record ChangePasswordRequest(@NotBlank String challenge, @NotBlank String newPassword,
+                                        @NotBlank String confirmNewPassword) {
+    }
+
+    public record ForgotPasswordStartRequest(@NotBlank @Email String email) {
+    }
+
+    public record ForgotPasswordVerifyRequest(@NotBlank @Email String email, @NotBlank String otp) {
+    }
+
+    public record ForgotPasswordResetRequest(@NotBlank String resetToken, @NotBlank String newPassword,
+                                             @NotBlank String confirmNewPassword) {
     }
 }

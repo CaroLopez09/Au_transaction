@@ -149,14 +149,14 @@ class OperatorControllerTest {
         verifyNoInteractions(operators);
     }
 
+    /** La contrasena la genera el backend: el comando ya no admite ese campo desde el cuerpo. */
     @Test
     @WithMockUser(roles = "ADMIN")
-    void unaContrasenaCortaNoLlegaAlServicio() throws Exception {
-        String corta = """
-                {"email":"ana@juriscop.test","firstName":"Ana","lastName":"Gomez",
-                 "password":"corta","role":"TREASURY_APPROVER"}""";
+    void unAltaSinRolNoLlegaAlServicio() throws Exception {
+        String sinRol = """
+                {"email":"ana@juriscop.test","firstName":"Ana","lastName":"Gomez","role":""}""";
 
-        mockMvc.perform(post("/api/operators").contentType(MediaType.APPLICATION_JSON).content(corta))
+        mockMvc.perform(post("/api/operators").contentType(MediaType.APPLICATION_JSON).content(sinRol))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("validation_error"));
 

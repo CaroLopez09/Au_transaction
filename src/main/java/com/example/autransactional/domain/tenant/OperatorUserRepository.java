@@ -27,4 +27,13 @@ public interface OperatorUserRepository {
 
     /** Actualiza el resultado de identidad junto al estado operativo de la cuenta. */
     void updateIdentity(String userId, OperatorIdentity identity, UserStatus status);
+
+    /**
+     * Reemplaza el hash de la contrasena (ya calculado por quien llama) y fija si queda un
+     * cambio obligatorio pendiente. {@code passwordResetByAdmin} distingue un reset hecho por un
+     * administrador (bypassa la politica de no-reutilizacion en el siguiente cambio) de la
+     * contrasena inicial de alta o de un cambio voluntario.
+     */
+    void updatePassword(String userId, String passwordHash, boolean mustChangePassword,
+                        boolean passwordResetByAdmin);
 }

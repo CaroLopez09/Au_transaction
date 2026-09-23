@@ -100,6 +100,18 @@ public class OperatorUserEntity {
         @Column(name = "identity_rejected_attempts", nullable = false)
         private int identityRejectedAttempts = 0;
 
+        /** true mientras la contrasena activa es temporal (alta o reset administrativo). */
+        @Column(name = "must_change_password", nullable = false)
+        private boolean mustChangePassword = false;
+
+        /**
+         * true solo mientras la contrasena temporal pendiente vino de un reset de administrador (no
+         * de la creacion de la cuenta): permite que ese unico cambio obligatorio no aplique la
+         * politica de no-reutilizacion, ya que el usuario no eligio perder su contrasena.
+         */
+        @Column(name = "password_reset_by_admin", nullable = false)
+        private boolean passwordResetByAdmin = false;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 

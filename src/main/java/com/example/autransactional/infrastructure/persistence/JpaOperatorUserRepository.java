@@ -76,6 +76,8 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
         entity.setIdentityVerifiedAt(user.identity().verifiedAt());
         entity.setIdentityRejectionReason(user.identity().rejectionReason());
         entity.setIdentityRejectedAttempts(user.identity().rejectedAttempts());
+        entity.setMustChangePassword(user.mustChangePassword());
+        entity.setPasswordResetByAdmin(user.passwordResetByAdmin());
         return toDomain(jpa.save(entity));
     }
 
@@ -120,6 +122,19 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
         jpa.save(entity);
     }
 
+    @Override
+    @org.springframework.transaction.annotation.Transactional
+    public void updatePassword(String userId, String passwordHash, boolean mustChangePassword,
+                               boolean passwordResetByAdmin) {
+        OperatorUserEntity entity = jpa.findById(userId)
+                .orElseThrow(() -> new IllegalStateException("Usuario inexistente: " + userId));
+        entity.setPasswordHash(passwordHash);
+        entity.setMustChangePassword(mustChangePassword);
+        entity.setPasswordResetByAdmin(passwordResetByAdmin);
+        entity.setUpdatedAt(java.time.Instant.now());
+        jpa.save(entity);
+    }
+
     private static OperatorUser toDomain(OperatorUserEntity e) {
         // Los operadores de la plataforma no tienen empresa: tenant_id nulo en la tabla.
         TenantId tenant = e.getTenantId() == null ? TenantId.PLATFORM : TenantId.of(e.getTenantId());
@@ -129,6 +144,7 @@ public class JpaOperatorUserRepository implements OperatorUserRepository {
             new OperatorIdentity(e.getIdentityStatus(), e.getKiraPersonReferenceId(),
                 e.getIdentityDocumentType(), e.getIdentityDocumentLastFour(),
                 e.getIdentityIssuingCountry(), e.getBiometricConsentAt(), e.getIdentityRequestedAt(),
-                e.getIdentityVerifiedAt(), e.getIdentityRejectionReason(), e.getIdentityRejectedAttempts()));
+                e.getIdentityVerifiedAt(), e.getIdentityRejectionReason(), e.getIdentityRejectedAttempts()),
+            e.isMustChangePassword(), e.isPasswordResetByAdmin());
     }
 }
